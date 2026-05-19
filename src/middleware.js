@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
 
+export const config = {
+  matcher: '/admin/:path*'
+}
+
 export function middleware(request) {
   const session = request.cookies.get('admin-session')
   const { pathname } = request.nextUrl
@@ -12,8 +16,4 @@ export function middleware(request) {
   }
 
   return NextResponse.next()
-}
-
-export const config = {
-  matcher: '/admin/:path*'
 }
