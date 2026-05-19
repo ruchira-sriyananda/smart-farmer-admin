@@ -1,19 +1,20 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Allow images from Supabase
+  // Replace deprecated images.domains with remotePatterns
   images: {
-    domains: ['supabase.co'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'supabase.co',
+        port: '',
+        pathname: '/**',
+      },
+    ],
   },
-  
-  // Fix the workspace root warning
   turbopack: {
     root: process.cwd(),
   },
-  
-  // Enable React Strict Mode
   reactStrictMode: true,
-  
-  // Remove the "x-powered-by" header
   poweredByHeader: false,
 }
 
