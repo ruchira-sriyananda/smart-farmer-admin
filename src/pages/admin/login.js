@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'
-import { useRouter } from 'next/router'
-import ReCAPTCHA from 'react-google-recaptcha'
+import { useState } from 'react';
+import { useRouter } from 'next/router';
+import ReCAPTCHA from 'react-google-recaptcha';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('')
