@@ -34,7 +34,7 @@ export default function AdminLogin() {
         throw authError
       }
 
-      // Query admin_users table (without role join)
+      // Query admin_users table (get role_id)
       const { data: adminData, error: adminError } = await supabase
         .from('admin_users')
         .select(`
@@ -42,7 +42,8 @@ export default function AdminLogin() {
           full_name,
           email,
           is_active,
-          is_super_admin
+          is_super_admin,
+          role_id
         `)
         .eq('email', email.toLowerCase())
         .maybeSingle()
@@ -51,10 +52,28 @@ export default function AdminLogin() {
       if (!adminData) throw new Error('Not authorized as admin.')
       if (!adminData.is_active) throw new Error('Admin account is disabled.')
 
-      // Store session (no role)
+      // ✅ Fetch role name explicitly using role_id
+      let role = null
+      if (adminData.role_id) {
+        const { data: roleData, error: roleError } = await supabase
+          .from('admin_roles')
+          .select('role_name')
+          .eq('role_id', adminData.role_id)
+          .maybeSingle()
+
+        if (roleError) throw new Error('Role lookup failed.')
+        role = roleData?.role_name || null
+      }
+
+      if (!role) {
+        throw new Error('No valid role assigned. Contact support.')
+      }
+
+      // Store session with role included
       localStorage.setItem('adminSession', JSON.stringify({
         user: authData.user,
         admin: adminData,
+        role,
         loggedInAt: new Date().toISOString()
       }))
 
