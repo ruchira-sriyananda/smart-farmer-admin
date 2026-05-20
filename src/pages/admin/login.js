@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import ReCAPTCHA from 'react-google-recaptcha'
@@ -8,8 +8,8 @@ export default function AdminLogin() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [captchaToken, setCaptchaToken] = useState(null)
   const router = useRouter()
+  const recaptchaRef = useRef(null)
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -17,9 +17,12 @@ export default function AdminLogin() {
     setError('')
 
     try {
-      // Require reCAPTCHA
-      if (!captchaToken) {
-        throw new Error('Please verify the reCAPTCHA before logging in.')
+      // Execute invisible reCAPTCHA
+      const token = await recaptchaRef.current.executeAsync()
+      recaptchaRef.current.reset()
+
+      if (!token) {
+        throw new Error('reCAPTCHA verification failed. Please try again.')
       }
 
       // Authenticate with Supabase
@@ -51,24 +54,12 @@ export default function AdminLogin() {
         .eq('email', email.toLowerCase())
         .maybeSingle()
 
-      if (adminError) {
-        console.error('Admin query error:', adminError)
-        throw new Error('Database error occurred')
-      }
+      if (adminError) throw new Error('Database error occurred')
+      if (!adminData) throw new Error('Not authorized as admin.')
+      if (!adminData.is_active) throw new Error('Admin account is disabled.')
 
-      if (!adminData) {
-        throw new Error('Not authorized as admin. Please contact system administrator.')
-      }
-
-      if (!adminData.is_active) {
-        throw new Error('Admin account is disabled. Please contact support.')
-      }
-
-      // Safe role extraction
       const role = adminData.admin_roles?.[0]?.role_name || adminData.admin_roles?.role_name
-      if (!role) {
-        throw new Error('No valid role assigned. Contact support.')
-      }
+      if (!role) throw new Error('No valid role assigned.')
 
       // Store session
       localStorage.setItem('adminSession', JSON.stringify({
@@ -78,20 +69,13 @@ export default function AdminLogin() {
         loggedInAt: new Date().toISOString()
       }))
 
-      // Sync cookie for server-side checks
       document.cookie = `admin-session=1; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
 
-      // Redirect to dashboard
-      try {
-        await router.push('/admin/dashboard')
-      } catch (routerError) {
-        console.log('Router push failed, using window.location')
-        window.location.href = '/admin/dashboard'
-      }
-
+      await router.push('/admin/dashboard')
     } catch (err) {
       console.error('Login error:', err)
       setError(err.message)
+    } finally {
       setLoading(false)
     }
   }
@@ -123,10 +107,11 @@ export default function AdminLogin() {
             required
           />
 
-          {/* reCAPTCHA widget */}
+          {/* Invisible reCAPTCHA */}
           <ReCAPTCHA
             sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY}
-            onChange={(token) => setCaptchaToken(token)}
+            size="invisible"
+            ref={recaptchaRef}
           />
 
           <button
