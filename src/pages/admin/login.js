@@ -20,17 +20,13 @@ export default function AdminLogin() {
       // Execute invisible reCAPTCHA
       const token = await recaptchaRef.current.executeAsync()
       recaptchaRef.current.reset()
-
-      if (!token) {
-        throw new Error('reCAPTCHA verification failed. Please try again.')
-      }
+      if (!token) throw new Error('reCAPTCHA verification failed. Please try again.')
 
       // Authenticate with Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password
       })
-      
       if (authError) {
         if (authError.message === 'Invalid login credentials') {
           throw new Error('Invalid email or password')
@@ -38,7 +34,7 @@ export default function AdminLogin() {
         throw authError
       }
 
-      // Query admin_users table with proper relationship alias
+      // Query admin_users table
       const { data: adminData, error: adminError } = await supabase
         .from('admin_users')
         .select(`
@@ -47,10 +43,7 @@ export default function AdminLogin() {
           email,
           is_active,
           is_super_admin,
-          role_id,
-          admin_roles:role_id (
-            role_name
-          )
+          role_id
         `)
         .eq('email', email.toLowerCase())
         .maybeSingle()
@@ -59,10 +52,21 @@ export default function AdminLogin() {
       if (!adminData) throw new Error('Not authorized as admin.')
       if (!adminData.is_active) throw new Error('Admin account is disabled.')
 
-      // ✅ Extract role name correctly
-      const role = adminData.admin_roles?.role_name
+      // ✅ Fetch role name explicitly using role_id
+      let role = null
+      if (adminData.role_id) {
+        const { data: roleData, error: roleError } = await supabase
+          .from('admin_roles')
+          .select('role_name')
+          .eq('role_id', adminData.role_id)
+          .maybeSingle()
+
+        if (roleError) throw new Error('Role lookup failed.')
+        role = roleData?.role_name || null
+      }
+
       if (!role) {
-        console.log('Debug adminData:', adminData) // helpful debug log
+        console.log('Debug adminData:', adminData)
         throw new Error('No valid role assigned. Contact support.')
       }
 
