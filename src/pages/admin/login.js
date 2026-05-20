@@ -1,14 +1,12 @@
 import { useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
-import ReCAPTCHA from 'react-google-recaptcha'
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [captchaToken, setCaptchaToken] = useState(null)
   const router = useRouter()
 
   const handleLogin = async (e) => {
@@ -17,11 +15,6 @@ export default function AdminLogin() {
     setError('')
 
     try {
-      // Require reCAPTCHA
-      if (!captchaToken) {
-        throw new Error('Please verify the reCAPTCHA before logging in.')
-      }
-
       // Authenticate with Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
@@ -64,37 +57,39 @@ export default function AdminLogin() {
         throw new Error('Admin account is disabled. Please contact support.')
       }
 
-      // Safe role extraction
-      const role = adminData.admin_roles?.[0]?.role_name || adminData.admin_roles?.role_name
-      if (!role) {
-        throw new Error('No valid role assigned. Contact support.')
-      }
+      // Safe role extraction (handles both array and object)
+      const role = adminData.admin_roles?.[0]?.role_name || 
+                   adminData.admin_roles?.role_name || 
+                   'unknown'
 
       // Store session
       localStorage.setItem('adminSession', JSON.stringify({
         user: authData.user,
         admin: adminData,
-        role,
+        role: role,
         loggedInAt: new Date().toISOString()
       }))
 
-      // Sync cookie for server-side checks
+      // Keep server-side Proxy auth check in sync (it reads cookies)
       document.cookie = `admin-session=1; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
 
       // Redirect to dashboard
-      try {
-        await router.push('/admin/dashboard')
-      } catch (routerError) {
-        console.log('Router push failed, using window.location')
-        window.location.href = '/admin/dashboard'
-      }
-
-    } catch (err) {
-      console.error('Login error:', err)
-      setError(err.message)
-      setLoading(false)
+    
+    try {
+      await router.push('/admin/dashboard')
+    } catch (routerError) {
+      console.log('Router push failed, trying window.location')
+      // METHOD 2: Fallback to window.location
+      window.location.href = '/admin/dashboard'
     }
+    
+  } catch (err) {
+    console.error('Login error:', err)
+    setError(err.message)
+    setLoading(false)
   }
+}
+  
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -122,17 +117,10 @@ export default function AdminLogin() {
             className="w-full p-2 border rounded mb-3"
             required
           />
-
-          {/* reCAPTCHA widget */}
-          <ReCAPTCHA
-            sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY}
-            onChange={(token) => setCaptchaToken(token)}
-          />
-
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700 disabled:bg-gray-400 mt-3"
+            className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700 disabled:bg-gray-400"
           >
             {loading ? 'Logging in...' : 'Login'}
           </button>
@@ -140,4 +128,4 @@ export default function AdminLogin() {
       </div>
     </div>
   )
-}
+} 
