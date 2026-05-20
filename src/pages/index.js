@@ -1,16 +1,19 @@
+import { useEffect } from 'react';
+import { useRouter } from 'next/router';
+
 export default function Home() {
+  const router = useRouter();
+  
+  useEffect(() => {
+    router.push('/admin/login');
+  }, [router]);
+  
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="text-center">
-        <h1 className="text-4xl font-bold text-green-600 mb-4">Smart Farmer Admin</h1>
-        <p className="text-gray-600 mb-8">Welcome to the Admin Panel</p>
-        <a 
-          href="/admin/login" 
-          className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
-        >
-          Go to Admin Login
-        </a>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+        <p className="mt-4 text-gray-600">Redirecting to admin login...</p>
       </div>
     </div>
-  )
+  );
 }
