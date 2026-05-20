@@ -58,7 +58,7 @@ export default function AdminLogin() {
       if (!adminData) throw new Error('Not authorized as admin.')
       if (!adminData.is_active) throw new Error('Admin account is disabled.')
 
-      // ✅ Extract role name correctly
+      // ✅ Extract role name correctly (one-to-one relationship)
       const role = adminData.admin_roles?.role_name
       if (!role) {
         throw new Error('No valid role assigned. Contact support.')
