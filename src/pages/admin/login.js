@@ -66,7 +66,7 @@ export default function AdminLogin() {
       }
 
       if (!role) {
-        throw new Error('No valid role assigned. Contact support.')
+        throw new Error(role)
       }
 
       // Store session with role included
