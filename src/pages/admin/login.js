@@ -58,8 +58,17 @@ export default function AdminLogin() {
       if (!adminData) throw new Error('Not authorized as admin.')
       if (!adminData.is_active) throw new Error('Admin account is disabled.')
 
-      const role = adminData.admin_roles?.[0]?.role_name || adminData.admin_roles?.role_name
-      if (!role) throw new Error('No valid role assigned.')
+      // ✅ Fix role extraction
+      let role = null
+      if (Array.isArray(adminData.admin_roles)) {
+        role = adminData.admin_roles[0]?.role_name || null
+      } else if (adminData.admin_roles?.role_name) {
+        role = adminData.admin_roles.role_name
+      }
+
+      if (!role) {
+        throw new Error('No valid role assigned. Contact support.')
+      }
 
       // Store session
       localStorage.setItem('adminSession', JSON.stringify({
