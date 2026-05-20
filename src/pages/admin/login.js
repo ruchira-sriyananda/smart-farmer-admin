@@ -38,7 +38,7 @@ export default function AdminLogin() {
         throw authError
       }
 
-      // Query admin_users table
+      // Query admin_users table with proper relationship alias
       const { data: adminData, error: adminError } = await supabase
         .from('admin_users')
         .select(`
@@ -47,7 +47,7 @@ export default function AdminLogin() {
           email,
           is_active,
           is_super_admin,
-          admin_roles (
+          admin_roles:role_id (
             role_name
           )
         `)
@@ -58,14 +58,8 @@ export default function AdminLogin() {
       if (!adminData) throw new Error('Not authorized as admin.')
       if (!adminData.is_active) throw new Error('Admin account is disabled.')
 
-      // ✅ Fix role extraction
-      let role = null
-      if (Array.isArray(adminData.admin_roles)) {
-        role = adminData.admin_roles[0]?.role_name || null
-      } else if (adminData.admin_roles?.role_name) {
-        role = adminData.admin_roles.role_name
-      }
-
+      // ✅ Extract role name correctly
+      const role = adminData.admin_roles?.role_name
       if (!role) {
         throw new Error('No valid role assigned. Contact support.')
       }
