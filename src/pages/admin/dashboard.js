@@ -1227,12 +1227,33 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                 </div>
+                <div className="col-md-3 col-sm-6">
+                  <button 
+                    className="btn btn-outline-primary w-100 py-3 text-start rounded-3 hover-lift"
+                    onClick={() => router.push('/admin/users')}
+                  >
+                    <i className="bi bi-people fs-4 d-block mb-2"></i>
+                    <span className="fw-semibold small">Manage Users</span>
+                    <small className="d-block text-muted mt-1" style={{ fontSize: '10px' }}>View and manage all users</small>
+                  </button>
+                </div>
+
+                <div className="col-md-3 col-sm-6">
+                  <button 
+                    className="btn btn-outline-danger w-100 py-3 text-start rounded-3 hover-lift"
+                    onClick={() => router.push('/admin/reports')}
+                  >
+                    <i className="bi bi-flag fs-4 d-block mb-2"></i>
+                    <span className="fw-semibold small">View Reports</span>
+                    <small className="d-block text-muted mt-1" style={{ fontSize: '10px' }}>Review user reports</small>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-
+      
       {/* Custom CSS */}
       <style jsx global>{`
         .bg-gradient-primary {
