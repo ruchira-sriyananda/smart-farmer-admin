@@ -1,32 +1,26 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
-const AuthContext = createContext()
+export const AuthContext = createContext()
 
-export function AuthProvider({ children }) {
+export const AuthProvider = ({ children }) => {
   const [admin, setAdmin] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    checkAdmin()
+    checkAuth()
   }, [])
 
-  async function checkAdmin() {
-    const { data: { session } } = await supabase.auth.getSession()
-    
+  const checkAuth = async () => {
+    const session = localStorage.getItem('adminSession')
     if (session) {
-      const { data: adminData } = await supabase
-        .from('admin_users')
-        .select('*, admin_roles(*)')
-        .eq('user_id', session.user.id)
-        .single()
-      
-      setAdmin(adminData)
+      setAdmin(JSON.parse(session))
     }
     setLoading(false)
   }
 
-  async function logout() {
+  const logout = async () => {
+    localStorage.removeItem('adminSession')
     await supabase.auth.signOut()
     setAdmin(null)
   }
@@ -37,5 +31,3 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   )
 }
-
-export const useAuth = () => useContext(AuthContext)

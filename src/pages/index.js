@@ -1,19 +1,18 @@
-import { useEffect } from 'react';
-import { useRouter } from 'next/router';
+import { useEffect } from 'react'
+import { useRouter } from 'next/router'
 
 export default function Home() {
-  const router = useRouter();
-  
+  const router = useRouter()
+
   useEffect(() => {
-    router.push('/admin/login');
-  }, [router]);
-  
+    router.push('/admin/login')
+  }, [router])
+
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Redirecting to admin login...</p>
+    <div className="min-vh-100 d-flex align-items-center justify-content-center">
+      <div className="spinner-border text-primary" role="status">
+        <span className="visually-hidden">Redirecting...</span>
       </div>
     </div>
-  );
+  )
 }

@@ -1,21 +1,32 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Replace deprecated images.domains with remotePatterns
+  reactStrictMode: true,
+  swcMinify: true,
   images: {
+    domains: ['supabase.co'],
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'supabase.co',
-        port: '',
-        pathname: '/**',
+        hostname: '**.supabase.co',
       },
     ],
   },
-  turbopack: {
-    root: process.cwd(),
+  env: {
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
   },
-  reactStrictMode: true,
-  poweredByHeader: false,
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-XSS-Protection', value: '1; mode=block' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
+    ];
+  },
 }
 
 module.exports = nextConfig
