@@ -28,12 +28,7 @@ export default function AdminDashboard() {
 
         const parsed = JSON.parse(storedSession)
 
-        if (!parsed?.admin?.admin_id || !parsed?.role) {
-          await clearSession()
-          router.push('/admin/login')
-          return
-        }
-
+        
         setSession(parsed)
         await fetchStats()
         

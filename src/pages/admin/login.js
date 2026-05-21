@@ -59,10 +59,7 @@ export default function AdminLogin() {
           full_name,
           email,
           is_active,
-          is_super_admin,
-          admin_roles (
-            role_name
-          )
+          is_super_admin
         `)
         .eq('email', email.toLowerCase())
         .maybeSingle()
@@ -83,7 +80,6 @@ export default function AdminLogin() {
       localStorage.setItem('adminSession', JSON.stringify({
         user: authData.user,
         admin: adminData,
-        role,
         loggedInAt: new Date().toISOString()
       }))
 
