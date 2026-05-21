@@ -1,69 +1,86 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 
-export default function CreateUser() {
+export default function EditUser() {
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
+  const { id } = router.query
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
-    password: '',
     role_id: '',
     is_active: true,
     is_super_admin: false
   })
-  const [error, setError] = useState('')
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+  useEffect(() => {
+    if (id) {
+      fetchUser()
+    }
+  }, [id])
 
+  const fetchUser = async () => {
     try {
-      // First create auth user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: { full_name: formData.full_name }
-        }
-      })
-
-      if (authError) throw authError
-
-      // Then add to admin_users
-      const { error: adminError } = await supabase
+      const { data, error } = await supabase
         .from('admin_users')
-        .insert({
-          full_name: formData.full_name,
-          email: formData.email,
-          password_hash: 'managed_by_auth',
-          role_id: formData.role_id || null,
-          is_active: formData.is_active,
-          is_super_admin: formData.is_super_admin
+        .select('*')
+        .eq('admin_id', id)
+        .single()
+
+      if (!error && data) {
+        setFormData({
+          full_name: data.full_name,
+          email: data.email,
+          role_id: data.role_id || '',
+          is_active: data.is_active,
+          is_super_admin: data.is_super_admin
         })
-
-      if (adminError) throw adminError
-
-      router.push('/admin/users')
+      }
     } catch (err) {
-      setError(err.message)
+      console.error('Error fetching user:', err)
     } finally {
       setLoading(false)
     }
   }
 
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+
+    const { error } = await supabase
+      .from('admin_users')
+      .update({
+        full_name: formData.full_name,
+        role_id: formData.role_id || null,
+        is_active: formData.is_active,
+        is_super_admin: formData.is_super_admin
+      })
+      .eq('admin_id', id)
+
+    if (!error) {
+      router.push(`/admin/users/${id}`)
+    }
+    setSaving(false)
+  }
+
+  if (loading) {
+    return (
+      <AdminLayout title="Edit User">
+        <div className="d-flex justify-content-center py-5">
+          <div className="spinner-border text-primary"></div>
+        </div>
+      </AdminLayout>
+    )
+  }
+
   return (
-    <AdminLayout title="Create New User">
+    <AdminLayout title="Edit User">
       <div className="card border-0 shadow-sm">
         <div className="card-body">
-          <h5 className="mb-4 fw-bold">Add New Administrator</h5>
-          
-          {error && (
-            <div className="alert alert-danger">{error}</div>
-          )}
+          <h5 className="mb-4 fw-bold">Edit User</h5>
 
           <form onSubmit={handleSubmit}>
             <div className="mb-3">
@@ -78,25 +95,14 @@ export default function CreateUser() {
             </div>
 
             <div className="mb-3">
-              <label className="form-label">Email *</label>
+              <label className="form-label">Email</label>
               <input
                 type="email"
-                className="form-control"
-                required
+                className="form-control bg-light"
+                disabled
                 value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
               />
-            </div>
-
-            <div className="mb-3">
-              <label className="form-label">Password *</label>
-              <input
-                type="password"
-                className="form-control"
-                required
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-              />
+              <small className="text-muted">Email cannot be changed</small>
             </div>
 
             <div className="mb-3">
@@ -140,8 +146,8 @@ export default function CreateUser() {
             </div>
 
             <div className="d-flex gap-2">
-              <button type="submit" className="btn btn-primary" disabled={loading}>
-                {loading ? 'Creating...' : 'Create User'}
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                {saving ? 'Saving...' : 'Save Changes'}
               </button>
               <button type="button" className="btn btn-secondary" onClick={() => router.back()}>
                 Cancel
