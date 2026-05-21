@@ -71,9 +71,7 @@ export default function AdminLogin() {
       if (!adminData) throw new Error('Not authorized as admin.')
       if (!adminData.is_active) throw new Error('Admin account is disabled.')
 
-      const role = adminData.admin_roles?.[0]?.role_name || adminData.admin_roles?.role_name
-      if (!role) throw new Error('No valid role assigned.')
-
+      
       // Save email if remember me is checked
       if (rememberMe) {
         localStorage.setItem('rememberedEmail', email)
