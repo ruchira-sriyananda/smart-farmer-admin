@@ -58,7 +58,7 @@ export default function SecurityDashboard() {
             <div className="card-body">
               <div className="d-flex justify-content-between">
                 <div>
-                  <h6 className="text-muted">Failed Logins</h6>
+                  <h6 className="text-muted">Failed Logins.</h6>
                   <h2 className="mb-0 fw-bold text-warning">{failedAttempts.length}</h2>
                 </div>
                 <i className="bi bi-shield-lock fs-1 text-warning"></i>
@@ -175,7 +175,7 @@ export default function SecurityDashboard() {
                 </table>
               </div>
             </div>
-          </div>
+          </div> 
         </div>
       </div>
     </AdminLayout>
