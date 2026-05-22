@@ -22,7 +22,21 @@ export default function AdminLogin() {
       setEmail(savedEmail)
       setRememberMe(true)
     }
-  }, [])
+    
+    // Check if user is already logged in
+    const checkExistingSession = async () => {
+      const session = localStorage.getItem('adminSession')
+      if (session) {
+        const sessionData = JSON.parse(session)
+        // Verify session is still valid
+        const { data: { session: currentSession } } = await supabase.auth.getSession()
+        if (currentSession) {
+          router.push('/admin/dashboard')
+        }
+      }
+    }
+    checkExistingSession()
+  }, [router])
 
   // Get real client IP address
   const getClientIP = async () => {
@@ -52,15 +66,45 @@ export default function AdminLogin() {
     }
   }
 
+  // Log activity to database
+  const logActivity = async (adminId, type, description, ip) => {
+    try {
+      await supabase
+        .from('admin_activity_logs')
+        .insert({
+          admin_id: adminId,
+          activity_type: type,
+          activity_description: description,
+          ip_address: ip,
+          created_at: new Date().toISOString()
+        })
+    } catch (err) {
+      console.error('Error logging activity:', err)
+    }
+  }
+
   const handleLogin = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
+    
+    const clientIP = await getClientIP()
 
     try {
+      // Validate inputs
+      if (!email || !password) {
+        throw new Error('Please enter both email and password')
+      }
+
       // Execute reCAPTCHA
-      const token = await recaptchaRef.current.executeAsync()
-      recaptchaRef.current.reset()
+      let token
+      try {
+        token = await recaptchaRef.current.executeAsync()
+        recaptchaRef.current.reset()
+      } catch (recaptchaError) {
+        console.error('reCAPTCHA error:', recaptchaError)
+        throw new Error('Security verification failed. Please refresh and try again.')
+      }
 
       if (!token) {
         throw new Error('Security verification failed. Please try again.')
@@ -68,7 +112,7 @@ export default function AdminLogin() {
 
       // Authenticate with Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password
       })
       
@@ -79,7 +123,11 @@ export default function AdminLogin() {
         throw authError
       }
 
-      // Query admin_users table
+      if (!authData.user) {
+        throw new Error('Authentication failed')
+      }
+
+      // Query admin_users table with role information
       const { data: adminData, error: adminError } = await supabase
         .from('admin_users')
         .select(`
@@ -88,25 +136,55 @@ export default function AdminLogin() {
           email,
           is_active,
           is_super_admin,
-          role_id
+          role_id,
+          created_at,
+          last_login
         `)
-        .eq('email', email.toLowerCase())
+        .eq('email', email.toLowerCase().trim())
         .maybeSingle()
 
-      if (adminError) throw new Error('Database error occurred')
-      if (!adminData) throw new Error('Not authorized as admin.')
-      if (!adminData.is_active) throw new Error('Admin account is disabled.')
+      if (adminError) {
+        console.error('Admin query error:', adminError)
+        throw new Error('Database error occurred')
+      }
 
-      // Get role name
-      let role = 'unknown'
+      if (!adminData) {
+        await logActivity(null, 'LOGIN_FAILED', `Failed login attempt for non-admin user: ${email}`, clientIP)
+        throw new Error('Access denied. You do not have administrator privileges.')
+      }
+
+      if (!adminData.is_active) {
+        await logActivity(adminData.admin_id, 'LOGIN_FAILED', `Login attempt on disabled account: ${email}`, clientIP)
+        throw new Error('Your account has been disabled. Please contact support.')
+      }
+
+      // Get role name from admin_roles table
+      let role = 'SUPER_ADMIN'
       if (adminData.role_id) {
-        const { data: roleData } = await supabase
+        const { data: roleData, error: roleError } = await supabase
           .from('admin_roles')
           .select('role_name')
           .eq('role_id', adminData.role_id)
           .single()
-        role = roleData?.role_name || 'unknown'
+        
+        if (!roleError && roleData) {
+          role = roleData.role_name
+        }
+      } else if (adminData.is_super_admin) {
+        role = 'SUPER_ADMIN'
       }
+
+      // Update last login timestamp
+      await supabase
+        .from('admin_users')
+        .update({ 
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('admin_id', adminData.admin_id)
+
+      // Log successful login
+      await logActivity(adminData.admin_id, 'LOGIN', `Admin logged in successfully from IP: ${clientIP}`, clientIP)
 
       // Save email if remember me is checked
       if (rememberMe) {
@@ -115,21 +193,7 @@ export default function AdminLogin() {
         localStorage.removeItem('rememberedEmail')
       }
 
-      // Get real IP address
-      const clientIP = await getClientIP()
-
-      // Log successful login with IP
-      await supabase
-        .from('admin_activity_logs')
-        .insert({
-          admin_id: adminData.admin_id,
-          activity_type: 'LOGIN',
-          activity_description: `Admin logged in successfully`,
-          ip_address: clientIP,
-          created_at: new Date().toISOString()
-        })
-
-      // Store complete session data
+      // Create complete session data
       const sessionData = {
         user: {
           id: authData.user.id,
@@ -143,19 +207,31 @@ export default function AdminLogin() {
           email: adminData.email,
           is_active: adminData.is_active,
           is_super_admin: adminData.is_super_admin,
-          role_id: adminData.role_id
+          role_id: adminData.role_id,
+          created_at: adminData.created_at,
+          last_login: new Date().toISOString()
         },
         role: role,
         sessionId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
         loggedInAt: new Date().toISOString(),
-        ipAddress: clientIP
+        ipAddress: clientIP,
+        userAgent: navigator.userAgent
       }
 
-      console.log('Storing session:', sessionData)
-      localStorage.setItem('adminSession', JSON.stringify(sessionData))
+      console.log('Session created:', {
+        admin: sessionData.admin.full_name,
+        role: sessionData.role,
+        email: sessionData.admin.email,
+        ip: sessionData.ipAddress
+      })
 
-      // Set cookie for middleware
-      document.cookie = `admin-session=1; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
+      // Store session in localStorage
+      localStorage.setItem('adminSession', JSON.stringify(sessionData))
+      
+      // Set secure cookie for middleware
+      const expiryDate = new Date()
+      expiryDate.setDate(expiryDate.getDate() + 7)
+      document.cookie = `admin-session=1; path=/; expires=${expiryDate.toUTCString()}; samesite=lax; ${window.location.protocol === 'https:' ? 'secure;' : ''}`
 
       // Redirect to dashboard
       await router.push('/admin/dashboard')
@@ -163,16 +239,20 @@ export default function AdminLogin() {
     } catch (err) {
       console.error('Login error:', err)
       
-      // Log failed attempt with IP
-      const clientIP = await getClientIP()
-      await supabase
-        .from('failed_login_attempts')
-        .insert({
-          email: email,
-          ip_address: clientIP,
-          failure_reason: err.message,
-          attempt_time: new Date().toISOString()
-        })
+      // Log failed attempt
+      try {
+        await supabase
+          .from('failed_login_attempts')
+          .insert({
+            email: email,
+            ip_address: clientIP,
+            failure_reason: err.message,
+            device_info: navigator.userAgent,
+            attempt_time: new Date().toISOString()
+          })
+      } catch (logErr) {
+        console.error('Error logging failed attempt:', logErr)
+      }
       
       setError(err.message)
     } finally {
@@ -219,6 +299,10 @@ export default function AdminLogin() {
         .btn-gradient:active {
           transform: translateY(0);
         }
+        .btn-gradient:disabled {
+          opacity: 0.7;
+          transform: none;
+        }
       `}</style>
 
       <div className="container">
@@ -230,7 +314,7 @@ export default function AdminLogin() {
                 <i className="bi bi-tractor fs-1 text-primary"></i>
               </div>
               <h2 className="text-white fw-bold mb-2">Smart Farmer</h2>
-              <p className="text-white-50">Administrator Access</p>
+              <p className="text-white-50">Administrator Access Portal</p>
             </div>
 
             {/* Login Card */}
@@ -238,7 +322,7 @@ export default function AdminLogin() {
               <div className="card-body p-5">
                 <div className="text-center mb-4">
                   <i className="bi bi-shield-lock fs-1 text-primary"></i>
-                  <h4 className="mt-2 fw-bold">Admin Login</h4>
+                  <h4 className="mt-2 fw-bold">Secure Admin Login</h4>
                   <p className="text-muted small">Enter your credentials to access the dashboard</p>
                 </div>
 
@@ -361,12 +445,13 @@ export default function AdminLogin() {
                 <div className="text-center">
                   <div className="d-flex justify-content-center gap-3 mb-3">
                     <i className="bi bi-shield-check text-success fs-5" title="SSL Secure"></i>
-                    <i className="bi bi-lock-fill text-primary fs-5" title="Encrypted"></i>
+                    <i className="bi bi-lock-fill text-primary fs-5" title="256-bit Encryption"></i>
                     <i className="bi bi-check-circle-fill text-info fs-5" title="2FA Ready"></i>
+                    <i className="bi bi-incognito text-warning fs-5" title="IP Logging Enabled"></i>
                   </div>
                   <p className="text-muted small mb-0">
                     <i className="bi bi-shield-lock me-1"></i>
-                    Your connection is secure and encrypted
+                    Your connection is secure and encrypted. All activities are logged.
                   </p>
                 </div>
               </div>
@@ -377,6 +462,10 @@ export default function AdminLogin() {
               <p className="text-white-50 small">
                 <i className="bi bi-c-circle me-1"></i>
                 2024 Smart Farmer Platform. All rights reserved.
+              </p>
+              <p className="text-white-50 small">
+                <i className="bi bi-shield-check me-1"></i>
+                Protected by reCAPTCHA and enterprise-grade security
               </p>
             </div>
           </div>

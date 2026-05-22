@@ -11,6 +11,7 @@ export default function Profile() {
   const [editing, setEditing] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
   const [session, setSession] = useState(null)
+  const [userRole, setUserRole] = useState('')
   
   const [formData, setFormData] = useState({
     full_name: '',
@@ -19,7 +20,12 @@ export default function Profile() {
     profile_image: '',
     bio: '',
     location: '',
-    timezone: 'Asia/Colombo'
+    timezone: 'Asia/Colombo',
+    notification_preferences: {
+      email_notifications: true,
+      security_alerts: true,
+      activity_summary: true
+    }
   })
 
   useEffect(() => {
@@ -31,6 +37,7 @@ export default function Profile() {
       }
       const parsedSession = JSON.parse(storedSession)
       setSession(parsedSession)
+      setUserRole(parsedSession.role || 'SUPER_ADMIN')
       await fetchProfile(parsedSession)
       
       // Subscribe to real-time profile updates
@@ -58,7 +65,7 @@ export default function Profile() {
             filter: `admin_id=eq.${adminId}`
           }, 
           (payload) => {
-            // Update profile in real-time when database changes
+            // Update profile in real-time
             setProfile(payload.new)
             setFormData({
               full_name: payload.new.full_name || '',
@@ -67,7 +74,12 @@ export default function Profile() {
               profile_image: payload.new.profile_image || '',
               bio: payload.new.bio || '',
               location: payload.new.location || '',
-              timezone: payload.new.timezone || 'Asia/Colombo'
+              timezone: payload.new.timezone || 'Asia/Colombo',
+              notification_preferences: payload.new.notification_preferences || {
+                email_notifications: true,
+                security_alerts: true,
+                activity_summary: true
+              }
             })
             
             // Update session storage
@@ -92,15 +104,23 @@ export default function Profile() {
       const adminId = sessionData.admin?.admin_id
       
       if (adminId) {
-        // Get data from admin_users table
+        // First try to get from database
         const { data, error } = await supabase
           .from('admin_users')
-          .select('*')
+          .select(`
+            *,
+            admin_roles!admin_users_role_id_fkey (
+              role_id,
+              role_name,
+              description
+            )
+          `)
           .eq('admin_id', adminId)
           .single()
 
         if (!error && data) {
           setProfile(data)
+          setUserRole(data.admin_roles?.role_name || sessionData.role || 'SUPER_ADMIN')
           setFormData({
             full_name: data.full_name || '',
             email: data.email || '',
@@ -108,26 +128,71 @@ export default function Profile() {
             profile_image: data.profile_image || '',
             bio: data.bio || '',
             location: data.location || '',
-            timezone: data.timezone || 'Asia/Colombo'
+            timezone: data.timezone || 'Asia/Colombo',
+            notification_preferences: data.notification_preferences || {
+              email_notifications: true,
+              security_alerts: true,
+              activity_summary: true
+            }
           })
         } else {
-          // Fallback to session data
-          setProfile(sessionData.admin)
-          setFormData({
-            full_name: sessionData.admin?.full_name || '',
-            email: sessionData.admin?.email || '',
-            phone_number: '',
-            profile_image: '',
-            bio: '',
-            location: '',
-            timezone: 'Asia/Colombo'
-          })
+          // If no data in database, create it
+          await createAdminRecord(sessionData)
         }
+      } else {
+        // Fallback to session data
+        setProfile(sessionData.admin)
+        setFormData({
+          full_name: sessionData.admin?.full_name || '',
+          email: sessionData.admin?.email || '',
+          phone_number: '',
+          profile_image: '',
+          bio: '',
+          location: '',
+          timezone: 'Asia/Colombo',
+          notification_preferences: {
+            email_notifications: true,
+            security_alerts: true,
+            activity_summary: true
+          }
+        })
       }
     } catch (err) {
       console.error('Error fetching profile:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const createAdminRecord = async (sessionData) => {
+    try {
+      // Get role_id for SUPER_ADMIN
+      const { data: roleData } = await supabase
+        .from('admin_roles')
+        .select('role_id')
+        .eq('role_name', 'SUPER_ADMIN')
+        .single()
+
+      const { data, error } = await supabase
+        .from('admin_users')
+        .insert({
+          admin_id: sessionData.admin?.admin_id || crypto.randomUUID(),
+          full_name: sessionData.admin?.full_name || 'Admin User',
+          email: sessionData.admin?.email || sessionData.user?.email,
+          password_hash: 'managed_by_auth',
+          role_id: roleData?.role_id,
+          is_active: true,
+          is_super_admin: true,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single()
+
+      if (!error && data) {
+        setProfile(data)
+      }
+    } catch (err) {
+      console.error('Error creating admin record:', err)
     }
   }
 
@@ -162,78 +227,54 @@ export default function Profile() {
 
     try {
       const adminId = session?.admin?.admin_id
-      const authUserId = session?.user?.id
       
       if (!adminId) {
         throw new Error('Admin ID not found')
       }
 
-      // Step 1: Update admin_users table
+      // Prepare update data
       const updateData = {
         full_name: formData.full_name,
         phone_number: formData.phone_number,
         bio: formData.bio,
         location: formData.location,
         timezone: formData.timezone,
+        notification_preferences: formData.notification_preferences,
         updated_at: new Date().toISOString()
       }
 
-      const { error: adminError } = await supabase
+      // Update profile in database
+      const { error } = await supabase
         .from('admin_users')
         .update(updateData)
         .eq('admin_id', adminId)
 
-      if (adminError) throw adminError
-
-      // Step 2: Update Supabase Auth user metadata (this is the key fix!)
-      if (authUserId) {
-        const { error: authError } = await supabase.auth.updateUser({
-          data: {
-            full_name: formData.full_name,
-            display_name: formData.full_name,
-            updated_at: new Date().toISOString()
-          }
-        })
-
-        if (authError) {
-          console.error('Auth update error:', authError)
-          // Don't throw here - admin_users was already updated
-          setMessage({ type: 'warning', text: 'Profile saved but display name may need re-login to update everywhere.' })
-        } else {
-          setMessage({ type: 'success', text: 'Profile updated successfully! Name synchronized across system.' })
-        }
-      } else {
-        setMessage({ type: 'success', text: 'Profile updated successfully!' })
+      if (error) {
+        console.error('Supabase error:', error)
+        throw new Error(error.message)
       }
 
-      // Step 3: Log the activity
+      // Log the activity
       await logActivity(`Profile updated by ${formData.full_name}`)
 
-      // Step 4: Update local state
+      // Update local state
       setProfile(prev => ({ ...prev, ...updateData }))
       
-      // Step 5: Update session storage with new data
+      // Update session storage
       const updatedSession = JSON.parse(localStorage.getItem('adminSession'))
       if (updatedSession) {
         updatedSession.admin = { ...updatedSession.admin, ...updateData }
-        updatedSession.user = { 
-          ...updatedSession.user, 
-          user_metadata: { 
-            ...updatedSession.user?.user_metadata, 
-            full_name: formData.full_name,
-            display_name: formData.full_name
-          }
-        }
         localStorage.setItem('adminSession', JSON.stringify(updatedSession))
-        setSession(updatedSession)
       }
 
+      setMessage({ type: 'success', text: 'Profile updated successfully in database!' })
       setEditing(false)
       
       // Auto-hide message after 3 seconds
       setTimeout(() => setMessage({ type: '', text: '' }), 3000)
       
     } catch (err) {
+      console.error('Save error:', err)
       setMessage({ type: 'danger', text: err.message })
     } finally {
       setSaving(false)
@@ -241,7 +282,6 @@ export default function Profile() {
   }
 
   const handleCancel = () => {
-    // Reset form data to original profile values
     setFormData({
       full_name: profile?.full_name || '',
       email: profile?.email || '',
@@ -249,7 +289,12 @@ export default function Profile() {
       profile_image: profile?.profile_image || '',
       bio: profile?.bio || '',
       location: profile?.location || '',
-      timezone: profile?.timezone || 'Asia/Colombo'
+      timezone: profile?.timezone || 'Asia/Colombo',
+      notification_preferences: profile?.notification_preferences || {
+        email_notifications: true,
+        security_alerts: true,
+        activity_summary: true
+      }
     })
     setEditing(false)
     setMessage({ type: '', text: '' })
@@ -317,58 +362,43 @@ export default function Profile() {
 
   return (
     <AdminLayout title="My Profile">
-      {/* Success/Error Message */}
       {message.text && (
         <div className={`alert alert-${message.type} alert-dismissible fade show mb-4 shadow-sm`} role="alert">
-          <i className={`bi bi-${message.type === 'success' ? 'check-circle' : message.type === 'warning' ? 'exclamation-triangle' : 'exclamation-triangle'} me-2`}></i>
+          <i className={`bi bi-${message.type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2`}></i>
           {message.text}
           <button type="button" className="btn-close" onClick={() => setMessage({ type: '', text: '' })}></button>
         </div>
       )}
 
       <div className="row g-4">
-        {/* Profile Card - Left Column */}
+        {/* Profile Card */}
         <div className="col-md-4">
           <div className="card border-0 shadow-sm rounded-4">
             <div className="card-body text-center p-4">
-              {/* Profile Image */}
               <div className="position-relative d-inline-block mb-3">
                 <div className="bg-gradient-primary rounded-circle d-flex align-items-center justify-content-center mx-auto" style={{ width: '120px', height: '120px' }}>
                   {formData.profile_image ? (
-                    <img 
-                      src={formData.profile_image} 
-                      alt="Profile" 
-                      className="rounded-circle w-100 h-100 object-fit-cover"
-                      style={{ objectFit: 'cover' }}
-                    />
+                    <img src={formData.profile_image} alt="Profile" className="rounded-circle w-100 h-100 object-fit-cover" />
                   ) : (
-                    <span className="text-white fw-bold fs-1">
-                      {formData.full_name?.charAt(0) || 'A'}
-                    </span>
+                    <span className="text-white fw-bold fs-1">{formData.full_name?.charAt(0) || 'A'}</span>
                   )}
                 </div>
                 {!editing && (
-                  <label className="position-absolute bottom-0 end-0 bg-primary rounded-circle p-2 shadow cursor-pointer" style={{ cursor: 'pointer' }}>
+                  <label className="position-absolute bottom-0 end-0 bg-primary rounded-circle p-2 shadow" style={{ cursor: 'pointer' }}>
                     <i className="bi bi-camera-fill text-white"></i>
-                    <input 
-                      type="file" 
-                      className="d-none" 
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      disabled={saving}
-                    />
+                    <input type="file" className="d-none" accept="image/*" onChange={handleImageUpload} disabled={saving} />
                   </label>
                 )}
               </div>
 
-              <h4 className="mb-1 fw-bold">{profile?.full_name}</h4>
-              <p className="text-muted mb-3">{profile?.email}</p>
+              <h4 className="mb-1 fw-bold">{profile?.full_name || formData.full_name}</h4>
+              <p className="text-muted mb-3">{profile?.email || formData.email}</p>
               
               <div className="border rounded-3 p-3 mb-3">
                 <div className="row">
                   <div className="col-6">
                     <small className="text-muted d-block">Role</small>
-                    <strong>{session?.role || 'Admin'}</strong>
+                    <strong className="text-primary">{userRole || 'SUPER_ADMIN'}</strong>
                   </div>
                   <div className="col-6">
                     <small className="text-muted d-block">Status</small>
@@ -384,7 +414,7 @@ export default function Profile() {
                 </div>
                 <div className="mb-2">
                   <i className="bi bi-clock-history me-2"></i>
-                  Last Login: {profile?.last_login ? new Date(profile.last_login).toLocaleString() : 'Never'}
+                  Last Updated: {profile?.updated_at ? new Date(profile.updated_at).toLocaleString() : 'Never'}
                 </div>
                 <div>
                   <i className="bi bi-arrow-repeat me-2"></i>
@@ -395,7 +425,7 @@ export default function Profile() {
           </div>
         </div>
 
-        {/* Profile Details - Right Column */}
+        {/* Profile Details */}
         <div className="col-md-8">
           <div className="card border-0 shadow-sm rounded-4">
             <div className="card-header bg-white border-0 pt-4 pb-3">
@@ -405,7 +435,7 @@ export default function Profile() {
                     <i className="bi bi-person-badge me-2 text-primary"></i>
                     Profile Information
                   </h5>
-                  <small className="text-muted">Your personal information and preferences</small>
+                  <small className="text-muted">Data syncs directly with Supabase database</small>
                 </div>
                 {!editing ? (
                   <button className="btn btn-primary btn-sm rounded-pill px-4" onClick={() => setEditing(true)}>
@@ -413,20 +443,9 @@ export default function Profile() {
                   </button>
                 ) : (
                   <div className="d-flex gap-2">
-                    <button className="btn btn-secondary btn-sm rounded-pill px-4" onClick={handleCancel}>
-                      Cancel
-                    </button>
+                    <button className="btn btn-secondary btn-sm rounded-pill px-4" onClick={handleCancel}>Cancel</button>
                     <button className="btn btn-success btn-sm rounded-pill px-4" onClick={handleSave} disabled={saving}>
-                      {saving ? (
-                        <>
-                          <span className="spinner-border spinner-border-sm me-2"></span>
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <i className="bi bi-save me-2"></i>Save Changes
-                        </>
-                      )}
+                      {saving ? <><span className="spinner-border spinner-border-sm me-2"></span>Saving...</> : <><i className="bi bi-save me-2"></i>Save Changes</>}
                     </button>
                   </div>
                 )}
@@ -434,83 +453,51 @@ export default function Profile() {
             </div>
             <div className="card-body">
               <div className="row g-4">
-                {/* Full Name */}
-                <div className="col-md-12">
-                  <label className="form-label fw-semibold">
-                    <i className="bi bi-person me-1"></i>Full Name
-                  </label>
+                <div className="col-md-6">
+                  <label className="form-label fw-semibold"><i className="bi bi-person me-1"></i>Full Name</label>
                   {editing ? (
-                    <input
-                      type="text"
-                      className="form-control form-control-lg"
-                      value={formData.full_name}
-                      onChange={(e) => setFormData({...formData, full_name: e.target.value})}
-                      placeholder="Enter your full name"
-                    />
+                    <input type="text" className="form-control" value={formData.full_name} onChange={(e) => setFormData({...formData, full_name: e.target.value})} />
                   ) : (
-                    <div className="border rounded p-3 bg-light">{profile?.full_name || 'Not set'}</div>
+                    <div className="border rounded p-2 bg-light">{profile?.full_name || 'Not set'}</div>
                   )}
-                  <small className="text-muted">This name will appear across the entire system</small>
                 </div>
 
-                {/* Email Address */}
                 <div className="col-md-6">
-                  <label className="form-label fw-semibold">
-                    <i className="bi bi-envelope me-1"></i>Email Address
-                  </label>
-                  <div className="border rounded p-2 bg-light text-muted">
-                    {profile?.email}
-                    <small className="d-block text-muted">Email cannot be changed</small>
-                  </div>
+                  <label className="form-label fw-semibold"><i className="bi bi-envelope me-1"></i>Email Address</label>
+                  <div className="border rounded p-2 bg-light text-muted">{profile?.email}<small className="d-block">Cannot be changed</small></div>
                 </div>
 
-                {/* Phone Number */}
                 <div className="col-md-6">
-                  <label className="form-label fw-semibold">
-                    <i className="bi bi-telephone me-1"></i>Phone Number
-                  </label>
+                  <label className="form-label fw-semibold"><i className="bi bi-telephone me-1"></i>Phone Number</label>
                   {editing ? (
-                    <input
-                      type="tel"
-                      className="form-control"
-                      value={formData.phone_number || ''}
-                      onChange={(e) => setFormData({...formData, phone_number: e.target.value})}
-                      placeholder="+94 XX XXX XXXX"
-                    />
+                    <input type="tel" className="form-control" value={formData.phone_number || ''} onChange={(e) => setFormData({...formData, phone_number: e.target.value})} placeholder="+94 XX XXX XXXX" />
                   ) : (
                     <div className="border rounded p-2 bg-light">{profile?.phone_number || 'Not provided'}</div>
                   )}
                 </div>
 
-                {/* Location */}
                 <div className="col-md-6">
-                  <label className="form-label fw-semibold">
-                    <i className="bi bi-geo-alt me-1"></i>Location
-                  </label>
+                  <label className="form-label fw-semibold"><i className="bi bi-geo-alt me-1"></i>Location</label>
                   {editing ? (
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formData.location || ''}
-                      onChange={(e) => setFormData({...formData, location: e.target.value})}
-                      placeholder="City, Country"
-                    />
+                    <input type="text" className="form-control" value={formData.location || ''} onChange={(e) => setFormData({...formData, location: e.target.value})} placeholder="City, Country" />
                   ) : (
                     <div className="border rounded p-2 bg-light">{profile?.location || 'Not provided'}</div>
                   )}
                 </div>
 
-                {/* Timezone */}
-                <div className="col-md-6">
-                  <label className="form-label fw-semibold">
-                    <i className="bi bi-clock me-1"></i>Timezone
-                  </label>
+                <div className="col-12">
+                  <label className="form-label fw-semibold"><i className="bi bi-file-text me-1"></i>Bio</label>
                   {editing ? (
-                    <select 
-                      className="form-select"
-                      value={formData.timezone}
-                      onChange={(e) => setFormData({...formData, timezone: e.target.value})}
-                    >
+                    <textarea className="form-control" rows="3" value={formData.bio || ''} onChange={(e) => setFormData({...formData, bio: e.target.value})} placeholder="Tell us about yourself..." />
+                  ) : (
+                    <div className="border rounded p-2 bg-light" style={{ minHeight: '80px' }}>{profile?.bio || 'No bio provided'}</div>
+                  )}
+                </div>
+
+                <div className="col-md-6">
+                  <label className="form-label fw-semibold"><i className="bi bi-clock me-1"></i>Timezone</label>
+                  {editing ? (
+                    <select className="form-select" value={formData.timezone} onChange={(e) => setFormData({...formData, timezone: e.target.value})}>
                       <option value="Asia/Colombo">Asia/Colombo (Sri Lanka)</option>
                       <option value="Asia/Kolkata">Asia/Kolkata (India)</option>
                       <option value="Asia/Dubai">Asia/Dubai (UAE)</option>
@@ -521,45 +508,37 @@ export default function Profile() {
                     <div className="border rounded p-2 bg-light">{profile?.timezone || 'Asia/Colombo'}</div>
                   )}
                 </div>
-
-                {/* Bio */}
-                <div className="col-12">
-                  <label className="form-label fw-semibold">
-                    <i className="bi bi-file-text me-1"></i>Bio
-                  </label>
-                  {editing ? (
-                    <textarea
-                      className="form-control"
-                      rows="3"
-                      value={formData.bio || ''}
-                      onChange={(e) => setFormData({...formData, bio: e.target.value})}
-                      placeholder="Tell us about yourself..."
-                    />
-                  ) : (
-                    <div className="border rounded p-2 bg-light" style={{ minHeight: '80px' }}>
-                      {profile?.bio || 'No bio provided'}
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           </div>
 
-          {/* Info Alert */}
-          <div className="alert alert-info mt-4">
-            <i className="bi bi-info-circle me-2"></i>
-            <strong>Note:</strong> After updating your name, you may need to refresh the page to see the changes everywhere in the system. The name is synchronized across both the database and your authentication profile.
+          {/* Notification Preferences */}
+          <div className="card border-0 shadow-sm rounded-4 mt-4">
+            <div className="card-header bg-white border-0 pt-4 pb-3">
+              <h5 className="mb-0 fw-bold"><i className="bi bi-bell me-2 text-primary"></i>Notification Preferences</h5>
+            </div>
+            <div className="card-body">
+              <div className="vstack gap-3">
+                {['email_notifications', 'security_alerts', 'activity_summary'].map(pref => (
+                  <div className="form-check form-switch" key={pref}>
+                    <input className="form-check-input" type="checkbox" id={pref}
+                      checked={formData.notification_preferences?.[pref]}
+                      onChange={(e) => setFormData({...formData, notification_preferences: {...formData.notification_preferences, [pref]: e.target.checked}})}
+                      disabled={!editing} />
+                    <label className="form-check-label fw-semibold" htmlFor={pref}>
+                      {pref.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <style jsx global>{`
-        .bg-gradient-primary {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        .object-fit-cover {
-          object-fit: cover;
-        }
+        .bg-gradient-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .object-fit-cover { object-fit: cover; }
       `}</style>
     </AdminLayout>
   )
