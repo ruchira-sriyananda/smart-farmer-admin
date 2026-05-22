@@ -84,7 +84,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     <div className="d-flex">
       <AdminSidebar />
       
-      <div style={{ marginLeft: '280px', width: '100%' }}>
+      <div style={{ marginLeft: '880px', width: '100%' }}>
         {/* Top Navbar with Working Profile Dropdown */}
         <nav className="navbar navbar-light bg-white shadow-sm px-4 py-2 sticky-top">
           <div>
