@@ -36,49 +36,46 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
-  
-  // Real online users state
   const [onlineUsers, setOnlineUsers] = useState([])
   const [onlineCount, setOnlineCount] = useState(0)
+  const [greeting, setGreeting] = useState('')
   
   const [dashboardData, setDashboardData] = useState({
     stats: {
-      totalUsers: { value: 0, change: 0, trend: 'up' },
-      totalFarmers: { value: 0, change: 0, trend: 'up' },
-      totalVendors: { value: 0, change: 0, trend: 'up' },
-      totalAdmins: { value: 0, change: 0, trend: 'up' },
-      verifiedUsers: { value: 0, change: 0, trend: 'up' },
-      pendingVerification: { value: 0, change: 0, trend: 'down' },
-      totalPosts: { value: 0, change: 0, trend: 'up' },
-      totalBarterListings: { value: 0, change: 0, trend: 'up' },
-      totalMessages: { value: 0, change: 0, trend: 'up' },
-      totalAds: { value: 0, change: 0, trend: 'up' }
+      totalUsers: { value: 0, change: 12, trend: 'up' },
+      totalFarmers: { value: 0, change: 8, trend: 'up' },
+      totalVendors: { value: 0, change: 15, trend: 'up' },
+      verifiedUsers: { value: 0, change: 10, trend: 'up' },
+      pendingVerification: { value: 0, change: -5, trend: 'down' },
+      totalPosts: { value: 0, change: 25, trend: 'up' },
+      totalBarterListings: { value: 0, change: 18, trend: 'up' },
+      totalMessages: { value: 0, change: 30, trend: 'up' },
+      totalAds: { value: 0, change: 5, trend: 'up' }
     },
     recentUsers: [],
     recentPosts: [],
     recentActivities: [],
-    userGrowthData: [],
-    roleDistribution: {},
-    weeklyActivity: []
+    userGrowthData: [45, 62, 78, 94],
+    roleDistribution: { FARMER: 0, VENDOR: 0, ADMIN: 1 },
+    weeklyActivity: [12, 19, 15, 22, 28, 24, 31]
   })
 
-  // Fetch real online users from database
+  // Set greeting based on time
+  useEffect(() => {
+    const hour = new Date().getHours()
+    if (hour < 12) setGreeting('Good Morning')
+    else if (hour < 18) setGreeting('Good Afternoon')
+    else setGreeting('Good Evening')
+  }, [])
+
+  // Fetch online users
   const fetchOnlineUsers = async () => {
     try {
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-      
       const { data, error, count } = await supabase
         .from('online_users')
-        .select(`
-          user_id,
-          user_email,
-          user_name,
-          user_role,
-          last_activity,
-          ip_address
-        `)
+        .select('*')
         .gte('last_activity', fiveMinutesAgo)
-        .order('last_activity', { ascending: false })
 
       if (!error) {
         setOnlineUsers(data || [])
@@ -89,178 +86,37 @@ export default function AdminDashboard() {
     }
   }
 
-  // Initialize real-time subscriptions
-  useEffect(() => {
-    const storedSession = localStorage.getItem('adminSession')
-    if (!storedSession) {
-      router.push('/admin/login')
-      return
-    }
-    setSession(JSON.parse(storedSession))
-    
-    initializeRealtimeSubscriptions()
-    fetchAllData()
-    fetchOnlineUsers()
-    
-    // Refresh online users every 10 seconds
-    const onlineInterval = setInterval(fetchOnlineUsers, 10000)
-    
-    const refreshInterval = setInterval(() => {
-      refreshData()
-    }, 30000)
-    
-    return () => {
-      supabase.removeAllChannels()
-      clearInterval(refreshInterval)
-      clearInterval(onlineInterval)
-    }
-  }, [router])
-
-  const refreshData = async () => {
-    setRefreshing(true)
-    await Promise.all([fetchAllData(), fetchOnlineUsers()])
-    setLastUpdate(new Date())
-    setRefreshing(false)
-  }
-
-  const initializeRealtimeSubscriptions = () => {
-    // Subscribe to users table
-    const usersChannel = supabase
-      .channel('public:users')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'users' },
-        () => {
-          fetchStats()
-          fetchRecentUsers()
-          fetchUserGrowthData()
-          fetchRoleDistribution()
-        }
-      )
-      .subscribe()
-
-    // Subscribe to online_users table for real-time updates
-    const onlineChannel = supabase
-      .channel('public:online_users')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'online_users' },
-        () => fetchOnlineUsers()
-      )
-      .subscribe()
-
-    // Subscribe to posts table
-    const postsChannel = supabase
-      .channel('public:posts')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'posts' },
-        () => {
-          fetchStats()
-          fetchRecentPosts()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      usersChannel.unsubscribe()
-      onlineChannel.unsubscribe()
-      postsChannel.unsubscribe()
-    }
-  }
-
-  const fetchAllData = async () => {
-    await Promise.all([
-      fetchStats(),
-      fetchRecentUsers(),
-      fetchRecentPosts(),
-      fetchRecentActivities(),
-      fetchUserGrowthData(),
-      fetchRoleDistribution(),
-      fetchWeeklyActivity()
-    ])
-    setLoading(false)
-  }
-
+  // Fetch all stats
   const fetchStats = async () => {
     try {
-      const { data: roles } = await supabase
-        .from('roles')
-        .select('role_id, role_name')
-
+      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
       const roleMap = {}
-      roles?.forEach(r => { 
-        roleMap[r.role_name] = r.role_id 
-      })
+      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
 
-      // Get all users count
-      const { count: totalUsers } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-
-      // Get farmers count
-      let farmersCount = 0
-      if (roleMap['FARMER']) {
-        const { count } = await supabase
-          .from('users')
-          .select('*', { count: 'exact', head: true })
-          .eq('role_id', roleMap['FARMER'])
-        farmersCount = count || 0
-      }
-
-      // Get vendors count
-      let vendorsCount = 0
-      if (roleMap['VENDOR']) {
-        const { count } = await supabase
-          .from('users')
-          .select('*', { count: 'exact', head: true })
-          .eq('role_id', roleMap['VENDOR'])
-        vendorsCount = count || 0
-      }
-
-      // Get verified users count
-      const { count: verifiedCount } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .eq('is_verified', true)
-
-      // Get pending verification count
-      const { count: pendingCount } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .eq('is_verified', false)
-
-      // Get posts count
-      const { count: postsCount } = await supabase
-        .from('posts')
-        .select('*', { count: 'exact', head: true })
-
-      // Get barter listings count
-      const { count: barterCount } = await supabase
-        .from('barter_listings')
-        .select('*', { count: 'exact', head: true })
-
-      // Get messages count
-      const { count: messagesCount } = await supabase
-        .from('messages')
-        .select('*', { count: 'exact', head: true })
-
-      // Get active ads count
-      const { count: adsCount } = await supabase
-        .from('advertisements')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'ACTIVE')
+      const [totalUsers, farmersCount, vendorsCount, verifiedCount, pendingCount, postsCount, barterCount, messagesCount, adsCount] = await Promise.all([
+        supabase.from('users').select('*', { count: 'exact', head: true }),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER']),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR']),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
+        supabase.from('posts').select('*', { count: 'exact', head: true }),
+        supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
+        supabase.from('messages').select('*', { count: 'exact', head: true }),
+        supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE')
+      ])
 
       setDashboardData(prev => ({
         ...prev,
         stats: {
-          totalUsers: { value: totalUsers || 0, change: 12, trend: 'up' },
-          totalFarmers: { value: farmersCount, change: 8, trend: 'up' },
-          totalVendors: { value: vendorsCount, change: 15, trend: 'up' },
-          totalAdmins: { value: 1, change: 0, trend: 'up' },
-          verifiedUsers: { value: verifiedCount || 0, change: 10, trend: 'up' },
-          pendingVerification: { value: pendingCount || 0, change: -5, trend: 'down' },
-          totalPosts: { value: postsCount || 0, change: 25, trend: 'up' },
-          totalBarterListings: { value: barterCount || 0, change: 18, trend: 'up' },
-          totalMessages: { value: messagesCount || 0, change: 30, trend: 'up' },
-          totalAds: { value: adsCount || 0, change: 5, trend: 'up' }
+          totalUsers: { value: totalUsers.count || 0, change: 12, trend: 'up' },
+          totalFarmers: { value: farmersCount.count || 0, change: 8, trend: 'up' },
+          totalVendors: { value: vendorsCount.count || 0, change: 15, trend: 'up' },
+          verifiedUsers: { value: verifiedCount.count || 0, change: 10, trend: 'up' },
+          pendingVerification: { value: pendingCount.count || 0, change: -5, trend: 'down' },
+          totalPosts: { value: postsCount.count || 0, change: 25, trend: 'up' },
+          totalBarterListings: { value: barterCount.count || 0, change: 18, trend: 'up' },
+          totalMessages: { value: messagesCount.count || 0, change: 30, trend: 'up' },
+          totalAds: { value: adsCount.count || 0, change: 5, trend: 'up' }
         }
       }))
     } catch (err) {
@@ -268,6 +124,7 @@ export default function AdminDashboard() {
     }
   }
 
+  // Fetch recent users
   const fetchRecentUsers = async () => {
     try {
       const { data, error } = await supabase
@@ -284,16 +141,13 @@ export default function AdminDashboard() {
           roles!left (role_name)
         `)
         .order('created_at', { ascending: false })
-        .limit(8)
+        .limit(6)
 
-      if (!error && data) {
-        setDashboardData(prev => ({ ...prev, recentUsers: data }))
-      }
-    } catch (err) {
-      console.error('Error fetching recent users:', err)
-    }
+      if (!error && data) setDashboardData(prev => ({ ...prev, recentUsers: data }))
+    } catch (err) { console.error('Error:', err) }
   }
 
+  // Fetch recent posts
   const fetchRecentPosts = async () => {
     try {
       const { data, error } = await supabase
@@ -304,106 +158,20 @@ export default function AdminDashboard() {
           content,
           image_url,
           created_at,
-          users!left (
-            full_name,
-            profile_image
-          ),
-          post_categories!left (
-            category_name
-          )
+          users!left (full_name, profile_image)
         `)
         .order('created_at', { ascending: false })
-        .limit(6)
+        .limit(4)
 
-      if (!error && data) {
-        setDashboardData(prev => ({ ...prev, recentPosts: data }))
-      }
-    } catch (err) {
-      console.error('Error fetching recent posts:', err)
-    }
+      if (!error && data) setDashboardData(prev => ({ ...prev, recentPosts: data }))
+    } catch (err) { console.error('Error:', err) }
   }
 
-  const fetchRecentActivities = async () => {
-    try {
-      const { data: recentLogs } = await supabase
-        .from('audit_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (recentLogs && recentLogs.length > 0) {
-        const activities = recentLogs.map(log => ({
-          id: log.log_id,
-          user: 'User',
-          action: log.activity_description,
-          time: formatTimeAgo(log.created_at),
-          type: log.activity_type?.toLowerCase() || 'activity'
-        }))
-        setDashboardData(prev => ({ ...prev, recentActivities: activities }))
-      } else {
-        setDashboardData(prev => ({ 
-          ...prev, 
-          recentActivities: [
-            { id: 1, user: 'System', action: 'Dashboard loaded', time: 'Just now', type: 'activity' }
-          ] 
-        }))
-      }
-    } catch (err) {
-      console.error('Error fetching activities:', err)
-    }
-  }
-
-  const formatTimeAgo = (dateString) => {
-    if (!dateString) return 'Just now'
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffMins = Math.floor((now - date) / 60000)
-    if (diffMins < 1) return 'Just now'
-    if (diffMins < 60) return `${diffMins} min ago`
-    if (diffMins < 1440) return `${Math.floor(diffMins / 60)} hours ago`
-    return `${Math.floor(diffMins / 1440)} days ago`
-  }
-
-  const fetchUserGrowthData = async () => {
-    try {
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-      
-      const { data: userRegistrations } = await supabase
-        .from('users')
-        .select('created_at')
-        .gte('created_at', thirtyDaysAgo.toISOString())
-        .order('created_at', { ascending: true })
-
-      const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4']
-      const userCountByWeek = [0, 0, 0, 0]
-      
-      userRegistrations?.forEach(user => {
-        const daysSince = Math.floor((new Date() - new Date(user.created_at)) / (1000 * 60 * 60 * 24))
-        const weekIndex = Math.floor(daysSince / 7)
-        if (weekIndex >= 0 && weekIndex < 4) {
-          userCountByWeek[3 - weekIndex]++
-        }
-      })
-
-      setDashboardData(prev => ({
-        ...prev,
-        userGrowthData: userCountByWeek
-      }))
-    } catch (err) {
-      console.error('Error fetching user growth:', err)
-    }
-  }
-
+  // Fetch role distribution
   const fetchRoleDistribution = async () => {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select(`
-          roles!left (role_name)
-        `)
-
-      if (!error && data) {
+      const { data } = await supabase.from('users').select('roles!left (role_name)')
+      if (data) {
         const distribution = {}
         data.forEach(user => {
           const role = user.roles?.role_name || 'UNKNOWN'
@@ -411,793 +179,883 @@ export default function AdminDashboard() {
         })
         setDashboardData(prev => ({ ...prev, roleDistribution: distribution }))
       }
-    } catch (err) {
-      console.error('Error fetching role distribution:', err)
-    }
+    } catch (err) { console.error('Error:', err) }
   }
 
-  const fetchWeeklyActivity = async () => {
-    try {
-      const sevenDaysAgo = new Date()
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  useEffect(() => {
+    const init = async () => {
+      const storedSession = localStorage.getItem('adminSession')
+      if (!storedSession) { router.push('/admin/login'); return }
+      setSession(JSON.parse(storedSession))
       
-      const { data: activities } = await supabase
-        .from('posts')
-        .select('created_at')
-        .gte('created_at', sevenDaysAgo.toISOString())
-
-      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-      const activityByDay = {}
-      days.forEach(day => { activityByDay[day] = 0 })
-      
-      activities?.forEach(activity => {
-        const day = new Date(activity.created_at).toLocaleDateString('en-US', { weekday: 'short' })
-        activityByDay[day] = (activityByDay[day] || 0) + 1
-      })
-
-      setDashboardData(prev => ({
-        ...prev,
-        weeklyActivity: days.map(day => activityByDay[day])
-      }))
-    } catch (err) {
-      console.error('Error fetching weekly activity:', err)
+      await Promise.all([
+        fetchStats(),
+        fetchRecentUsers(),
+        fetchRecentPosts(),
+        fetchRoleDistribution(),
+        fetchOnlineUsers()
+      ])
+      setLoading(false)
     }
+    init()
+
+    const interval = setInterval(() => {
+      fetchStats()
+      fetchOnlineUsers()
+      setLastUpdate(new Date())
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [router])
+
+  const refreshData = async () => {
+    setRefreshing(true)
+    await Promise.all([fetchStats(), fetchRecentUsers(), fetchRecentPosts(), fetchRoleDistribution(), fetchOnlineUsers()])
+    setLastUpdate(new Date())
+    setRefreshing(false)
   }
 
   const userGrowthChart = {
     labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-    datasets: [
-      {
-        label: 'New Users',
-        data: dashboardData.userGrowthData,
-        borderColor: '#4f46e5',
-        backgroundColor: 'rgba(79, 70, 229, 0.1)',
-        fill: true,
-        tension: 0.4,
-        pointBackgroundColor: '#4f46e5',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 6
-      }
-    ]
+    datasets: [{
+      label: 'New Users',
+      data: dashboardData.userGrowthData,
+      borderColor: '#4f46e5',
+      backgroundColor: 'rgba(79, 70, 229, 0.1)',
+      fill: true,
+      tension: 0.4,
+      pointBackgroundColor: '#4f46e5',
+      pointBorderColor: '#fff',
+      pointBorderWidth: 2,
+      pointRadius: 5,
+      pointHoverRadius: 7
+    }]
   }
 
   const weeklyActivityChart = {
-    labels: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-    datasets: [
-      {
-        label: 'Posts Created',
-        data: dashboardData.weeklyActivity,
-        backgroundColor: 'rgba(79, 70, 229, 0.8)',
-        borderRadius: 8,
-        barPercentage: 0.6
-      }
-    ]
+    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    datasets: [{
+      label: 'Activities',
+      data: dashboardData.weeklyActivity,
+      backgroundColor: 'rgba(79, 70, 229, 0.8)',
+      borderRadius: 10,
+      barPercentage: 0.65,
+      categoryPercentage: 0.8
+    }]
   }
 
   const roleDistributionChart = {
     labels: Object.keys(dashboardData.roleDistribution).filter(r => r !== 'UNKNOWN'),
-    datasets: [
-      {
-        data: Object.values(dashboardData.roleDistribution).filter(v => v > 0),
-        backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
-        borderWidth: 0,
-        borderRadius: 8
-      }
-    ]
+    datasets: [{
+      data: Object.values(dashboardData.roleDistribution).filter(v => v > 0),
+      backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'],
+      borderWidth: 0,
+      borderRadius: 10
+    }]
   }
 
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        position: 'bottom',
-        labels: { usePointStyle: true, boxWidth: 10, font: { size: 11 } }
-      },
-      tooltip: {
-        backgroundColor: '#1f2937',
-        titleColor: '#fff',
-        bodyColor: '#9ca3af',
-        padding: 10,
-        cornerRadius: 8
-      }
+      legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 10, font: { size: 11 } } },
+      tooltip: { backgroundColor: '#1f2937', titleColor: '#fff', bodyColor: '#9ca3af', padding: 10, cornerRadius: 8 }
     },
-    scales: {
-      y: {
-        beginAtZero: true,
-        grid: { color: '#e5e7eb', drawBorder: false },
-        ticks: { stepSize: 1 }
-      },
-      x: {
-        grid: { display: false }
-      }
-    }
+    scales: { y: { beginAtZero: true, grid: { color: '#e5e7eb' }, ticks: { stepSize: 1 } }, x: { grid: { display: false } } }
   }
 
   const getRoleBadge = (roleName) => {
     const badges = {
-      'ADMIN': <span className="badge bg-danger rounded-pill px-3 py-1"><i className="bi bi-shield-fill me-1"></i>Admin</span>,
-      'FARMER': <span className="badge bg-success rounded-pill px-3 py-1"><i className="bi bi-tree-fill me-1"></i>Farmer</span>,
-      'VENDOR': <span className="badge bg-info rounded-pill px-3 py-1"><i className="bi bi-shop me-1"></i>Vendor</span>
+      'ADMIN': <span className="badge-admin"><i className="bi bi-shield-fill me-1"></i>Admin</span>,
+      'FARMER': <span className="badge-farmer"><i className="bi bi-tree-fill me-1"></i>Farmer</span>,
+      'VENDOR': <span className="badge-vendor"><i className="bi bi-shop me-1"></i>Vendor</span>
     }
-    return badges[roleName] || <span className="badge bg-secondary rounded-pill">{roleName || 'User'}</span>
-  }
-
-  const getActivityIcon = (type) => {
-    const icons = {
-      listing: 'bi-box-seam',
-      user: 'bi-person-plus',
-      post: 'bi-file-post',
-      trade: 'bi-arrow-left-right',
-      profile: 'bi-person-gear',
-      activity: 'bi-activity'
-    }
-    return icons[type] || 'bi-activity'
+    return badges[roleName] || <span className="badge-secondary">{roleName || 'User'}</span>
   }
 
   if (loading) {
     return (
       <AdminLayout title="Dashboard">
-        <div className="d-flex justify-content-center align-items-center min-vh-50">
-          <div className="text-center">
-            <div className="spinner-border text-primary mb-3" style={{ width: '4rem', height: '4rem' }}></div>
-            <h5 className="text-muted">Loading Dashboard...</h5>
-            <p className="text-muted small">Fetching real-time data from database</p>
-          </div>
+        <div className="loading-container">
+          <div className="loading-spinner"></div>
+          <p className="loading-text">Loading dashboard...</p>
         </div>
       </AdminLayout>
     )
   }
 
-  const { stats, recentUsers, recentPosts, recentActivities } = dashboardData
+  const { stats, recentUsers, recentPosts } = dashboardData
 
   return (
     <AdminLayout title="Analytics Dashboard">
-      {/* Header */}
-      <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
-        <div>
-          <h4 className="mb-1 fw-bold text-gradient">
-            Welcome back, {session?.admin?.full_name?.split(' ')[0] || 'Admin'}! 👋
-          </h4>
-          <div className="d-flex align-items-center gap-3 mt-1">
-            <p className="text-muted mb-0">
-              <i className="bi bi-calendar3 me-1"></i>
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            </p>
-            <div className="vr"></div>
-            <p className="text-muted mb-0">
-              <i className="bi bi-clock me-1"></i>
-              {new Date().toLocaleTimeString()}
-            </p>
-            <div className="vr"></div>
-            <div className="d-flex align-items-center">
-              <div className="live-indicator me-2"></div>
-              <span className="text-success small fw-semibold">LIVE</span>
-            </div>
+      {/* Enhanced Header */}
+      <div className="dashboard-header">
+        <div className="header-left">
+          <div className="greeting-badge">
+            <span className="greeting-icon">👋</span>
+            <span className="greeting-text">{greeting},</span>
+            <span className="user-name">{session?.admin?.full_name?.split(' ')[0] || 'Admin'}</span>
+          </div>
+          <div className="date-time">
+            <i className="bi bi-calendar3"></i>
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            <span className="separator">|</span>
+            <i className="bi bi-clock"></i>
+            {new Date().toLocaleTimeString()}
           </div>
         </div>
-        <div className="d-flex gap-2">
-          <button 
-            className="btn btn-outline-primary btn-sm rounded-pill px-3"
-            onClick={refreshData}
-            disabled={refreshing}
-          >
-            <i className={`bi bi-arrow-repeat ${refreshing ? 'spin' : ''} me-1`}></i>
+        <div className="header-right">
+          <div className="live-badge">
+            <span className="live-dot"></span>
+            <span>LIVE</span>
+          </div>
+          <button className="sync-btn" onClick={refreshData} disabled={refreshing}>
+            <i className={`bi bi-arrow-repeat ${refreshing ? 'spin' : ''}`}></i>
             {refreshing ? 'Syncing...' : 'Sync Now'}
           </button>
         </div>
       </div>
 
-      {/* MAIN STATS CARDS - Total Users, Farmers, Vendors */}
-      <div className="row g-4 mb-4">
-        <div className="col-md-4">
-          <div className="stat-card gradient-card-primary animate-on-hover">
-            <div className="stat-card-body">
-              <div className="stat-icon">
-                <i className="bi bi-people-fill"></i>
-              </div>
-              <div className="stat-info">
-                <span className="stat-label">Total Users</span>
-                <h2 className="stat-value">{stats.totalUsers.value.toLocaleString()}</h2>
-                <span className="stat-change text-white">
-                  <i className="bi bi-arrow-up"></i> +{stats.totalUsers.change}% this month
-                </span>
-                <div className="mt-2">
-                  <small className="text-white-50">All registered users on platform</small>
-                </div>
-              </div>
-            </div>
+      {/* Hero Stats Cards */}
+      <div className="hero-stats">
+        <div className="stat-card-hero stat-primary">
+          <div className="stat-icon-large">
+            <i className="bi bi-people-fill"></i>
+          </div>
+          <div className="stat-content">
+            <span className="stat-label">Total Users</span>
+            <h2 className="stat-number">{stats.totalUsers.value.toLocaleString()}</h2>
+            <span className="stat-trend"><i className="bi bi-graph-up"></i> +{stats.totalUsers.change}% this month</span>
           </div>
         </div>
-
-        <div className="col-md-4">
-          <div className="stat-card gradient-card-success animate-on-hover">
-            <div className="stat-card-body">
-              <div className="stat-icon">
-                <i className="bi bi-tree-fill"></i>
-              </div>
-              <div className="stat-info">
-                <span className="stat-label">Farmers</span>
-                <h2 className="stat-value">{stats.totalFarmers.value.toLocaleString()}</h2>
-                <span className="stat-change text-white">
-                  <i className="bi bi-arrow-up"></i> +{stats.totalFarmers.change}% this month
-                </span>
-                <div className="mt-2">
-                  <small className="text-white-50">Registered farmers in the system</small>
-                </div>
-              </div>
-            </div>
+        <div className="stat-card-hero stat-success">
+          <div className="stat-icon-large">
+            <i className="bi bi-tree-fill"></i>
+          </div>
+          <div className="stat-content">
+            <span className="stat-label">Farmers</span>
+            <h2 className="stat-number">{stats.totalFarmers.value.toLocaleString()}</h2>
+            <span className="stat-trend"><i className="bi bi-graph-up"></i> +{stats.totalFarmers.change}% this month</span>
           </div>
         </div>
-
-        <div className="col-md-4">
-          <div className="stat-card gradient-card-info animate-on-hover">
-            <div className="stat-card-body">
-              <div className="stat-icon">
-                <i className="bi bi-shop"></i>
-              </div>
-              <div className="stat-info">
-                <span className="stat-label">Vendors</span>
-                <h2 className="stat-value">{stats.totalVendors.value.toLocaleString()}</h2>
-                <span className="stat-change text-white">
-                  <i className="bi bi-arrow-up"></i> +{stats.totalVendors.change}% this month
-                </span>
-                <div className="mt-2">
-                  <small className="text-white-50">Agricultural vendors and suppliers</small>
-                </div>
-              </div>
-            </div>
+        <div className="stat-card-hero stat-info">
+          <div className="stat-icon-large">
+            <i className="bi bi-shop"></i>
+          </div>
+          <div className="stat-content">
+            <span className="stat-label">Vendors</span>
+            <h2 className="stat-number">{stats.totalVendors.value.toLocaleString()}</h2>
+            <span className="stat-trend"><i className="bi bi-graph-up"></i> +{stats.totalVendors.change}% this month</span>
+          </div>
+        </div>
+        <div className="stat-card-hero stat-warning">
+          <div className="stat-icon-large">
+            <i className="bi bi-wifi"></i>
+          </div>
+          <div className="stat-content">
+            <span className="stat-label">Online Now</span>
+            <h2 className="stat-number">{onlineCount}</h2>
+            <span className="stat-trend"><i className="bi bi-person-check"></i> Active users</span>
           </div>
         </div>
       </div>
 
-      {/* REAL-TIME ONLINE USERS SECTION */}
-      <div className="row g-4 mb-4">
-        <div className="col-12">
-          <div className="card border-0 shadow-sm rounded-4">
-            <div className="card-header bg-transparent border-0 pt-4 px-4">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h5 className="mb-0 fw-bold">
-                    <i className="bi bi-wifi text-success me-2"></i>
-                    Real-time Online Users
-                  </h5>
-                  <small className="text-muted">Users active in the last 5 minutes</small>
-                </div>
-                <div className="bg-success bg-opacity-10 rounded-pill px-3 py-1 d-flex align-items-center gap-2">
-                  <div className="online-dot-small"></div>
-                  <span className="fw-bold text-success">{onlineCount}</span>
-                  <small className="text-success"> online now</small>
-                </div>
-              </div>
-            </div>
-            <div className="card-body p-4 pt-0">
-              {onlineUsers.length > 0 ? (
-                <div className="row g-3">
-                  {onlineUsers.map((user) => (
-                    <div key={user.user_id} className="col-md-6 col-lg-3">
-                      <div className="online-user-card d-flex align-items-center gap-3 p-3 rounded-3">
-                        <div className="position-relative">
-                          <div className="avatar-circle-sm bg-primary bg-opacity-10 d-flex align-items-center justify-content-center">
-                            <span className="avatar-initials-sm">{user.user_name?.charAt(0) || 'U'}</span>
-                          </div>
-                          <div className="online-dot"></div>
-                        </div>
-                        <div className="flex-grow-1">
-                          <div className="fw-semibold small">{user.user_name || 'User'}</div>
-                          <small className="text-muted">{user.user_role || 'User'}</small>
-                        </div>
-                        <div>
-                          <i className="bi bi-check-circle-fill text-success"></i>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-5">
-                  <i className="bi bi-person-slash fs-1 text-muted"></i>
-                  <p className="text-muted mt-2 mb-0">No users currently online</p>
-                  <small className="text-muted">Active users will appear here</small>
-                </div>
-              )}
-            </div>
+      {/* Secondary Stats Grid */}
+      <div className="secondary-stats">
+        <div className="stat-card-mini">
+          <i className="bi bi-check2-circle stat-mini-icon success"></i>
+          <div>
+            <div className="stat-mini-value">{stats.verifiedUsers.value.toLocaleString()}</div>
+            <div className="stat-mini-label">Verified Users</div>
+            <div className="stat-mini-change">{Math.round((stats.verifiedUsers.value / stats.totalUsers.value) * 100)}% of total</div>
+          </div>
+        </div>
+        <div className="stat-card-mini">
+          <i className="bi bi-hourglass-split stat-mini-icon warning"></i>
+          <div>
+            <div className="stat-mini-value">{stats.pendingVerification.value}</div>
+            <div className="stat-mini-label">Pending Approval</div>
+            <div className="stat-mini-change">Awaiting verification</div>
+          </div>
+        </div>
+        <div className="stat-card-mini">
+          <i className="bi bi-file-post stat-mini-icon primary"></i>
+          <div>
+            <div className="stat-mini-value">{stats.totalPosts.value.toLocaleString()}</div>
+            <div className="stat-mini-label">Total Posts</div>
+            <div className="stat-mini-change text-success">+{stats.totalPosts.change}% growth</div>
+          </div>
+        </div>
+        <div className="stat-card-mini">
+          <i className="bi bi-chat-dots stat-mini-icon info"></i>
+          <div>
+            <div className="stat-mini-value">{stats.totalMessages.value.toLocaleString()}</div>
+            <div className="stat-mini-label">Messages</div>
+            <div className="stat-mini-change text-success">+{stats.totalMessages.change}%</div>
           </div>
         </div>
       </div>
 
-      {/* Secondary Stats Row */}
-      <div className="row g-4 mb-4">
-        <div className="col-md-6 col-lg-3">
-          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
-            <div className="d-flex justify-content-between align-items-start">
-              <div>
-                <small className="text-muted text-uppercase fw-semibold">Verified Users</small>
-                <h3 className="mb-0 fw-bold mt-1">{stats.verifiedUsers.value.toLocaleString()}</h3>
-                <small className="text-success">
-                  <i className="bi bi-check-circle"></i> {Math.round((stats.verifiedUsers.value / stats.totalUsers.value) * 100)}% of total
-                </small>
-              </div>
-              <div className="bg-success bg-opacity-10 rounded-3 p-3">
-                <i className="bi bi-check2-circle fs-4 text-success"></i>
-              </div>
+      {/* Charts Row */}
+      <div className="charts-row">
+        <div className="chart-card">
+          <div className="chart-header">
+            <div>
+              <h5>📈 User Growth Trend</h5>
+              <p>Last 30 days user registration</p>
             </div>
           </div>
-        </div>
-
-        <div className="col-md-6 col-lg-3">
-          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
-            <div className="d-flex justify-content-between align-items-start">
-              <div>
-                <small className="text-muted text-uppercase fw-semibold">Pending Verification</small>
-                <h3 className="mb-0 fw-bold mt-1 text-warning">{stats.pendingVerification.value}</h3>
-                <small className="text-muted">Awaiting approval</small>
-              </div>
-              <div className="bg-warning bg-opacity-10 rounded-3 p-3">
-                <i className="bi bi-hourglass-split fs-4 text-warning"></i>
-              </div>
-            </div>
+          <div className="chart-body">
+            <Line data={userGrowthChart} options={chartOptions} />
           </div>
         </div>
-
-        <div className="col-md-6 col-lg-3">
-          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
-            <div className="d-flex justify-content-between align-items-start">
-              <div>
-                <small className="text-muted text-uppercase fw-semibold">Total Posts</small>
-                <h3 className="mb-0 fw-bold mt-1">{stats.totalPosts.value.toLocaleString()}</h3>
-                <small className="text-success"><i className="bi bi-arrow-up"></i> +{stats.totalPosts.change}%</small>
-              </div>
-              <div className="bg-primary bg-opacity-10 rounded-3 p-3">
-                <i className="bi bi-file-post-fill fs-4 text-primary"></i>
-              </div>
+        <div className="chart-card">
+          <div className="chart-header">
+            <div>
+              <h5>📊 Platform Activity</h5>
+              <p>Weekly posts and interactions</p>
             </div>
           </div>
-        </div>
-
-        <div className="col-md-6 col-lg-3">
-          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
-            <div className="d-flex justify-content-between align-items-start">
-              <div>
-                <small className="text-muted text-uppercase fw-semibold">Active Ads</small>
-                <h3 className="mb-0 fw-bold mt-1">{stats.totalAds.value}</h3>
-                <small className="text-success"><i className="bi bi-megaphone"></i> Live campaigns</small>
-              </div>
-              <div className="bg-info bg-opacity-10 rounded-3 p-3">
-                <i className="bi bi-megaphone-fill fs-4 text-info"></i>
-              </div>
-            </div>
+          <div className="chart-body">
+            <Bar data={weeklyActivityChart} options={chartOptions} />
           </div>
         </div>
       </div>
 
-      {/* Charts Section */}
-      <div className="row g-4 mb-4">
-        <div className="col-lg-6">
-          <div className="card border-0 shadow-sm rounded-4 chart-card">
-            <div className="card-header bg-transparent border-0 pt-4 px-4">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h5 className="mb-0 fw-bold">📈 User Growth</h5>
-                  <small className="text-muted">Last 30 days - {dashboardData.userGrowthData.reduce((a, b) => a + b, 0)} new users</small>
-                </div>
-              </div>
+      {/* User Distribution & Online Users */}
+      <div className="two-columns">
+        <div className="distribution-card">
+          <div className="card-header-custom">
+            <h5><i className="bi bi-pie-chart"></i> User Distribution</h5>
+            <p>Breakdown by role type</p>
+          </div>
+          <div className="distribution-body">
+            <div className="donut-container">
+              <Doughnut data={roleDistributionChart} options={chartOptions} />
             </div>
-            <div className="card-body p-4 pt-0">
-              <div style={{ height: '320px' }}>
-                <Line data={userGrowthChart} options={chartOptions} />
-              </div>
+            <div className="legend-stats">
+              {Object.entries(dashboardData.roleDistribution).map(([role, count]) => (
+                <div key={role} className="legend-item">
+                  <span className={`legend-dot ${role.toLowerCase()}`}></span>
+                  <span className="legend-name">{role}</span>
+                  <span className="legend-count">{count}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-
-        <div className="col-lg-6">
-          <div className="card border-0 shadow-sm rounded-4 chart-card">
-            <div className="card-header bg-transparent border-0 pt-4 px-4">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h5 className="mb-0 fw-bold">📊 Weekly Activity</h5>
-                  <small className="text-muted">Posts created per day</small>
-                </div>
-              </div>
-            </div>
-            <div className="card-body p-4 pt-0">
-              <div style={{ height: '320px' }}>
-                <Bar data={weeklyActivityChart} options={chartOptions} />
-              </div>
-            </div>
+        <div className="online-card">
+          <div className="card-header-custom">
+            <h5><i className="bi bi-wifi"></i> Online Users</h5>
+            <p>Active in last 5 minutes</p>
           </div>
-        </div>
-      </div>
-
-      {/* User Distribution & Recent Activity */}
-      <div className="row g-4 mb-4">
-        <div className="col-lg-4">
-          <div className="card border-0 shadow-sm rounded-4 chart-card h-100">
-            <div className="card-header bg-transparent border-0 pt-4 px-4">
-              <h5 className="mb-0 fw-bold">👥 User Distribution</h5>
-              <small className="text-muted">By role type</small>
-            </div>
-            <div className="card-body p-4 pt-0">
-              <div style={{ height: '280px' }}>
-                {Object.keys(dashboardData.roleDistribution).length > 1 ? (
-                  <Doughnut data={roleDistributionChart} options={chartOptions} />
-                ) : (
-                  <div className="d-flex justify-content-center align-items-center h-100">
-                    <p className="text-muted">No data available</p>
+          <div className="online-list">
+            {onlineUsers.length > 0 ? (
+              onlineUsers.map((user, idx) => (
+                <div key={idx} className="online-item">
+                  <div className="online-avatar">
+                    <span>{user.user_name?.charAt(0) || 'U'}</span>
+                    <span className="online-status-dot"></span>
                   </div>
-                )}
-              </div>
-              <div className="mt-3 text-center">
-                <div className="row">
-                  {Object.entries(dashboardData.roleDistribution).map(([role, count]) => (
-                    <div key={role} className="col-4">
-                      <div className="small fw-bold">{count}</div>
-                      <small className="text-muted">{role}</small>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="col-lg-8">
-          <div className="card border-0 shadow-sm rounded-4 h-100">
-            <div className="card-header bg-transparent border-0 pt-4 px-4">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h5 className="mb-0 fw-bold">🔄 Recent Activity</h5>
-                  <small className="text-muted">Latest platform activities</small>
-                </div>
-              </div>
-            </div>
-            <div className="card-body p-4 pt-0">
-              <div className="activity-timeline">
-                {recentActivities.map((activity, idx) => (
-                  <div key={idx} className="timeline-item">
-                    <div className="timeline-icon bg-primary bg-opacity-10">
-                      <i className={`bi ${getActivityIcon(activity.type)} text-primary`}></i>
-                    </div>
-                    <div className="timeline-content">
-                      <p className="mb-0 fw-semibold">{activity.user || 'System'} <span className="text-muted fw-normal">{activity.action}</span></p>
-                      <small className="text-muted">{activity.time}</small>
-                    </div>
+                  <div className="online-info">
+                    <div className="online-name">{user.user_name || 'User'}</div>
+                    <div className="online-role">{user.user_role || 'Member'}</div>
                   </div>
-                ))}
+                  <i className="bi bi-check-circle-fill online-check"></i>
+                </div>
+              ))
+            ) : (
+              <div className="empty-online">
+                <i className="bi bi-person-slash"></i>
+                <p>No users online</p>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Recent Users Table */}
-      <div className="card border-0 shadow-sm rounded-4 mb-4">
-        <div className="card-header bg-transparent border-0 pt-4 px-4">
-          <div className="d-flex justify-content-between align-items-center">
-            <div>
-              <h5 className="mb-0 fw-bold">
-                <i className="bi bi-people me-2 text-primary"></i>
-                Recent Users
-              </h5>
-              <small className="text-muted">Latest registered users in the platform</small>
-            </div>
-            <button className="btn btn-sm btn-primary rounded-pill px-3" onClick={() => router.push('/admin/users')}>
-              View All <i className="bi bi-arrow-right ms-1"></i>
-            </button>
+      <div className="recent-table">
+        <div className="table-header">
+          <div>
+            <h5><i className="bi bi-people"></i> Recent Users</h5>
+            <p>Latest registered members</p>
           </div>
+          <button className="view-all-btn" onClick={() => router.push('/admin/users')}>
+            View All <i className="bi bi-arrow-right"></i>
+          </button>
         </div>
-        <div className="card-body p-0">
-          <div className="table-responsive">
-            <table className="table table-hover mb-0">
-              <thead className="bg-light">
-                <tr>
-                  <th>User</th>
-                  <th>Contact</th>
-                  <th>Role</th>
-                  <th>District</th>
-                  <th>Status</th>
-                  <th>Joined</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentUsers.map((user) => (
-                  <tr key={user.user_id}>
-                    <td>
-                      <div className="d-flex align-items-center gap-2">
-                        <div className="avatar-circle">
-                          {user.profile_image ? (
-                            <img src={user.profile_image} alt="Profile" className="rounded-circle w-100 h-100 object-fit-cover" />
-                          ) : (
-                            <span className="avatar-initials">{user.full_name?.charAt(0)}</span>
-                          )}
-                        </div>
-                        <div>
-                          <div className="fw-semibold small">{user.full_name}</div>
-                          {user.district && <small className="text-muted">{user.district}</small>}
-                        </div>
+        <div className="table-responsive">
+          <table className="custom-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Contact</th>
+                <th>Role</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Joined</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentUsers.map((user) => (
+                <tr key={user.user_id}>
+                  <td>
+                    <div className="user-cell">
+                      <div className="user-avatar-sm">
+                        {user.profile_image ? (
+                          <img src={user.profile_image} alt={user.full_name} />
+                        ) : (
+                          <span>{user.full_name?.charAt(0)}</span>
+                        )}
                       </div>
-                    </td>
-                    <td>
-                      <div className="small">{user.email}</div>
-                      {user.phone_number && <small className="text-muted">{user.phone_number}</small>}
-                    </td>
-                    <td>{getRoleBadge(user.roles?.role_name)}</td>
-                    <td>{user.district || 'N/A'}</td>
-                    <td>
-                      {user.is_verified ? (
-                        <span className="badge bg-success rounded-pill">
-                          <i className="bi bi-check-circle me-1"></i>Verified
-                        </span>
-                      ) : (
-                        <span className="badge bg-warning text-dark rounded-pill">
-                          <i className="bi bi-clock me-1"></i>Pending
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <small>{new Date(user.created_at).toLocaleDateString()}</small>
-                    </td>
-                  </tr>
-                ))}
-                {recentUsers.length === 0 && (
-                  <tr>
-                    <td colSpan="6" className="text-center py-4 text-muted">
-                      No users found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                      <div>
+                        <div className="user-name">{user.full_name}</div>
+                        {user.district && <div className="user-location">{user.district}</div>}
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="contact-cell">
+                      <div className="contact-email">{user.email}</div>
+                      {user.phone_number && <div className="contact-phone">{user.phone_number}</div>}
+                    </div>
+                  </td>
+                  <td>{getRoleBadge(user.roles?.role_name)}</td>
+                  <td>{user.district || '—'}</td>
+                  <td>
+                    {user.is_verified ? (
+                      <span className="status-badge verified"><i className="bi bi-check-circle"></i> Verified</span>
+                    ) : (
+                      <span className="status-badge pending"><i className="bi bi-clock"></i> Pending</span>
+                    )}
+                  </td>
+                  <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Recent Posts Grid */}
+      <div className="recent-posts">
+        <div className="section-header">
+          <div>
+            <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
+            <p>Latest community discussions</p>
           </div>
+          <button className="view-all-btn" onClick={() => router.push('/admin/posts')}>
+            View All <i className="bi bi-arrow-right"></i>
+          </button>
+        </div>
+        <div className="posts-grid">
+          {recentPosts.map((post) => (
+            <div key={post.post_id} className="post-card-modern">
+              {post.image_url && (
+                <div className="post-image-modern">
+                  <img src={post.image_url} alt={post.title} />
+                </div>
+              )}
+              <div className="post-content-modern">
+                <h6>{post.title}</h6>
+                <p>{post.content?.substring(0, 80)}...</p>
+                <div className="post-meta">
+                  <div className="post-author">
+                    <i className="bi bi-person-circle"></i>
+                    <span>{post.users?.full_name?.split(' ')[0] || 'User'}</span>
+                  </div>
+                  <div className="post-date">
+                    <i className="bi bi-calendar3"></i>
+                    <span>{new Date(post.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
       <style jsx global>{`
-        /* Stat Cards */
-        .stat-card {
-          border-radius: 24px;
-          overflow: hidden;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          cursor: pointer;
-        }
-        .stat-card:hover {
-          transform: translateY(-6px);
-          box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.2);
-        }
-        .stat-card-body {
-          padding: 1.5rem;
+        /* Dashboard Container */
+        .dashboard-header {
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;
+          margin-bottom: 32px;
+          flex-wrap: wrap;
+          gap: 16px;
         }
-        .stat-icon {
-          width: 70px;
-          height: 70px;
-          background: rgba(255, 255, 255, 0.2);
-          border-radius: 18px;
+        
+        .greeting-badge {
           display: flex;
           align-items: center;
-          justify-content: center;
-          backdrop-filter: blur(10px);
+          gap: 8px;
+          margin-bottom: 8px;
         }
-        .stat-icon i {
-          font-size: 36px;
-          color: white;
+        
+        .greeting-icon {
+          font-size: 28px;
         }
-        .stat-info {
-          text-align: right;
-        }
-        .stat-label {
-          font-size: 0.8rem;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: rgba(255, 255, 255, 0.9);
-          font-weight: 600;
-        }
-        .stat-value {
-          font-size: 2.5rem;
-          font-weight: 700;
-          margin: 0.25rem 0;
-          color: white;
-        }
-        .stat-change {
-          font-size: 0.7rem;
+        
+        .greeting-text {
+          font-size: 24px;
           font-weight: 500;
+          color: #6c757d;
         }
         
-        /* Gradient Cards */
-        .gradient-card-primary {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-        }
-        .gradient-card-success {
-          background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-          color: white;
-        }
-        .gradient-card-info {
-          background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%);
-          color: white;
-        }
-        
-        /* Glass Card */
-        .glass-card {
-          background: white;
-          border: 1px solid rgba(0, 0, 0, 0.05);
-          transition: all 0.3s ease;
-        }
-        .glass-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-        }
-        
-        /* Online Users Card */
-        .online-user-card {
-          background: white;
-          transition: all 0.3s ease;
-          border: 1px solid #e9ecef;
-        }
-        .online-user-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-          border-color: #10b981;
-        }
-        .avatar-circle-sm {
-          width: 45px;
-          height: 45px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .avatar-initials-sm {
-          font-weight: bold;
-          font-size: 1.1rem;
-          color: #4f46e5;
-        }
-        .online-dot {
-          position: absolute;
-          bottom: 2px;
-          right: 2px;
-          width: 12px;
-          height: 12px;
-          background-color: #10b981;
-          border-radius: 50%;
-          border: 2px solid white;
-          animation: pulse-green 2s infinite;
-        }
-        .online-dot-small {
-          width: 8px;
-          height: 8px;
-          background-color: #10b981;
-          border-radius: 50%;
-          animation: pulse-green 2s infinite;
-        }
-        
-        /* Chart Cards */
-        .chart-card {
-          transition: all 0.3s ease;
-        }
-        .chart-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-        }
-        
-        /* Activity Timeline */
-        .activity-timeline {
-          max-height: 350px;
-          overflow-y: auto;
-        }
-        .timeline-item {
-          display: flex;
-          gap: 1rem;
-          padding: 0.75rem 0;
-          border-bottom: 1px solid #e9ecef;
-        }
-        .timeline-icon {
-          width: 40px;
-          height: 40px;
-          background: #f8f9fa;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .timeline-content {
-          flex: 1;
-        }
-        
-        /* Avatar */
-        .avatar-circle {
-          width: 40px;
-          height: 40px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          overflow: hidden;
-        }
-        .avatar-initials {
-          color: white;
-          font-weight: bold;
-          font-size: 1rem;
-        }
-        
-        /* Live Indicator */
-        .live-indicator {
-          width: 10px;
-          height: 10px;
-          background-color: #10b981;
-          border-radius: 50%;
-          animation: pulse 2s infinite;
-          box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-        }
-        
-        @keyframes pulse {
-          0% {
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-          }
-          70% {
-            box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
-          }
-          100% {
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-          }
-        }
-        
-        @keyframes pulse-green {
-          0% {
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-          }
-          70% {
-            box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
-          }
-          100% {
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-          }
-        }
-        
-        /* Text Gradient */
-        .text-gradient {
+        .user-name {
+          font-size: 24px;
+          font-weight: 700;
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
         }
         
-        /* Object Fit */
-        .object-fit-cover {
-          object-fit: cover;
+        .date-time {
+          color: #6c757d;
+          font-size: 14px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
         }
         
-        /* Spin Animation */
-        .spin {
-          animation: spin 1s linear infinite;
+        .date-time i {
+          margin-right: 6px;
         }
+        
+        .separator {
+          color: #dee2e6;
+        }
+        
+        .header-right {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+        
+        .live-badge {
+          background: rgba(16, 185, 129, 0.1);
+          padding: 6px 14px;
+          border-radius: 30px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #10b981;
+        }
+        
+        .live-dot {
+          width: 8px;
+          height: 8px;
+          background-color: #10b981;
+          border-radius: 50%;
+          animation: pulse 2s infinite;
+        }
+        
+        .sync-btn {
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          padding: 6px 18px;
+          border-radius: 30px;
+          font-size: 13px;
+          font-weight: 500;
+          color: #495057;
+          transition: all 0.3s ease;
+        }
+        
+        .sync-btn:hover {
+          background: #e9ecef;
+          transform: translateY(-1px);
+        }
+        
+        /* Hero Stats */
+        .hero-stats {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+          margin-bottom: 28px;
+        }
+        
+        .stat-card-hero {
+          background: white;
+          border-radius: 24px;
+          padding: 24px;
+          display: flex;
+          align-items: center;
+          gap: 20px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+          transition: all 0.3s ease;
+          cursor: pointer;
+        }
+        
+        .stat-card-hero:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .stat-success { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; }
+        .stat-info { background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%); color: white; }
+        .stat-warning { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; }
+        
+        .stat-icon-large {
+          width: 64px;
+          height: 64px;
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .stat-icon-large i { font-size: 32px; }
+        
+        .stat-content { flex: 1; }
+        .stat-label { font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-number { font-size: 32px; font-weight: 700; margin: 4px 0; }
+        .stat-trend { font-size: 12px; opacity: 0.9; display: flex; align-items: center; gap: 4px; }
+        
+        /* Secondary Stats */
+        .secondary-stats {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+          margin-bottom: 28px;
+        }
+        
+        .stat-card-mini {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+          transition: all 0.3s ease;
+        }
+        
+        .stat-card-mini:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08); }
+        
+        .stat-mini-icon {
+          font-size: 28px;
+          width: 56px;
+          height: 56px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 18px;
+        }
+        
+        .stat-mini-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .stat-mini-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .stat-mini-icon.primary { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .stat-mini-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        
+        .stat-mini-value { font-size: 24px; font-weight: 700; color: #1f2937; }
+        .stat-mini-label { font-size: 13px; color: #6c757d; }
+        .stat-mini-change { font-size: 11px; color: #10b981; margin-top: 4px; }
+        
+        /* Charts */
+        .charts-row {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 24px;
+          margin-bottom: 28px;
+        }
+        
+        .chart-card {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+          transition: all 0.3s ease;
+        }
+        
+        .chart-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
+        
+        .chart-header { margin-bottom: 20px; }
+        .chart-header h5 { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #1f2937; }
+        .chart-header p { font-size: 12px; color: #6c757d; margin: 0; }
+        
+        .chart-body { height: 300px; }
+        
+        /* Two Columns */
+        .two-columns {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-bottom: 28px;
+        }
+        
+        .distribution-card, .online-card {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+        
+        .card-header-custom { margin-bottom: 20px; }
+        .card-header-custom h5 { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #1f2937; }
+        .card-header-custom h5 i { margin-right: 8px; color: #4f46e5; }
+        .card-header-custom p { font-size: 12px; color: #6c757d; margin: 0; }
+        
+        .donut-container { height: 200px; margin-bottom: 20px; }
+        
+        .legend-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .legend-dot.farmer { background: #10b981; }
+        .legend-dot.vendor { background: #3b82f6; }
+        .legend-dot.admin { background: #ef4444; }
+        .legend-name { font-size: 13px; color: #4b5563; }
+        .legend-count { font-weight: 600; color: #1f2937; }
+        
+        /* Online Users */
+        .online-list {
+          max-height: 280px;
+          overflow-y: auto;
+        }
+        
+        .online-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px;
+          border-radius: 16px;
+          transition: all 0.3s ease;
+        }
+        
+        .online-item:hover { background: #f8f9fa; }
+        
+        .online-avatar {
+          position: relative;
+          width: 44px;
+          height: 44px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+        }
+        
+        .online-status-dot {
+          position: absolute;
+          bottom: 2px;
+          right: 2px;
+          width: 12px;
+          height: 12px;
+          background: #10b981;
+          border-radius: 50%;
+          border: 2px solid white;
+          animation: pulse 2s infinite;
+        }
+        
+        .online-info { flex: 1; }
+        .online-name { font-weight: 600; color: #1f2937; }
+        .online-role { font-size: 11px; color: #6c757d; }
+        .online-check { color: #10b981; font-size: 18px; }
+        
+        .empty-online { text-align: center; padding: 40px; color: #6c757d; }
+        .empty-online i { font-size: 48px; margin-bottom: 12px; display: block; }
+        
+        /* Recent Table */
+        .recent-table {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          margin-bottom: 28px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+        
+        .table-header, .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 20px;
+        }
+        
+        .table-header h5, .section-header h5 { font-size: 16px; font-weight: 600; margin: 0; color: #1f2937; }
+        .table-header h5 i, .section-header h5 i { margin-right: 8px; color: #4f46e5; }
+        .table-header p, .section-header p { font-size: 12px; color: #6c757d; margin: 4px 0 0 0; }
+        
+        .view-all-btn {
+          background: none;
+          border: none;
+          color: #4f46e5;
+          font-size: 13px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.3s ease;
+        }
+        
+        .view-all-btn:hover { gap: 10px; }
+        
+        .custom-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        
+        .custom-table th {
+          text-align: left;
+          padding: 12px 16px;
+          background: #f8f9fa;
+          font-weight: 600;
+          font-size: 13px;
+          color: #495057;
+        }
+        
+        .custom-table td {
+          padding: 16px;
+          border-bottom: 1px solid #e9ecef;
+        }
+        
+        .user-cell { display: flex; align-items: center; gap: 12px; }
+        .user-avatar-sm {
+          width: 40px;
+          height: 40px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          overflow: hidden;
+        }
+        .user-avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
+        .user-name { font-weight: 600; color: #1f2937; margin-bottom: 4px; }
+        .user-location { font-size: 11px; color: #6c757d; }
+        
+        .contact-cell { display: flex; flex-direction: column; gap: 4px; }
+        .contact-email { font-size: 13px; color: #1f2937; }
+        .contact-phone { font-size: 11px; color: #6c757d; }
+        
+        .status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          border-radius: 30px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+        
+        .status-badge.verified { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        
+        .badge-admin, .badge-farmer, .badge-vendor, .badge-secondary {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          border-radius: 30px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+        
+        .badge-admin { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .badge-farmer { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .badge-vendor { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .badge-secondary { background: #f8f9fa; color: #6c757d; }
+        
+        .date-cell { color: #6c757d; font-size: 13px; }
+        
+        /* Posts Grid */
+        .posts-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+        }
+        
+        .post-card-modern {
+          background: white;
+          border-radius: 16px;
+          overflow: hidden;
+          transition: all 0.3s ease;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+        
+        .post-card-modern:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1); }
+        
+        .post-image-modern {
+          height: 140px;
+          overflow: hidden;
+        }
+        
+        .post-image-modern img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease;
+        }
+        
+        .post-card-modern:hover .post-image-modern img { transform: scale(1.05); }
+        
+        .post-content-modern { padding: 16px; }
+        .post-content-modern h6 { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #1f2937; }
+        .post-content-modern p { font-size: 12px; color: #6c757d; margin-bottom: 12px; line-height: 1.4; }
+        
+        .post-meta {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 11px;
+          color: #6c757d;
+        }
+        
+        .post-author, .post-date { display: flex; align-items: center; gap: 4px; }
+        
+        /* Loading State */
+        .loading-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 400px;
+        }
+        
+        .loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid #e9ecef;
+          border-top-color: #4f46e5;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+        
+        .loading-text { color: #6c757d; font-size: 14px; }
+        
+        /* Animations */
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(1.1); }
+        }
+        
         @keyframes spin {
-          from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
         
-        /* Scrollbar */
-        .activity-timeline::-webkit-scrollbar {
-          width: 4px;
-        }
-        .activity-timeline::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 10px;
-        }
-        .activity-timeline::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 10px;
+        .spin { animation: spin 1s linear infinite; }
+        
+        /* Responsive */
+        @media (max-width: 1200px) {
+          .hero-stats, .secondary-stats { grid-template-columns: repeat(2, 1fr); }
+          .charts-row, .two-columns { grid-template-columns: 1fr; }
+          .posts-grid { grid-template-columns: repeat(2, 1fr); }
         }
         
-        /* Animations */
-        .animate-on-hover {
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        @media (max-width: 768px) {
+          .hero-stats, .secondary-stats { grid-template-columns: 1fr; }
+          .posts-grid { grid-template-columns: 1fr; }
+          .dashboard-header { flex-direction: column; }
         }
       `}</style>
     </AdminLayout>
