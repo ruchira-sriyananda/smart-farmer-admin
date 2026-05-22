@@ -12,7 +12,6 @@ export default function Profile() {
   const [message, setMessage] = useState({ type: '', text: '' })
   const [session, setSession] = useState(null)
   const [userRole, setUserRole] = useState('')
-  const [debugInfo, setDebugInfo] = useState(null)
   
   const [formData, setFormData] = useState({
     full_name: '',
@@ -41,7 +40,6 @@ export default function Profile() {
       setUserRole(parsedSession.role || 'SUPER_ADMIN')
       await fetchProfile(parsedSession)
     }
-    
     init()
   }, [router])
 
@@ -55,8 +53,6 @@ export default function Profile() {
         return
       }
 
-      console.log('Fetching profile for admin_id:', adminId)
-
       // First, check if record exists
       const { data: existingData, error: checkError } = await supabase
         .from('admin_users')
@@ -69,7 +65,6 @@ export default function Profile() {
       }
 
       if (!existingData) {
-        console.log('No profile found, creating one...')
         // Create profile if it doesn't exist
         const { data: newProfile, error: insertError } = await supabase
           .from('admin_users')
@@ -89,7 +84,6 @@ export default function Profile() {
 
         if (insertError) {
           console.error('Error creating profile:', insertError)
-          setDebugInfo({ error: insertError })
         } else if (newProfile) {
           setProfile(newProfile)
           setFormData({
@@ -108,7 +102,6 @@ export default function Profile() {
           })
         }
       } else {
-        console.log('Profile found:', existingData)
         setProfile(existingData)
         setFormData({
           full_name: existingData.full_name || '',
@@ -127,7 +120,6 @@ export default function Profile() {
       }
     } catch (err) {
       console.error('Error in fetchProfile:', err)
-      setDebugInfo({ error: err.message })
     } finally {
       setLoading(false)
     }
@@ -143,10 +135,31 @@ export default function Profile() {
     }
   }
 
+  // Safe logging function with error handling
   const logActivity = async (description) => {
     const adminId = session?.admin?.admin_id
-    if (adminId) {
-      await supabase
+    
+    // Don't try to log if no admin_id
+    if (!adminId) {
+      console.warn('Cannot log activity: No admin_id')
+      return
+    }
+
+    try {
+      // First verify that admin exists in admin_users
+      const { data: adminExists } = await supabase
+        .from('admin_users')
+        .select('admin_id')
+        .eq('admin_id', adminId)
+        .maybeSingle()
+
+      if (!adminExists) {
+        console.warn('Admin not found in admin_users, skipping log')
+        return
+      }
+
+      // Now safely insert the log
+      const { error } = await supabase
         .from('admin_activity_logs')
         .insert({
           admin_id: adminId,
@@ -155,6 +168,12 @@ export default function Profile() {
           ip_address: await getClientIP(),
           created_at: new Date().toISOString()
         })
+
+      if (error) {
+        console.warn('Activity logging failed:', error.message)
+      }
+    } catch (err) {
+      console.warn('Failed to log activity:', err.message)
     }
   }
 
@@ -169,10 +188,7 @@ export default function Profile() {
         throw new Error('Admin ID not found. Please logout and login again.')
       }
 
-      console.log('Updating profile for admin_id:', adminId)
-      console.log('Update data:', formData)
-
-      // Prepare update data - only include columns that exist
+      // Prepare update data
       const updateData = {
         full_name: formData.full_name,
         phone_number: formData.phone_number || null,
@@ -191,21 +207,18 @@ export default function Profile() {
       })
 
       // Update profile in database
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('admin_users')
         .update(updateData)
         .eq('admin_id', adminId)
-        .select()
 
       if (error) {
         console.error('Supabase update error:', error)
         throw new Error(`Database error: ${error.message}`)
       }
 
-      console.log('Update response:', data)
-
-      // Log the activity
-      await logActivity(`Profile updated by ${formData.full_name}`)
+      // Log activity (don't await - non-blocking)
+      logActivity(`Profile updated by ${formData.full_name}`)
 
       // Update local state
       setProfile(prev => ({ ...prev, ...updateData }))
@@ -217,13 +230,9 @@ export default function Profile() {
         localStorage.setItem('adminSession', JSON.stringify(updatedSession))
       }
 
-      setMessage({ type: 'success', text: 'Profile updated successfully in database!' })
+      setMessage({ type: 'success', text: 'Profile updated successfully!' })
       setEditing(false)
       
-      // Refresh profile data
-      await fetchProfile(session)
-      
-      // Auto-hide message after 3 seconds
       setTimeout(() => setMessage({ type: '', text: '' }), 3000)
       
     } catch (err) {
@@ -302,7 +311,6 @@ export default function Profile() {
 
       setFormData(prev => ({ ...prev, profile_image: publicUrl }))
       setMessage({ type: 'success', text: 'Profile image updated!' })
-      await logActivity('Profile image updated')
       
     } catch (err) {
       console.error('Image upload error:', err)
@@ -324,13 +332,6 @@ export default function Profile() {
 
   return (
     <AdminLayout title="My Profile">
-      {/* Debug Info (remove in production) */}
-      {debugInfo && process.env.NODE_ENV !== 'production' && (
-        <div className="alert alert-warning small mb-3">
-          <strong>Debug:</strong> {JSON.stringify(debugInfo)}
-        </div>
-      )}
-
       {message.text && (
         <div className={`alert alert-${message.type} alert-dismissible fade show mb-4 shadow-sm`} role="alert">
           <i className={`bi bi-${message.type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2`}></i>
@@ -385,10 +386,6 @@ export default function Profile() {
                   <i className="bi bi-clock-history me-2"></i>
                   Last Updated: {profile?.updated_at ? new Date(profile.updated_at).toLocaleString() : 'Never'}
                 </div>
-                <div>
-                  <i className="bi bi-database me-2"></i>
-                  Supabase Sync: Active
-                </div>
               </div>
             </div>
           </div>
@@ -404,7 +401,7 @@ export default function Profile() {
                     <i className="bi bi-person-badge me-2 text-primary"></i>
                     Profile Information
                   </h5>
-                  <small className="text-muted">Data syncs directly with Supabase database</small>
+                  <small className="text-muted">Your personal information</small>
                 </div>
                 {!editing ? (
                   <button className="btn btn-primary btn-sm rounded-pill px-4" onClick={() => setEditing(true)}>
@@ -433,10 +430,7 @@ export default function Profile() {
 
                 <div className="col-md-6">
                   <label className="form-label fw-semibold"><i className="bi bi-envelope me-1"></i>Email Address</label>
-                  <div className="border rounded p-2 bg-light text-muted">
-                    {profile?.email || formData.email}
-                    <small className="d-block text-muted">Cannot be changed</small>
-                  </div>
+                  <div className="border rounded p-2 bg-light text-muted">{profile?.email}<small className="d-block">Cannot be changed</small></div>
                 </div>
 
                 <div className="col-md-6">
