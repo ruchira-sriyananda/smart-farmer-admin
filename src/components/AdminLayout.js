@@ -84,7 +84,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     <div className="d-flex">
       <AdminSidebar />
       
-      <div style={{ marginLeft: '880px', width: '100%' }}>
+      <div style={{ marginLeft: '280px', width: '100%' }}>
         {/* Top Navbar with Working Profile Dropdown */}
         <nav className="navbar navbar-light bg-white shadow-sm px-4 py-2 sticky-top">
           <div>
@@ -120,7 +120,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
               {/* Dropdown Menu */}
               {showDropdown && (
-                <div className="position-absolute end-0 mt-2" style={{ width: '280px', zIndex: 1050 }}>
+                <div className="position-absolute end-0 mt-2" style={{ width: '300px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
                     {/* Profile Header */}
                     <div className="bg-primary text-white px-4 py-3 text-center">
