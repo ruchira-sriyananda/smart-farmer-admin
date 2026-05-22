@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
@@ -36,9 +36,6 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
-  const [notifications, setNotifications] = useState([])
-  const [showNotifications, setShowNotifications] = useState(false)
-  const notificationRef = useRef(null)
   
   const [dashboardData, setDashboardData] = useState({
     stats: {
@@ -61,17 +58,6 @@ export default function AdminDashboard() {
       reportTrends: []
     }
   })
-
-  // Close notification dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (notificationRef.current && !notificationRef.current.contains(event.target)) {
-        setShowNotifications(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   // Initialize real-time subscriptions
   useEffect(() => {
@@ -115,13 +101,7 @@ export default function AdminDashboard() {
       { table: 'admin_users', event: '*', callback: () => fetchStats() },
       { table: 'system_reports', event: '*', callback: () => { fetchPendingReports(); fetchStats(); } },
       { table: 'security_alerts', event: '*', callback: () => fetchSecurityAlerts() },
-      { table: 'admin_activity_logs', event: 'INSERT', callback: (payload) => {
-        setDashboardData(prev => ({
-          ...prev,
-          activities: [payload.new, ...prev.activities.slice(0, 9)]
-        }))
-        addNotification('New Activity', payload.new.activity_description, 'info')
-      }},
+      { table: 'admin_activity_logs', event: 'INSERT', callback: () => fetchRecentActivities() },
       { table: 'content_moderation', event: '*', callback: () => { fetchStats(); fetchChartData(); } },
       { table: 'system_analytics', event: '*', callback: () => fetchChartData() }
     ]
@@ -132,22 +112,6 @@ export default function AdminDashboard() {
         .on('postgres_changes', { event, schema: 'public', table }, callback)
         .subscribe()
     })
-  }
-
-  const addNotification = (title, message, type = 'info') => {
-    const newNotification = {
-      id: Date.now(),
-      title,
-      message,
-      type,
-      time: 'Just now',
-      read: false
-    }
-    setNotifications(prev => [newNotification, ...prev.slice(0, 9)])
-    
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== newNotification.id))
-    }, 5000)
   }
 
   const fetchAllData = async () => {
@@ -162,15 +126,9 @@ export default function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      // Get current date ranges for comparison
-      const now = new Date()
       const lastMonth = new Date()
       lastMonth.setMonth(lastMonth.getMonth() - 1)
-      
-      const lastWeek = new Date()
-      lastWeek.setDate(lastWeek.getDate() - 7)
 
-      // Fetch all real counts from database
       const [
         totalUsers,
         activeUsers,
@@ -193,12 +151,10 @@ export default function AdminDashboard() {
         supabase.from('admin_users').select('*', { count: 'exact', head: true }).lt('created_at', lastMonth.toISOString())
       ])
 
-      // Calculate percentage changes
       const userChange = previousTotalUsers.count > 0 
         ? Math.round(((totalUsers.count - previousTotalUsers.count) / previousTotalUsers.count) * 100)
         : 0
 
-      // Get real message count
       const messageCount = totalMessages.data?.total_messages || 0
       const adCount = totalAds.data?.total_ads || 0
       const barterCount = totalBarter.data?.total_barter_transactions || 0
@@ -285,7 +241,6 @@ export default function AdminDashboard() {
 
   const fetchChartData = async () => {
     try {
-      // Fetch last 30 days of user registrations
       const thirtyDaysAgo = new Date()
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
       
@@ -295,7 +250,6 @@ export default function AdminDashboard() {
         .gte('created_at', thirtyDaysAgo.toISOString())
         .order('created_at', { ascending: true })
 
-      // Process user growth data by week
       const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4']
       const userCountByWeek = [0, 0, 0, 0]
       
@@ -307,7 +261,6 @@ export default function AdminDashboard() {
         }
       })
 
-      // Fetch weekly activity for last 7 days
       const sevenDaysAgo = new Date()
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
       
@@ -325,7 +278,6 @@ export default function AdminDashboard() {
         activityByDay[day] = (activityByDay[day] || 0) + 1
       })
 
-      // Fetch activity distribution by type
       const { data: activityTypes } = await supabase
         .from('admin_activity_logs')
         .select('activity_type')
@@ -337,7 +289,6 @@ export default function AdminDashboard() {
         distributionMap[type] = (distributionMap[type] || 0) + 1
       })
 
-      // Fetch report trends
       const { data: reportTrends } = await supabase
         .from('system_reports')
         .select('created_at, report_status')
@@ -377,7 +328,6 @@ export default function AdminDashboard() {
     if (!error) {
       await fetchPendingReports()
       await fetchStats()
-      addNotification('Report Resolved', 'A pending report has been resolved', 'success')
     }
   }
 
@@ -394,7 +344,6 @@ export default function AdminDashboard() {
 
     if (!error) {
       await fetchSecurityAlerts()
-      addNotification('Alert Dismissed', 'A security alert has been dismissed', 'warning')
     }
   }
 
@@ -407,7 +356,6 @@ export default function AdminDashboard() {
     return badges[severity] || <span className="badge bg-secondary">{severity}</span>
   }
 
-  // Chart configurations with real data
   const userGrowthChart = {
     labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
     datasets: [
@@ -488,21 +436,6 @@ export default function AdminDashboard() {
 
   return (
     <AdminLayout title="Analytics Dashboard">
-      {/* Floating Notifications Panel */}
-      <div className="position-fixed bottom-0 end-0 p-3" style={{ zIndex: 1050, maxWidth: '380px' }} ref={notificationRef}>
-        {notifications.map(notif => (
-          <div key={notif.id} className="toast show mb-2 shadow-lg border-0 animate-slide-in" role="alert">
-            <div className={`toast-header bg-${notif.type === 'success' ? 'success' : notif.type === 'warning' ? 'warning' : 'primary'} text-white`}>
-              <i className={`bi bi-${notif.type === 'success' ? 'check-circle' : notif.type === 'warning' ? 'exclamation-triangle' : 'info-circle'} me-2`}></i>
-              <strong className="me-auto">{notif.title}</strong>
-              <small>{notif.time}</small>
-              <button type="button" className="btn-close btn-close-white" onClick={() => setNotifications(prev => prev.filter(n => n.id !== notif.id))}></button>
-            </div>
-            <div className="toast-body">{notif.message}</div>
-          </div>
-        ))}
-      </div>
-
       {/* Header with Refresh Control */}
       <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
@@ -516,28 +449,14 @@ export default function AdminDashboard() {
             Last updated: {lastUpdate.toLocaleTimeString()}
           </p>
         </div>
-        <div className="d-flex gap-2">
-          <button 
-            className="btn btn-outline-secondary btn-sm rounded-pill px-3"
-            onClick={refreshData}
-            disabled={refreshing}
-          >
-            <i className={`bi bi-arrow-repeat ${refreshing ? 'spin' : ''} me-1`}></i>
-            {refreshing ? 'Updating...' : 'Refresh'}
-          </button>
-          <button 
-            className="btn btn-outline-primary btn-sm rounded-pill px-3 position-relative"
-            onClick={() => setShowNotifications(!showNotifications)}
-          >
-            <i className="bi bi-bell me-1"></i>
-            Notifications
-            {notifications.filter(n => !n.read).length > 0 && (
-              <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
-                {notifications.filter(n => !n.read).length}
-              </span>
-            )}
-          </button>
-        </div>
+        <button 
+          className="btn btn-outline-secondary btn-sm rounded-pill px-3"
+          onClick={refreshData}
+          disabled={refreshing}
+        >
+          <i className={`bi bi-arrow-repeat ${refreshing ? 'spin' : ''} me-1`}></i>
+          {refreshing ? 'Updating...' : 'Refresh Data'}
+        </button>
       </div>
 
       {/* Stats Cards Grid - Row 1 */}
@@ -1031,21 +950,6 @@ export default function AdminDashboard() {
           display: flex;
           align-items: center;
           justify-content: center;
-        }
-        
-        .animate-slide-in {
-          animation: slideInRight 0.3s ease-out;
-        }
-        
-        @keyframes slideInRight {
-          from {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
         }
         
         .spin {
