@@ -15,8 +15,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 })
 
-// Safe logging function that handles RLS errors gracefully
+// Safe logging function that handles missing admin_id gracefully
 export const safeLogActivity = async (adminId, activityType, description, ipAddress) => {
+  // If no adminId, don't try to log (or log with null)
+  if (!adminId) {
+    console.warn('Cannot log activity: No admin_id provided')
+    return
+  }
+
   try {
     const { error } = await supabase
       .from('admin_activity_logs')
@@ -24,39 +30,28 @@ export const safeLogActivity = async (adminId, activityType, description, ipAddr
         admin_id: adminId,
         activity_type: activityType,
         activity_description: description,
-        ip_address: ipAddress,
+        ip_address: ipAddress || 'unknown',
         created_at: new Date().toISOString()
       })
     
     if (error) {
-      console.warn('Activity logging failed (RLS may be blocking):', error.message)
-      // Don't throw - logging failure shouldn't break the main flow
+      console.warn('Activity logging failed:', error.message)
     }
   } catch (err) {
     console.warn('Failed to log activity:', err.message)
   }
 }
 
-// For development - bypass RLS (use only in development)
-export const devLogActivity = async (adminId, activityType, description, ipAddress) => {
-  if (process.env.NODE_ENV !== 'production') {
-    try {
-      // Use service role key for development (bypass RLS)
-      const serviceClient = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-        auth: { autoRefreshToken: false, persistSession: false }
-      })
-      
-      await serviceClient
-        .from('admin_activity_logs')
-        .insert({
-          admin_id: adminId,
-          activity_type: activityType,
-          activity_description: description,
-          ip_address: ipAddress,
-          created_at: new Date().toISOString()
-        })
-    } catch (err) {
-      console.warn('Dev logging failed:', err.message)
+// Server-side logging function using service role
+export const createAdminClient = () => {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
     }
-  }
+  )
 }
