@@ -45,7 +45,6 @@ export default function Profile() {
 
   const fetchProfile = async (sessionData) => {
     try {
-      // Get admin by email instead of ID to avoid mismatch
       const adminEmail = sessionData.admin?.email || sessionData.user?.email
       
       if (!adminEmail) {
@@ -109,7 +108,6 @@ export default function Profile() {
     setMessage({ type: '', text: '' })
 
     try {
-      // Use email to update (bypasses admin_id issues)
       const adminEmail = session?.admin?.email || profile?.email
       
       if (!adminEmail) {
@@ -137,7 +135,7 @@ export default function Profile() {
       console.log('Updating email:', adminEmail)
       console.log('Update data:', updateData)
 
-      // Update profile by email (no admin_id needed)
+      // Update profile by email - NO LOGGING HERE
       const { error } = await supabase
         .from('admin_users')
         .update(updateData)
