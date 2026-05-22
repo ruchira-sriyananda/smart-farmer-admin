@@ -19,12 +19,7 @@ export default function Profile() {
     profile_image: '',
     bio: '',
     location: '',
-    timezone: 'Asia/Colombo',
-    notification_preferences: {
-      email_notifications: true,
-      security_alerts: true,
-      activity_summary: true
-    }
+    timezone: 'Asia/Colombo'
   })
 
   useEffect(() => {
@@ -72,12 +67,7 @@ export default function Profile() {
               profile_image: payload.new.profile_image || '',
               bio: payload.new.bio || '',
               location: payload.new.location || '',
-              timezone: payload.new.timezone || 'Asia/Colombo',
-              notification_preferences: payload.new.notification_preferences || {
-                email_notifications: true,
-                security_alerts: true,
-                activity_summary: true
-              }
+              timezone: payload.new.timezone || 'Asia/Colombo'
             })
             
             // Update session storage
@@ -102,6 +92,7 @@ export default function Profile() {
       const adminId = sessionData.admin?.admin_id
       
       if (adminId) {
+        // Get data from admin_users table
         const { data, error } = await supabase
           .from('admin_users')
           .select('*')
@@ -117,12 +108,7 @@ export default function Profile() {
             profile_image: data.profile_image || '',
             bio: data.bio || '',
             location: data.location || '',
-            timezone: data.timezone || 'Asia/Colombo',
-            notification_preferences: data.notification_preferences || {
-              email_notifications: true,
-              security_alerts: true,
-              activity_summary: true
-            }
+            timezone: data.timezone || 'Asia/Colombo'
           })
         } else {
           // Fallback to session data
@@ -134,12 +120,7 @@ export default function Profile() {
             profile_image: '',
             bio: '',
             location: '',
-            timezone: 'Asia/Colombo',
-            notification_preferences: {
-              email_notifications: true,
-              security_alerts: true,
-              activity_summary: true
-            }
+            timezone: 'Asia/Colombo'
           })
         }
       }
@@ -181,44 +162,72 @@ export default function Profile() {
 
     try {
       const adminId = session?.admin?.admin_id
+      const authUserId = session?.user?.id
       
       if (!adminId) {
         throw new Error('Admin ID not found')
       }
 
-      // Prepare update data
+      // Step 1: Update admin_users table
       const updateData = {
         full_name: formData.full_name,
         phone_number: formData.phone_number,
         bio: formData.bio,
         location: formData.location,
         timezone: formData.timezone,
-        notification_preferences: formData.notification_preferences,
         updated_at: new Date().toISOString()
       }
 
-      // Update profile in database
-      const { error } = await supabase
+      const { error: adminError } = await supabase
         .from('admin_users')
         .update(updateData)
         .eq('admin_id', adminId)
 
-      if (error) throw error
+      if (adminError) throw adminError
 
-      // Log the activity
+      // Step 2: Update Supabase Auth user metadata (this is the key fix!)
+      if (authUserId) {
+        const { error: authError } = await supabase.auth.updateUser({
+          data: {
+            full_name: formData.full_name,
+            display_name: formData.full_name,
+            updated_at: new Date().toISOString()
+          }
+        })
+
+        if (authError) {
+          console.error('Auth update error:', authError)
+          // Don't throw here - admin_users was already updated
+          setMessage({ type: 'warning', text: 'Profile saved but display name may need re-login to update everywhere.' })
+        } else {
+          setMessage({ type: 'success', text: 'Profile updated successfully! Name synchronized across system.' })
+        }
+      } else {
+        setMessage({ type: 'success', text: 'Profile updated successfully!' })
+      }
+
+      // Step 3: Log the activity
       await logActivity(`Profile updated by ${formData.full_name}`)
 
-      // Update local state
+      // Step 4: Update local state
       setProfile(prev => ({ ...prev, ...updateData }))
       
-      // Update session storage
+      // Step 5: Update session storage with new data
       const updatedSession = JSON.parse(localStorage.getItem('adminSession'))
       if (updatedSession) {
         updatedSession.admin = { ...updatedSession.admin, ...updateData }
+        updatedSession.user = { 
+          ...updatedSession.user, 
+          user_metadata: { 
+            ...updatedSession.user?.user_metadata, 
+            full_name: formData.full_name,
+            display_name: formData.full_name
+          }
+        }
         localStorage.setItem('adminSession', JSON.stringify(updatedSession))
+        setSession(updatedSession)
       }
 
-      setMessage({ type: 'success', text: 'Profile updated successfully!' })
       setEditing(false)
       
       // Auto-hide message after 3 seconds
@@ -240,12 +249,7 @@ export default function Profile() {
       profile_image: profile?.profile_image || '',
       bio: profile?.bio || '',
       location: profile?.location || '',
-      timezone: profile?.timezone || 'Asia/Colombo',
-      notification_preferences: profile?.notification_preferences || {
-        email_notifications: true,
-        security_alerts: true,
-        activity_summary: true
-      }
+      timezone: profile?.timezone || 'Asia/Colombo'
     })
     setEditing(false)
     setMessage({ type: '', text: '' })
@@ -255,13 +259,11 @@ export default function Profile() {
     const file = e.target.files[0]
     if (!file) return
 
-    // Check file size (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
       setMessage({ type: 'danger', text: 'Image size must be less than 2MB' })
       return
     }
 
-    // Check file type
     if (!file.type.startsWith('image/')) {
       setMessage({ type: 'danger', text: 'Please upload an image file' })
       return
@@ -275,19 +277,16 @@ export default function Profile() {
       const fileName = `${adminId}-${Date.now()}.${fileExt}`
       const filePath = `profile-images/${fileName}`
 
-      // Upload image to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('admin-profiles')
         .upload(filePath, file)
 
       if (uploadError) throw uploadError
 
-      // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('admin-profiles')
         .getPublicUrl(filePath)
 
-      // Update profile with image URL
       const { error: updateError } = await supabase
         .from('admin_users')
         .update({ profile_image: publicUrl })
@@ -297,8 +296,6 @@ export default function Profile() {
 
       setFormData(prev => ({ ...prev, profile_image: publicUrl }))
       setMessage({ type: 'success', text: 'Profile image updated!' })
-      
-      // Log activity
       await logActivity('Profile image updated')
       
     } catch (err) {
@@ -323,7 +320,7 @@ export default function Profile() {
       {/* Success/Error Message */}
       {message.text && (
         <div className={`alert alert-${message.type} alert-dismissible fade show mb-4 shadow-sm`} role="alert">
-          <i className={`bi bi-${message.type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2`}></i>
+          <i className={`bi bi-${message.type === 'success' ? 'check-circle' : message.type === 'warning' ? 'exclamation-triangle' : 'exclamation-triangle'} me-2`}></i>
           {message.text}
           <button type="button" className="btn-close" onClick={() => setMessage({ type: '', text: '' })}></button>
         </div>
@@ -438,21 +435,22 @@ export default function Profile() {
             <div className="card-body">
               <div className="row g-4">
                 {/* Full Name */}
-                <div className="col-md-6">
+                <div className="col-md-12">
                   <label className="form-label fw-semibold">
                     <i className="bi bi-person me-1"></i>Full Name
                   </label>
                   {editing ? (
                     <input
                       type="text"
-                      className="form-control"
+                      className="form-control form-control-lg"
                       value={formData.full_name}
                       onChange={(e) => setFormData({...formData, full_name: e.target.value})}
                       placeholder="Enter your full name"
                     />
                   ) : (
-                    <div className="border rounded p-2 bg-light">{profile?.full_name || 'Not set'}</div>
+                    <div className="border rounded p-3 bg-light">{profile?.full_name || 'Not set'}</div>
                   )}
+                  <small className="text-muted">This name will appear across the entire system</small>
                 </div>
 
                 {/* Email Address */}
@@ -502,26 +500,6 @@ export default function Profile() {
                   )}
                 </div>
 
-                {/* Bio */}
-                <div className="col-12">
-                  <label className="form-label fw-semibold">
-                    <i className="bi bi-file-text me-1"></i>Bio
-                  </label>
-                  {editing ? (
-                    <textarea
-                      className="form-control"
-                      rows="3"
-                      value={formData.bio || ''}
-                      onChange={(e) => setFormData({...formData, bio: e.target.value})}
-                      placeholder="Tell us about yourself..."
-                    />
-                  ) : (
-                    <div className="border rounded p-2 bg-light" style={{ minHeight: '80px' }}>
-                      {profile?.bio || 'No bio provided'}
-                    </div>
-                  )}
-                </div>
-
                 {/* Timezone */}
                 <div className="col-md-6">
                   <label className="form-label fw-semibold">
@@ -543,84 +521,34 @@ export default function Profile() {
                     <div className="border rounded p-2 bg-light">{profile?.timezone || 'Asia/Colombo'}</div>
                   )}
                 </div>
+
+                {/* Bio */}
+                <div className="col-12">
+                  <label className="form-label fw-semibold">
+                    <i className="bi bi-file-text me-1"></i>Bio
+                  </label>
+                  {editing ? (
+                    <textarea
+                      className="form-control"
+                      rows="3"
+                      value={formData.bio || ''}
+                      onChange={(e) => setFormData({...formData, bio: e.target.value})}
+                      placeholder="Tell us about yourself..."
+                    />
+                  ) : (
+                    <div className="border rounded p-2 bg-light" style={{ minHeight: '80px' }}>
+                      {profile?.bio || 'No bio provided'}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Notification Preferences */}
-          <div className="card border-0 shadow-sm rounded-4 mt-4">
-            <div className="card-header bg-white border-0 pt-4 pb-3">
-              <h5 className="mb-0 fw-bold">
-                <i className="bi bi-bell me-2 text-primary"></i>
-                Notification Preferences
-              </h5>
-            </div>
-            <div className="card-body">
-              <div className="vstack gap-3">
-                <div className="form-check form-switch">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="emailNotifications"
-                    checked={formData.notification_preferences?.email_notifications}
-                    onChange={(e) => setFormData({
-                      ...formData, 
-                      notification_preferences: {
-                        ...formData.notification_preferences,
-                        email_notifications: e.target.checked
-                      }
-                    })}
-                    disabled={!editing}
-                  />
-                  <label className="form-check-label fw-semibold" htmlFor="emailNotifications">
-                    Email Notifications
-                  </label>
-                  <div className="text-muted small">Receive system notifications via email</div>
-                </div>
-
-                <div className="form-check form-switch">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="securityAlerts"
-                    checked={formData.notification_preferences?.security_alerts}
-                    onChange={(e) => setFormData({
-                      ...formData, 
-                      notification_preferences: {
-                        ...formData.notification_preferences,
-                        security_alerts: e.target.checked
-                      }
-                    })}
-                    disabled={!editing}
-                  />
-                  <label className="form-check-label fw-semibold" htmlFor="securityAlerts">
-                    Security Alerts
-                  </label>
-                  <div className="text-muted small">Get notified about security events and suspicious activities</div>
-                </div>
-
-                <div className="form-check form-switch">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="activitySummary"
-                    checked={formData.notification_preferences?.activity_summary}
-                    onChange={(e) => setFormData({
-                      ...formData, 
-                      notification_preferences: {
-                        ...formData.notification_preferences,
-                        activity_summary: e.target.checked
-                      }
-                    })}
-                    disabled={!editing}
-                  />
-                  <label className="form-check-label fw-semibold" htmlFor="activitySummary">
-                    Activity Summary
-                  </label>
-                  <div className="text-muted small">Receive weekly summary of platform activities</div>
-                </div>
-              </div>
-            </div>
+          {/* Info Alert */}
+          <div className="alert alert-info mt-4">
+            <i className="bi bi-info-circle me-2"></i>
+            <strong>Note:</strong> After updating your name, you may need to refresh the page to see the changes everywhere in the system. The name is synchronized across both the database and your authentication profile.
           </div>
         </div>
       </div>
