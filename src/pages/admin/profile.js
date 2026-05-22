@@ -43,75 +43,89 @@ export default function Profile() {
     init()
   }, [router])
 
+  // Function to ensure admin exists in database
+  const ensureAdminInDatabase = async (sessionData) => {
+    const adminId = sessionData.admin?.admin_id || sessionData.user?.id
+    
+    if (!adminId) return null
+
+    // Check if admin exists
+    const { data: existingAdmin, error } = await supabase
+      .from('admin_users')
+      .select('*')
+      .eq('admin_id', adminId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error checking admin:', error)
+      return null
+    }
+
+    if (existingAdmin) {
+      return existingAdmin
+    }
+
+    // Create admin if doesn't exist
+    const { data: newAdmin, error: insertError } = await supabase
+      .from('admin_users')
+      .insert({
+        admin_id: adminId,
+        full_name: sessionData.admin?.full_name || sessionData.user?.email?.split('@')[0] || 'Admin',
+        email: sessionData.admin?.email || sessionData.user?.email,
+        password_hash: 'managed_by_auth',
+        is_active: true,
+        is_super_admin: true,
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single()
+
+    if (insertError) {
+      console.error('Error creating admin:', insertError)
+      return null
+    }
+
+    return newAdmin
+  }
+
   const fetchProfile = async (sessionData) => {
     try {
-      const adminId = sessionData.admin?.admin_id
+      // First ensure admin exists in database
+      const dbAdmin = await ensureAdminInDatabase(sessionData)
       
-      if (!adminId) {
-        console.error('No admin_id found in session')
-        setLoading(false)
-        return
-      }
-
-      // First, check if record exists
-      const { data: existingData, error: checkError } = await supabase
-        .from('admin_users')
-        .select('*')
-        .eq('admin_id', adminId)
-        .maybeSingle()
-
-      if (checkError) {
-        console.error('Error checking profile:', checkError)
-      }
-
-      if (!existingData) {
-        // Create profile if it doesn't exist
-        const { data: newProfile, error: insertError } = await supabase
-          .from('admin_users')
-          .insert({
-            admin_id: adminId,
-            full_name: sessionData.admin?.full_name || 'Admin User',
-            email: sessionData.admin?.email || sessionData.user?.email,
-            password_hash: 'managed_by_auth',
-            role_id: sessionData.admin?.role_id || null,
-            is_active: true,
-            is_super_admin: sessionData.admin?.is_super_admin || false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .select()
-          .single()
-
-        if (insertError) {
-          console.error('Error creating profile:', insertError)
-        } else if (newProfile) {
-          setProfile(newProfile)
-          setFormData({
-            full_name: newProfile.full_name || '',
-            email: newProfile.email || '',
-            phone_number: newProfile.phone_number || '',
-            profile_image: newProfile.profile_image || '',
-            bio: newProfile.bio || '',
-            location: newProfile.location || '',
-            timezone: newProfile.timezone || 'Asia/Colombo',
-            notification_preferences: newProfile.notification_preferences || {
-              email_notifications: true,
-              security_alerts: true,
-              activity_summary: true
-            }
-          })
-        }
-      } else {
-        setProfile(existingData)
+      if (dbAdmin) {
+        setProfile(dbAdmin)
         setFormData({
-          full_name: existingData.full_name || '',
-          email: existingData.email || '',
-          phone_number: existingData.phone_number || '',
-          profile_image: existingData.profile_image || '',
-          bio: existingData.bio || '',
-          location: existingData.location || '',
-          timezone: existingData.timezone || 'Asia/Colombo',
-          notification_preferences: existingData.notification_preferences || {
+          full_name: dbAdmin.full_name || '',
+          email: dbAdmin.email || '',
+          phone_number: dbAdmin.phone_number || '',
+          profile_image: dbAdmin.profile_image || '',
+          bio: dbAdmin.bio || '',
+          location: dbAdmin.location || '',
+          timezone: dbAdmin.timezone || 'Asia/Colombo',
+          notification_preferences: dbAdmin.notification_preferences || {
+            email_notifications: true,
+            security_alerts: true,
+            activity_summary: true
+          }
+        })
+        
+        // Update session with correct admin_id
+        const updatedSession = { ...sessionData, admin: { ...sessionData.admin, admin_id: dbAdmin.admin_id } }
+        localStorage.setItem('adminSession', JSON.stringify(updatedSession))
+        setSession(updatedSession)
+      } else {
+        // Fallback to session data
+        setProfile(sessionData.admin)
+        setFormData({
+          full_name: sessionData.admin?.full_name || '',
+          email: sessionData.admin?.email || '',
+          phone_number: '',
+          profile_image: '',
+          bio: '',
+          location: '',
+          timezone: 'Asia/Colombo',
+          notification_preferences: {
             email_notifications: true,
             security_alerts: true,
             activity_summary: true
@@ -120,6 +134,7 @@ export default function Profile() {
       }
     } catch (err) {
       console.error('Error in fetchProfile:', err)
+      setMessage({ type: 'danger', text: 'Error loading profile: ' + err.message })
     } finally {
       setLoading(false)
     }
@@ -135,18 +150,17 @@ export default function Profile() {
     }
   }
 
-  // Safe logging function with error handling
+  // Safe logging function that won't break updates
   const logActivity = async (description) => {
-    const adminId = session?.admin?.admin_id
+    const adminId = session?.admin?.admin_id || profile?.admin_id
     
-    // Don't try to log if no admin_id
     if (!adminId) {
       console.warn('Cannot log activity: No admin_id')
       return
     }
 
     try {
-      // First verify that admin exists in admin_users
+      // First verify admin exists
       const { data: adminExists } = await supabase
         .from('admin_users')
         .select('admin_id')
@@ -154,11 +168,11 @@ export default function Profile() {
         .maybeSingle()
 
       if (!adminExists) {
-        console.warn('Admin not found in admin_users, skipping log')
+        console.warn('Admin not found, skipping log')
         return
       }
 
-      // Now safely insert the log
+      // Insert log
       const { error } = await supabase
         .from('admin_activity_logs')
         .insert({
@@ -182,7 +196,7 @@ export default function Profile() {
     setMessage({ type: '', text: '' })
 
     try {
-      const adminId = session?.admin?.admin_id
+      const adminId = session?.admin?.admin_id || profile?.admin_id
       
       if (!adminId) {
         throw new Error('Admin ID not found. Please logout and login again.')
@@ -206,19 +220,25 @@ export default function Profile() {
         }
       })
 
+      console.log('Updating admin_id:', adminId)
+      console.log('Update data:', updateData)
+
       // Update profile in database
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('admin_users')
         .update(updateData)
         .eq('admin_id', adminId)
+        .select()
 
       if (error) {
         console.error('Supabase update error:', error)
         throw new Error(`Database error: ${error.message}`)
       }
 
+      console.log('Update response:', data)
+
       // Log activity (don't await - non-blocking)
-      logActivity(`Profile updated by ${formData.full_name}`)
+      await logActivity(`Profile updated by ${formData.full_name}`)
 
       // Update local state
       setProfile(prev => ({ ...prev, ...updateData }))
@@ -226,7 +246,7 @@ export default function Profile() {
       // Update session storage
       const updatedSession = JSON.parse(localStorage.getItem('adminSession'))
       if (updatedSession) {
-        updatedSession.admin = { ...updatedSession.admin, ...updateData }
+        updatedSession.admin = { ...updatedSession.admin, ...updateData, admin_id: adminId }
         localStorage.setItem('adminSession', JSON.stringify(updatedSession))
       }
 
@@ -279,7 +299,7 @@ export default function Profile() {
     setSaving(true)
 
     try {
-      const adminId = session?.admin?.admin_id
+      const adminId = session?.admin?.admin_id || profile?.admin_id
       const fileExt = file.name.split('.').pop()
       const fileName = `${adminId}-${Date.now()}.${fileExt}`
       const filePath = `profile-images/${fileName}`
