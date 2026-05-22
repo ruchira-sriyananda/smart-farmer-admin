@@ -16,35 +16,39 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   const [loadingNotifications, setLoadingNotifications] = useState(true)
   const [profileImage, setProfileImage] = useState(null)
   const [profileName, setProfileName] = useState('')
+  const [profileEmail, setProfileEmail] = useState('')
+  const [profileRole, setProfileRole] = useState('')
   const dropdownRef = useRef(null)
   const notificationRef = useRef(null)
 
   useEffect(() => {
-    const storedSession = localStorage.getItem('adminSession')
-    if (!storedSession) {
-      router.push('/admin/login')
-      return
+    const init = async () => {
+      const storedSession = localStorage.getItem('adminSession')
+      if (!storedSession) {
+        router.push('/admin/login')
+        return
+      }
+      
+      try {
+        const parsedSession = JSON.parse(storedSession)
+        setSession(parsedSession)
+        
+        // Fetch fresh profile data from database
+        await fetchFreshProfile(parsedSession)
+        
+        // Subscribe to real-time profile updates
+        subscribeToProfileUpdates(parsedSession)
+      } catch (err) {
+        console.error('Error parsing session:', err)
+        router.push('/admin/login')
+      }
     }
     
-    try {
-      const parsedSession = JSON.parse(storedSession)
-      setSession(parsedSession)
-      setProfileName(parsedSession.admin?.full_name || parsedSession.user?.email?.split('@')[0] || 'Admin')
-      setProfileImage(parsedSession.admin?.profile_image || null)
-      
-      // Subscribe to real-time profile updates
-      subscribeToProfileUpdates(parsedSession)
-    } catch (err) {
-      console.error('Error parsing session:', err)
-      router.push('/admin/login')
-    }
+    init()
 
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     
-    // Fetch real notifications from database
     fetchRealNotifications()
-    
-    // Subscribe to real-time notifications
     subscribeToRealTimeNotifications()
     
     return () => {
@@ -52,6 +56,49 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       supabase.removeAllChannels()
     }
   }, [router])
+
+  // Fetch fresh profile data from database
+  const fetchFreshProfile = async (sessionData) => {
+    try {
+      const adminEmail = sessionData.admin?.email || sessionData.user?.email
+      
+      if (!adminEmail) return
+
+      const { data: adminUser, error } = await supabase
+        .from('admin_users')
+        .select('full_name, email, profile_image, admin_roles!left(role_name)')
+        .eq('email', adminEmail)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Error fetching profile:', error)
+        return
+      }
+
+      if (adminUser) {
+        setProfileImage(adminUser.profile_image || null)
+        setProfileName(adminUser.full_name || sessionData.admin?.full_name || 'Admin')
+        setProfileEmail(adminUser.email || sessionData.admin?.email || 'admin@smartfarmer.com')
+        setProfileRole(sessionData.role || adminUser.admin_roles?.role_name || 'Administrator')
+        
+        // Update session with latest profile image
+        const updatedSession = { ...sessionData }
+        if (!updatedSession.admin) updatedSession.admin = {}
+        updatedSession.admin.profile_image = adminUser.profile_image
+        updatedSession.admin.full_name = adminUser.full_name
+        localStorage.setItem('adminSession', JSON.stringify(updatedSession))
+        setSession(updatedSession)
+      } else {
+        // Fallback to session data
+        setProfileImage(sessionData.admin?.profile_image || null)
+        setProfileName(sessionData.admin?.full_name || sessionData.user?.email?.split('@')[0] || 'Admin')
+        setProfileEmail(sessionData.admin?.email || sessionData.user?.email || 'admin@smartfarmer.com')
+        setProfileRole(sessionData.role || 'Administrator')
+      }
+    } catch (err) {
+      console.error('Error in fetchFreshProfile:', err)
+    }
+  }
 
   // Subscribe to profile changes in real-time
   const subscribeToProfileUpdates = (sessionData) => {
@@ -71,7 +118,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         },
         async (payload) => {
           // Update profile image and name in real-time
-          if (payload.new.profile_image) {
+          if (payload.new.profile_image !== undefined) {
             setProfileImage(payload.new.profile_image)
           }
           if (payload.new.full_name) {
@@ -81,7 +128,9 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           // Update session storage
           const currentSession = JSON.parse(localStorage.getItem('adminSession'))
           if (currentSession) {
-            currentSession.admin = { ...currentSession.admin, ...payload.new }
+            if (!currentSession.admin) currentSession.admin = {}
+            currentSession.admin.profile_image = payload.new.profile_image
+            currentSession.admin.full_name = payload.new.full_name
             localStorage.setItem('adminSession', JSON.stringify(currentSession))
             setSession(currentSession)
           }
@@ -333,22 +382,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     router.push('/admin/login')
   }
 
-  const getInitials = () => {
-    return profileName.charAt(0).toUpperCase() || 'A'
-  }
-
-  const getDisplayName = () => {
-    return profileName || session?.admin?.full_name || session?.user?.email?.split('@')[0] || 'Admin'
-  }
-
-  const getUserEmail = () => {
-    return session?.admin?.email || session?.user?.email || 'admin@smartfarmer.com'
-  }
-
-  const getUserRole = () => {
-    return session?.role || session?.admin?.role || 'Administrator'
-  }
-
   if (!session) {
     return (
       <div className="min-vh-100 d-flex align-items-center justify-content-center">
@@ -507,7 +540,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               )}
             </div>
 
-            {/* Profile Dropdown with Real-time Image */}
+            {/* Profile Dropdown with Real-time Image - ALWAYS SHOW IMAGE */}
             <div className="position-relative" ref={dropdownRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 d-flex align-items-center"
@@ -515,10 +548,10 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                 style={{ outline: 'none' }}
               >
                 <div className="d-flex align-items-center gap-2">
-                  <div className="rounded-circle d-flex align-items-center justify-content-center text-white fw-bold" style={{ 
+                  <div className="rounded-circle d-flex align-items-center justify-content-center" style={{ 
                     width: '40px', 
                     height: '40px',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    background: profileImage ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     overflow: 'hidden'
                   }}>
                     {profileImage ? (
@@ -528,12 +561,12 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
                     ) : (
-                      <span>{getInitials()}</span>
+                      <i className="bi bi-person-circle fs-2 text-white"></i>
                     )}
                   </div>
                   <div className="text-start d-none d-md-block">
-                    <div className="fw-bold small">{getDisplayName()}</div>
-                    <small className="text-muted">{getUserRole()}</small>
+                    <div className="fw-bold small">{profileName}</div>
+                    <small className="text-muted">{profileRole}</small>
                   </div>
                   <i className="bi bi-chevron-down text-muted" style={{ fontSize: '12px' }}></i>
                 </div>
@@ -551,18 +584,18 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                         ) : (
-                          <span className="text-primary fw-bold fs-2">{getInitials()}</span>
+                          <i className="bi bi-person-circle fs-1 text-primary"></i>
                         )}
                       </div>
-                      <h6 className="mb-1 fw-bold">{getDisplayName()}</h6>
-                      <p className="small mb-0 opacity-75">{getUserEmail()}</p>
+                      <h6 className="mb-1 fw-bold">{profileName}</h6>
+                      <p className="small mb-0 opacity-75">{profileEmail}</p>
                     </div>
 
                     <div className="px-4 py-3 border-bottom">
                       <div className="row text-center">
                         <div className="col-6">
                           <small className="text-muted d-block">Role</small>
-                          <strong>{getUserRole()}</strong>
+                          <strong>{profileRole}</strong>
                         </div>
                         <div className="col-6">
                           <small className="text-muted d-block">Status</small>
