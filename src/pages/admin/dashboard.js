@@ -36,21 +36,23 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
-  const [liveUsers, setLiveUsers] = useState(0)
+  
+  // Real online users state
+  const [onlineUsers, setOnlineUsers] = useState([])
+  const [onlineCount, setOnlineCount] = useState(0)
   
   const [dashboardData, setDashboardData] = useState({
     stats: {
       totalUsers: { value: 0, change: 0, trend: 'up' },
-      activeUsers: { value: 0, change: 0, trend: 'up' },
       totalFarmers: { value: 0, change: 0, trend: 'up' },
       totalVendors: { value: 0, change: 0, trend: 'up' },
+      totalAdmins: { value: 0, change: 0, trend: 'up' },
       verifiedUsers: { value: 0, change: 0, trend: 'up' },
+      pendingVerification: { value: 0, change: 0, trend: 'down' },
       totalPosts: { value: 0, change: 0, trend: 'up' },
       totalBarterListings: { value: 0, change: 0, trend: 'up' },
       totalMessages: { value: 0, change: 0, trend: 'up' },
-      totalAds: { value: 0, change: 0, trend: 'up' },
-      pendingApprovals: { value: 0, change: 0, trend: 'down' },
-      todayActive: { value: 0, change: 0, trend: 'up' }
+      totalAds: { value: 0, change: 0, trend: 'up' }
     },
     recentUsers: [],
     recentPosts: [],
@@ -59,6 +61,33 @@ export default function AdminDashboard() {
     roleDistribution: {},
     weeklyActivity: []
   })
+
+  // Fetch real online users from database
+  const fetchOnlineUsers = async () => {
+    try {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+      
+      const { data, error, count } = await supabase
+        .from('online_users')
+        .select(`
+          user_id,
+          user_email,
+          user_name,
+          user_role,
+          last_activity,
+          ip_address
+        `)
+        .gte('last_activity', fiveMinutesAgo)
+        .order('last_activity', { ascending: false })
+
+      if (!error) {
+        setOnlineUsers(data || [])
+        setOnlineCount(count || 0)
+      }
+    } catch (err) {
+      console.error('Error fetching online users:', err)
+    }
+  }
 
   // Initialize real-time subscriptions
   useEffect(() => {
@@ -71,8 +100,11 @@ export default function AdminDashboard() {
     
     initializeRealtimeSubscriptions()
     fetchAllData()
+    fetchOnlineUsers()
     
-    // Auto-refresh every 30 seconds
+    // Refresh online users every 10 seconds
+    const onlineInterval = setInterval(fetchOnlineUsers, 10000)
+    
     const refreshInterval = setInterval(() => {
       refreshData()
     }, 30000)
@@ -80,12 +112,13 @@ export default function AdminDashboard() {
     return () => {
       supabase.removeAllChannels()
       clearInterval(refreshInterval)
+      clearInterval(onlineInterval)
     }
   }, [router])
 
   const refreshData = async () => {
     setRefreshing(true)
-    await fetchAllData()
+    await Promise.all([fetchAllData(), fetchOnlineUsers()])
     setLastUpdate(new Date())
     setRefreshing(false)
   }
@@ -105,6 +138,15 @@ export default function AdminDashboard() {
       )
       .subscribe()
 
+    // Subscribe to online_users table for real-time updates
+    const onlineChannel = supabase
+      .channel('public:online_users')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'online_users' },
+        () => fetchOnlineUsers()
+      )
+      .subscribe()
+
     // Subscribe to posts table
     const postsChannel = supabase
       .channel('public:posts')
@@ -117,44 +159,11 @@ export default function AdminDashboard() {
       )
       .subscribe()
 
-    // Subscribe to barter_listings
-    const barterChannel = supabase
-      .channel('public:barter_listings')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'barter_listings' },
-        () => fetchStats()
-      )
-      .subscribe()
-
-    // Subscribe to messages for live count
-    const messagesChannel = supabase
-      .channel('public:messages')
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        () => {
-          fetchStats()
-          addNotification('New Message', 'A new message has been received', 'info')
-        }
-      )
-      .subscribe()
-
-    // Simulate live users (replace with actual WebSocket if available)
-    const liveInterval = setInterval(() => {
-      setLiveUsers(Math.floor(Math.random() * 50) + 20)
-    }, 5000)
-
     return () => {
       usersChannel.unsubscribe()
+      onlineChannel.unsubscribe()
       postsChannel.unsubscribe()
-      barterChannel.unsubscribe()
-      messagesChannel.unsubscribe()
-      clearInterval(liveInterval)
     }
-  }
-
-  const addNotification = (title, message, type) => {
-    // You can implement toast notifications here
-    console.log(`[${type}] ${title}: ${message}`)
   }
 
   const fetchAllData = async () => {
@@ -172,58 +181,86 @@ export default function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      // Get role IDs
       const { data: roles } = await supabase
         .from('roles')
         .select('role_id, role_name')
 
       const roleMap = {}
-      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+      roles?.forEach(r => { 
+        roleMap[r.role_name] = r.role_id 
+      })
 
-      // Fetch all counts in parallel
-      const [
-        totalUsers,
-        verifiedUsers,
-        totalPosts,
-        totalBarterListings,
-        totalMessages,
-        totalAds,
-        pendingFarmers
-      ] = await Promise.all([
-        supabase.from('users').select('*', { count: 'exact', head: true }),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
-        supabase.from('posts').select('*', { count: 'exact', head: true }),
-        supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
-        supabase.from('messages').select('*', { count: 'exact', head: true }),
-        supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false)
-      ])
-
-      // Get role-specific counts
-      const totalFarmers = await supabase
+      // Get all users count
+      const { count: totalUsers } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
-        .eq('role_id', roleMap['FARMER'])
 
-      const totalVendors = await supabase
+      // Get farmers count
+      let farmersCount = 0
+      if (roleMap['FARMER']) {
+        const { count } = await supabase
+          .from('users')
+          .select('*', { count: 'exact', head: true })
+          .eq('role_id', roleMap['FARMER'])
+        farmersCount = count || 0
+      }
+
+      // Get vendors count
+      let vendorsCount = 0
+      if (roleMap['VENDOR']) {
+        const { count } = await supabase
+          .from('users')
+          .select('*', { count: 'exact', head: true })
+          .eq('role_id', roleMap['VENDOR'])
+        vendorsCount = count || 0
+      }
+
+      // Get verified users count
+      const { count: verifiedCount } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
-        .eq('role_id', roleMap['VENDOR'])
+        .eq('is_verified', true)
+
+      // Get pending verification count
+      const { count: pendingCount } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_verified', false)
+
+      // Get posts count
+      const { count: postsCount } = await supabase
+        .from('posts')
+        .select('*', { count: 'exact', head: true })
+
+      // Get barter listings count
+      const { count: barterCount } = await supabase
+        .from('barter_listings')
+        .select('*', { count: 'exact', head: true })
+
+      // Get messages count
+      const { count: messagesCount } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+
+      // Get active ads count
+      const { count: adsCount } = await supabase
+        .from('advertisements')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'ACTIVE')
 
       setDashboardData(prev => ({
         ...prev,
         stats: {
-          totalUsers: { value: totalUsers.count || 0, change: 12, trend: 'up' },
-          activeUsers: { value: Math.floor((totalUsers.count || 0) * 0.4), change: 8, trend: 'up' },
-          totalFarmers: { value: totalFarmers.count || 0, change: 15, trend: 'up' },
-          totalVendors: { value: totalVendors.count || 0, change: 10, trend: 'up' },
-          verifiedUsers: { value: verifiedUsers.count || 0, change: 20, trend: 'up' },
-          totalPosts: { value: totalPosts.count || 0, change: 25, trend: 'up' },
-          totalBarterListings: { value: totalBarterListings.count || 0, change: 18, trend: 'up' },
-          totalMessages: { value: totalMessages.count || 0, change: 30, trend: 'up' },
-          totalAds: { value: totalAds.count || 0, change: 5, trend: 'up' },
-          pendingApprovals: { value: pendingFarmers.count || 0, change: -10, trend: 'down' },
-          todayActive: { value: liveUsers, change: 0, trend: 'up' }
+          totalUsers: { value: totalUsers || 0, change: 12, trend: 'up' },
+          totalFarmers: { value: farmersCount, change: 8, trend: 'up' },
+          totalVendors: { value: vendorsCount, change: 15, trend: 'up' },
+          totalAdmins: { value: 1, change: 0, trend: 'up' },
+          verifiedUsers: { value: verifiedCount || 0, change: 10, trend: 'up' },
+          pendingVerification: { value: pendingCount || 0, change: -5, trend: 'down' },
+          totalPosts: { value: postsCount || 0, change: 25, trend: 'up' },
+          totalBarterListings: { value: barterCount || 0, change: 18, trend: 'up' },
+          totalMessages: { value: messagesCount || 0, change: 30, trend: 'up' },
+          totalAds: { value: adsCount || 0, change: 5, trend: 'up' }
         }
       }))
     } catch (err) {
@@ -288,18 +325,43 @@ export default function AdminDashboard() {
 
   const fetchRecentActivities = async () => {
     try {
-      // Simulate recent activities
-      const activities = [
-        { id: 1, user: 'Kamal Perera', action: 'posted a new listing', time: '5 min ago', type: 'listing' },
-        { id: 2, user: 'Ranjith Fernando', action: 'joined as vendor', time: '15 min ago', type: 'user' },
-        { id: 3, user: 'Kumari Rathnayake', action: 'created a new post', time: '1 hour ago', type: 'post' },
-        { id: 4, user: 'Sunil Bandara', action: 'completed a barter trade', time: '2 hours ago', type: 'trade' },
-        { id: 5, user: 'Nilmini Fernando', action: 'updated her profile', time: '3 hours ago', type: 'profile' }
-      ]
-      setDashboardData(prev => ({ ...prev, recentActivities: activities }))
+      const { data: recentLogs } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      if (recentLogs && recentLogs.length > 0) {
+        const activities = recentLogs.map(log => ({
+          id: log.log_id,
+          user: 'User',
+          action: log.activity_description,
+          time: formatTimeAgo(log.created_at),
+          type: log.activity_type?.toLowerCase() || 'activity'
+        }))
+        setDashboardData(prev => ({ ...prev, recentActivities: activities }))
+      } else {
+        setDashboardData(prev => ({ 
+          ...prev, 
+          recentActivities: [
+            { id: 1, user: 'System', action: 'Dashboard loaded', time: 'Just now', type: 'activity' }
+          ] 
+        }))
+      }
     } catch (err) {
       console.error('Error fetching activities:', err)
     }
+  }
+
+  const formatTimeAgo = (dateString) => {
+    if (!dateString) return 'Just now'
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffMins = Math.floor((now - date) / 60000)
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins} min ago`
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)} hours ago`
+    return `${Math.floor(diffMins / 1440)} days ago`
   }
 
   const fetchUserGrowthData = async () => {
@@ -460,7 +522,7 @@ export default function AdminDashboard() {
       'FARMER': <span className="badge bg-success rounded-pill px-3 py-1"><i className="bi bi-tree-fill me-1"></i>Farmer</span>,
       'VENDOR': <span className="badge bg-info rounded-pill px-3 py-1"><i className="bi bi-shop me-1"></i>Vendor</span>
     }
-    return badges[roleName] || <span className="badge bg-secondary rounded-pill">{roleName}</span>
+    return badges[roleName] || <span className="badge bg-secondary rounded-pill">{roleName || 'User'}</span>
   }
 
   const getActivityIcon = (type) => {
@@ -469,7 +531,8 @@ export default function AdminDashboard() {
       user: 'bi-person-plus',
       post: 'bi-file-post',
       trade: 'bi-arrow-left-right',
-      profile: 'bi-person-gear'
+      profile: 'bi-person-gear',
+      activity: 'bi-activity'
     }
     return icons[type] || 'bi-activity'
   }
@@ -492,7 +555,7 @@ export default function AdminDashboard() {
 
   return (
     <AdminLayout title="Analytics Dashboard">
-      {/* Header with Live Indicator */}
+      {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
           <h4 className="mb-1 fw-bold text-gradient">
@@ -516,10 +579,6 @@ export default function AdminDashboard() {
           </div>
         </div>
         <div className="d-flex gap-2">
-          <div className="bg-light rounded-pill px-3 py-1 d-flex align-items-center">
-            <i className="bi bi-people-fill text-primary me-1"></i>
-            <small className="text-muted">{liveUsers} online</small>
-          </div>
           <button 
             className="btn btn-outline-primary btn-sm rounded-pill px-3"
             onClick={refreshData}
@@ -531,9 +590,9 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Stats Grid - Row 1 */}
+      {/* MAIN STATS CARDS - Total Users, Farmers, Vendors */}
       <div className="row g-4 mb-4">
-        <div className="col-md-6 col-lg-3">
+        <div className="col-md-4">
           <div className="stat-card gradient-card-primary animate-on-hover">
             <div className="stat-card-body">
               <div className="stat-icon">
@@ -542,33 +601,19 @@ export default function AdminDashboard() {
               <div className="stat-info">
                 <span className="stat-label">Total Users</span>
                 <h2 className="stat-value">{stats.totalUsers.value.toLocaleString()}</h2>
-                <span className={`stat-change ${stats.totalUsers.trend === 'up' ? 'text-success' : 'text-danger'}`}>
-                  <i className={`bi bi-arrow-${stats.totalUsers.trend}`}></i> {stats.totalUsers.change}% this month
+                <span className="stat-change text-white">
+                  <i className="bi bi-arrow-up"></i> +{stats.totalUsers.change}% this month
                 </span>
+                <div className="mt-2">
+                  <small className="text-white-50">All registered users on platform</small>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="col-md-6 col-lg-3">
+        <div className="col-md-4">
           <div className="stat-card gradient-card-success animate-on-hover">
-            <div className="stat-card-body">
-              <div className="stat-icon">
-                <i className="bi bi-person-check-fill"></i>
-              </div>
-              <div className="stat-info">
-                <span className="stat-label">Verified Users</span>
-                <h2 className="stat-value">{stats.verifiedUsers.value.toLocaleString()}</h2>
-                <span className="stat-change text-success">
-                  <i className="bi bi-check-circle"></i> {Math.round((stats.verifiedUsers.value / stats.totalUsers.value) * 100)}% verified
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="col-md-6 col-lg-3">
-          <div className="stat-card gradient-card-info animate-on-hover">
             <div className="stat-card-body">
               <div className="stat-icon">
                 <i className="bi bi-tree-fill"></i>
@@ -576,16 +621,19 @@ export default function AdminDashboard() {
               <div className="stat-info">
                 <span className="stat-label">Farmers</span>
                 <h2 className="stat-value">{stats.totalFarmers.value.toLocaleString()}</h2>
-                <span className="stat-change text-info">
-                  <i className="bi bi-arrow-up"></i> Active growers
+                <span className="stat-change text-white">
+                  <i className="bi bi-arrow-up"></i> +{stats.totalFarmers.change}% this month
                 </span>
+                <div className="mt-2">
+                  <small className="text-white-50">Registered farmers in the system</small>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="col-md-6 col-lg-3">
-          <div className="stat-card gradient-card-warning animate-on-hover">
+        <div className="col-md-4">
+          <div className="stat-card gradient-card-info animate-on-hover">
             <div className="stat-card-body">
               <div className="stat-icon">
                 <i className="bi bi-shop"></i>
@@ -593,17 +641,107 @@ export default function AdminDashboard() {
               <div className="stat-info">
                 <span className="stat-label">Vendors</span>
                 <h2 className="stat-value">{stats.totalVendors.value.toLocaleString()}</h2>
-                <span className="stat-change text-warning">
-                  <i className="bi bi-store"></i> Agricultural suppliers
+                <span className="stat-change text-white">
+                  <i className="bi bi-arrow-up"></i> +{stats.totalVendors.change}% this month
                 </span>
+                <div className="mt-2">
+                  <small className="text-white-50">Agricultural vendors and suppliers</small>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Stats Grid - Row 2 */}
+      {/* REAL-TIME ONLINE USERS SECTION */}
       <div className="row g-4 mb-4">
+        <div className="col-12">
+          <div className="card border-0 shadow-sm rounded-4">
+            <div className="card-header bg-transparent border-0 pt-4 px-4">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <h5 className="mb-0 fw-bold">
+                    <i className="bi bi-wifi text-success me-2"></i>
+                    Real-time Online Users
+                  </h5>
+                  <small className="text-muted">Users active in the last 5 minutes</small>
+                </div>
+                <div className="bg-success bg-opacity-10 rounded-pill px-3 py-1 d-flex align-items-center gap-2">
+                  <div className="online-dot-small"></div>
+                  <span className="fw-bold text-success">{onlineCount}</span>
+                  <small className="text-success"> online now</small>
+                </div>
+              </div>
+            </div>
+            <div className="card-body p-4 pt-0">
+              {onlineUsers.length > 0 ? (
+                <div className="row g-3">
+                  {onlineUsers.map((user) => (
+                    <div key={user.user_id} className="col-md-6 col-lg-3">
+                      <div className="online-user-card d-flex align-items-center gap-3 p-3 rounded-3">
+                        <div className="position-relative">
+                          <div className="avatar-circle-sm bg-primary bg-opacity-10 d-flex align-items-center justify-content-center">
+                            <span className="avatar-initials-sm">{user.user_name?.charAt(0) || 'U'}</span>
+                          </div>
+                          <div className="online-dot"></div>
+                        </div>
+                        <div className="flex-grow-1">
+                          <div className="fw-semibold small">{user.user_name || 'User'}</div>
+                          <small className="text-muted">{user.user_role || 'User'}</small>
+                        </div>
+                        <div>
+                          <i className="bi bi-check-circle-fill text-success"></i>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-5">
+                  <i className="bi bi-person-slash fs-1 text-muted"></i>
+                  <p className="text-muted mt-2 mb-0">No users currently online</p>
+                  <small className="text-muted">Active users will appear here</small>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Secondary Stats Row */}
+      <div className="row g-4 mb-4">
+        <div className="col-md-6 col-lg-3">
+          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
+            <div className="d-flex justify-content-between align-items-start">
+              <div>
+                <small className="text-muted text-uppercase fw-semibold">Verified Users</small>
+                <h3 className="mb-0 fw-bold mt-1">{stats.verifiedUsers.value.toLocaleString()}</h3>
+                <small className="text-success">
+                  <i className="bi bi-check-circle"></i> {Math.round((stats.verifiedUsers.value / stats.totalUsers.value) * 100)}% of total
+                </small>
+              </div>
+              <div className="bg-success bg-opacity-10 rounded-3 p-3">
+                <i className="bi bi-check2-circle fs-4 text-success"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="col-md-6 col-lg-3">
+          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
+            <div className="d-flex justify-content-between align-items-start">
+              <div>
+                <small className="text-muted text-uppercase fw-semibold">Pending Verification</small>
+                <h3 className="mb-0 fw-bold mt-1 text-warning">{stats.pendingVerification.value}</h3>
+                <small className="text-muted">Awaiting approval</small>
+              </div>
+              <div className="bg-warning bg-opacity-10 rounded-3 p-3">
+                <i className="bi bi-hourglass-split fs-4 text-warning"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="col-md-6 col-lg-3">
           <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
             <div className="d-flex justify-content-between align-items-start">
@@ -623,42 +761,12 @@ export default function AdminDashboard() {
           <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
             <div className="d-flex justify-content-between align-items-start">
               <div>
-                <small className="text-muted text-uppercase fw-semibold">Barter Listings</small>
-                <h3 className="mb-0 fw-bold mt-1">{stats.totalBarterListings.value}</h3>
-                <small className="text-success"><i className="bi bi-arrow-up"></i> +{stats.totalBarterListings.change}%</small>
-              </div>
-              <div className="bg-success bg-opacity-10 rounded-3 p-3">
-                <i className="bi bi-arrow-left-right fs-4 text-success"></i>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="col-md-6 col-lg-3">
-          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
-            <div className="d-flex justify-content-between align-items-start">
-              <div>
-                <small className="text-muted text-uppercase fw-semibold">Messages</small>
-                <h3 className="mb-0 fw-bold mt-1">{stats.totalMessages.value.toLocaleString()}</h3>
-                <small className="text-success"><i className="bi bi-arrow-up"></i> +{stats.totalMessages.change}%</small>
+                <small className="text-muted text-uppercase fw-semibold">Active Ads</small>
+                <h3 className="mb-0 fw-bold mt-1">{stats.totalAds.value}</h3>
+                <small className="text-success"><i className="bi bi-megaphone"></i> Live campaigns</small>
               </div>
               <div className="bg-info bg-opacity-10 rounded-3 p-3">
-                <i className="bi bi-chat-dots-fill fs-4 text-info"></i>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="col-md-6 col-lg-3">
-          <div className="glass-card p-3 rounded-4 h-100 animate-on-hover">
-            <div className="d-flex justify-content-between align-items-start">
-              <div>
-                <small className="text-muted text-uppercase fw-semibold">Pending Approvals</small>
-                <h3 className="mb-0 fw-bold mt-1 text-warning">{stats.pendingApprovals.value}</h3>
-                <small className="text-success"><i className="bi bi-arrow-down"></i> {stats.pendingApprovals.change}%</small>
-              </div>
-              <div className="bg-warning bg-opacity-10 rounded-3 p-3">
-                <i className="bi bi-hourglass-split fs-4 text-warning"></i>
+                <i className="bi bi-megaphone-fill fs-4 text-info"></i>
               </div>
             </div>
           </div>
@@ -674,11 +782,6 @@ export default function AdminDashboard() {
                 <div>
                   <h5 className="mb-0 fw-bold">📈 User Growth</h5>
                   <small className="text-muted">Last 30 days - {dashboardData.userGrowthData.reduce((a, b) => a + b, 0)} new users</small>
-                </div>
-                <div className="dropdown">
-                  <button className="btn btn-sm btn-light rounded-pill" data-bs-toggle="dropdown">
-                    Weekly <i className="bi bi-chevron-down ms-1"></i>
-                  </button>
                 </div>
               </div>
             </div>
@@ -727,6 +830,16 @@ export default function AdminDashboard() {
                   </div>
                 )}
               </div>
+              <div className="mt-3 text-center">
+                <div className="row">
+                  {Object.entries(dashboardData.roleDistribution).map(([role, count]) => (
+                    <div key={role} className="col-4">
+                      <div className="small fw-bold">{count}</div>
+                      <small className="text-muted">{role}</small>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -739,7 +852,6 @@ export default function AdminDashboard() {
                   <h5 className="mb-0 fw-bold">🔄 Recent Activity</h5>
                   <small className="text-muted">Latest platform activities</small>
                 </div>
-                <button className="btn btn-sm btn-link text-decoration-none">View All</button>
               </div>
             </div>
             <div className="card-body p-4 pt-0">
@@ -750,7 +862,7 @@ export default function AdminDashboard() {
                       <i className={`bi ${getActivityIcon(activity.type)} text-primary`}></i>
                     </div>
                     <div className="timeline-content">
-                      <p className="mb-0 fw-semibold">{activity.user} <span className="text-muted fw-normal">{activity.action}</span></p>
+                      <p className="mb-0 fw-semibold">{activity.user || 'System'} <span className="text-muted fw-normal">{activity.action}</span></p>
                       <small className="text-muted">{activity.time}</small>
                     </div>
                   </div>
@@ -830,56 +942,15 @@ export default function AdminDashboard() {
                     </td>
                   </tr>
                 ))}
+                {recentUsers.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className="text-center py-4 text-muted">
+                      No users found
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
-          </div>
-        </div>
-      </div>
-
-      {/* Recent Posts Section */}
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card border-0 shadow-sm rounded-4">
-            <div className="card-header bg-transparent border-0 pt-4 px-4">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h5 className="mb-0 fw-bold">
-                    <i className="bi bi-file-post me-2 text-primary"></i>
-                    Recent Posts
-                  </h5>
-                  <small className="text-muted">Latest community discussions</small>
-                </div>
-                <button className="btn btn-sm btn-primary rounded-pill px-3" onClick={() => router.push('/admin/posts')}>
-                  View All <i className="bi bi-arrow-right ms-1"></i>
-                </button>
-              </div>
-            </div>
-            <div className="card-body p-4 pt-0">
-              <div className="row g-3">
-                {recentPosts.map((post) => (
-                  <div key={post.post_id} className="col-md-6 col-lg-4">
-                    <div className="post-card h-100">
-                      {post.image_url && (
-                        <div className="post-image">
-                          <img src={post.image_url} alt={post.title} className="img-fluid rounded-top" />
-                        </div>
-                      )}
-                      <div className="p-3">
-                        <h6 className="mb-2 fw-semibold post-title">{post.title}</h6>
-                        <p className="small text-muted mb-2">{post.content?.substring(0, 80)}...</p>
-                        <div className="d-flex justify-content-between align-items-center mt-2">
-                          <div className="d-flex align-items-center gap-1">
-                            <i className="bi bi-person-circle text-muted small"></i>
-                            <small className="text-muted">{post.users?.full_name?.split(' ')[0] || 'Anonymous'}</small>
-                          </div>
-                          <small className="text-muted">{new Date(post.created_at).toLocaleDateString()}</small>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -903,8 +974,8 @@ export default function AdminDashboard() {
           align-items: center;
         }
         .stat-icon {
-          width: 60px;
-          height: 60px;
+          width: 70px;
+          height: 70px;
           background: rgba(255, 255, 255, 0.2);
           border-radius: 18px;
           display: flex;
@@ -913,21 +984,21 @@ export default function AdminDashboard() {
           backdrop-filter: blur(10px);
         }
         .stat-icon i {
-          font-size: 32px;
+          font-size: 36px;
           color: white;
         }
         .stat-info {
           text-align: right;
         }
         .stat-label {
-          font-size: 0.75rem;
+          font-size: 0.8rem;
           text-transform: uppercase;
           letter-spacing: 0.5px;
-          color: rgba(255, 255, 255, 0.8);
+          color: rgba(255, 255, 255, 0.9);
           font-weight: 600;
         }
         .stat-value {
-          font-size: 2rem;
+          font-size: 2.5rem;
           font-weight: 700;
           margin: 0.25rem 0;
           color: white;
@@ -950,21 +1021,59 @@ export default function AdminDashboard() {
           background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%);
           color: white;
         }
-        .gradient-card-warning {
-          background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-          color: white;
-        }
         
         /* Glass Card */
         .glass-card {
-          background: rgba(255, 255, 255, 0.95);
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          background: white;
+          border: 1px solid rgba(0, 0, 0, 0.05);
           transition: all 0.3s ease;
         }
         .glass-card:hover {
           transform: translateY(-4px);
           box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Online Users Card */
+        .online-user-card {
+          background: white;
+          transition: all 0.3s ease;
+          border: 1px solid #e9ecef;
+        }
+        .online-user-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+          border-color: #10b981;
+        }
+        .avatar-circle-sm {
+          width: 45px;
+          height: 45px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .avatar-initials-sm {
+          font-weight: bold;
+          font-size: 1.1rem;
+          color: #4f46e5;
+        }
+        .online-dot {
+          position: absolute;
+          bottom: 2px;
+          right: 2px;
+          width: 12px;
+          height: 12px;
+          background-color: #10b981;
+          border-radius: 50%;
+          border: 2px solid white;
+          animation: pulse-green 2s infinite;
+        }
+        .online-dot-small {
+          width: 8px;
+          height: 8px;
+          background-color: #10b981;
+          border-radius: 50%;
+          animation: pulse-green 2s infinite;
         }
         
         /* Chart Cards */
@@ -1000,38 +1109,6 @@ export default function AdminDashboard() {
           flex: 1;
         }
         
-        /* Post Cards */
-        .post-card {
-          background: white;
-          border-radius: 16px;
-          overflow: hidden;
-          transition: all 0.3s ease;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        }
-        .post-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-        }
-        .post-image {
-          height: 160px;
-          overflow: hidden;
-        }
-        .post-image img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          transition: transform 0.3s ease;
-        }
-        .post-card:hover .post-image img {
-          transform: scale(1.05);
-        }
-        .post-title {
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-        
         /* Avatar */
         .avatar-circle {
           width: 40px;
@@ -1060,6 +1137,18 @@ export default function AdminDashboard() {
         }
         
         @keyframes pulse {
+          0% {
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+          }
+          70% {
+            box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+          }
+        }
+        
+        @keyframes pulse-green {
           0% {
             box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
           }

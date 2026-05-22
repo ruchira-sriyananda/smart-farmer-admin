@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminSidebar from './AdminSidebar'
+import OnlineHeartbeat from './OnlineHeartbeat'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import 'bootstrap-icons/font/bootstrap-icons.css'
 
@@ -20,6 +21,12 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   const [profileRole, setProfileRole] = useState('')
   const dropdownRef = useRef(null)
   const notificationRef = useRef(null)
+
+  // Get user info for heartbeat
+  const userId = session?.admin?.admin_id || session?.user?.id
+  const userEmail = session?.admin?.email || session?.user?.email
+  const userName = session?.admin?.full_name || 'Admin'
+  const userRole = session?.role || 'ADMIN'
 
   useEffect(() => {
     const init = async () => {
@@ -65,8 +72,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       if (!adminEmail) return
 
       const { data: adminUser, error } = await supabase
-        .from('admin_users')
-        .select('full_name, email, profile_image, admin_roles!left(role_name)')
+        .from('users')
+        .select('full_name, email, profile_image, roles!left(role_name)')
         .eq('email', adminEmail)
         .maybeSingle()
 
@@ -79,7 +86,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         setProfileImage(adminUser.profile_image || null)
         setProfileName(adminUser.full_name || sessionData.admin?.full_name || 'Admin')
         setProfileEmail(adminUser.email || sessionData.admin?.email || 'admin@smartfarmer.com')
-        setProfileRole(sessionData.role || adminUser.admin_roles?.role_name || 'Administrator')
+        setProfileRole(sessionData.role || adminUser.roles?.role_name || 'Administrator')
         
         // Update session with latest profile image
         const updatedSession = { ...sessionData }
@@ -113,7 +120,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'admin_users',
+          table: 'users',
           filter: `email=eq.${adminEmail}`
         },
         async (payload) => {
@@ -377,6 +384,22 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   }
 
   const handleLogout = async () => {
+    // Remove from online users
+    if (userId) {
+      await fetch('/api/online-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          userEmail,
+          userName,
+          userRole,
+          ipAddress: 'unknown',
+          deviceInfo: 'offline'
+        })
+      }).catch(() => {})
+    }
+    
     localStorage.removeItem('adminSession')
     document.cookie = 'admin-session=; path=/; max-age=0'
     router.push('/admin/login')
@@ -394,6 +417,16 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
   return (
     <div className="d-flex">
+      {/* Online Heartbeat Component - Tracks real-time online status */}
+      {userId && (
+        <OnlineHeartbeat 
+          userId={userId}
+          userEmail={userEmail}
+          userName={userName}
+          userRole={userRole}
+        />
+      )}
+      
       <AdminSidebar />
       
       <div style={{ marginLeft: '280px', width: '100%' }}>
@@ -540,7 +573,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               )}
             </div>
 
-            {/* Profile Dropdown with Real-time Image - ALWAYS SHOW IMAGE */}
+            {/* Profile Dropdown with Real-time Image */}
             <div className="position-relative" ref={dropdownRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 d-flex align-items-center"
