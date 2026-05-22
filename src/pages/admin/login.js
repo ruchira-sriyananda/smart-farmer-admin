@@ -16,13 +16,45 @@ export default function AdminLogin() {
   const recaptchaRef = useRef(null)
 
   useEffect(() => {
+    // Check if already logged in
+    const storedSession = localStorage.getItem('adminSession')
+    if (storedSession) {
+      router.push('/admin/dashboard')
+    }
+    
     // Check for saved email
     const savedEmail = localStorage.getItem('rememberedEmail')
     if (savedEmail) {
       setEmail(savedEmail)
       setRememberMe(true)
     }
-  }, [])
+  }, [router])
+
+  const getClientIP = async () => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json')
+      const data = await response.json()
+      return data.ip
+    } catch (err) {
+      return 'unknown'
+    }
+  }
+
+  const logFailedAttempt = async (email, reason) => {
+    try {
+      await supabase
+        .from('failed_login_attempts')
+        .insert({
+          email: email,
+          ip_address: await getClientIP(),
+          device_info: navigator.userAgent,
+          failure_reason: reason,
+          attempt_time: new Date().toISOString()
+        })
+    } catch (err) {
+      console.error('Failed to log attempt:', err)
+    }
+  }
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -31,8 +63,14 @@ export default function AdminLogin() {
 
     try {
       // Execute reCAPTCHA
-      const token = await recaptchaRef.current.executeAsync()
-      recaptchaRef.current.reset()
+      let token
+      try {
+        token = await recaptchaRef.current.executeAsync()
+        recaptchaRef.current.reset()
+      } catch (recaptchaError) {
+        console.error('reCAPTCHA error:', recaptchaError)
+        throw new Error('Security verification failed. Please refresh and try again.')
+      }
 
       if (!token) {
         throw new Error('Security verification failed. Please try again.')
@@ -40,16 +78,20 @@ export default function AdminLogin() {
 
       // Authenticate with Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.toLowerCase(),
         password
       })
       
       if (authError) {
+        await logFailedAttempt(email, authError.message)
+        
         if (authError.message === 'Invalid login credentials') {
           throw new Error('Invalid email or password')
         }
         throw authError
       }
+
+      console.log('✅ Auth successful:', authData.user.email)
 
       // Query admin_users table
       const { data: adminData, error: adminError } = await supabase
@@ -59,16 +101,55 @@ export default function AdminLogin() {
           full_name,
           email,
           is_active,
-          is_super_admin
+          is_super_admin,
+          phone_number,
+          created_at,
+          last_login,
+          admin_roles (
+            role_id,
+            role_name,
+            description
+          )
         `)
         .eq('email', email.toLowerCase())
         .maybeSingle()
 
-      if (adminError) throw new Error('Database error occurred')
-      if (!adminData) throw new Error('Not authorized as admin.')
-      if (!adminData.is_active) throw new Error('Admin account is disabled.')
+      console.log('📊 Admin query result:', { adminData, adminError })
 
-      
+      if (adminError) {
+        console.error('Admin query error:', adminError)
+        throw new Error('Database error occurred')
+      }
+
+      if (!adminData) {
+        await logFailedAttempt(email, 'Not authorized as admin')
+        throw new Error('Not authorized as admin. Please contact system administrator.')
+      }
+
+      if (!adminData.is_active) {
+        await logFailedAttempt(email, 'Account disabled')
+        throw new Error('Admin account is disabled. Please contact support.')
+      }
+
+      // Extract role safely
+      let role = 'Administrator'
+      if (adminData.admin_roles) {
+        if (Array.isArray(adminData.admin_roles) && adminData.admin_roles.length > 0) {
+          role = adminData.admin_roles[0].role_name || 'Administrator'
+        } else if (adminData.admin_roles.role_name) {
+          role = adminData.admin_roles.role_name
+        }
+      }
+
+      // Update last login timestamp
+      await supabase
+        .from('admin_users')
+        .update({ 
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('admin_id', adminData.admin_id)
+
       // Save email if remember me is checked
       if (rememberMe) {
         localStorage.setItem('rememberedEmail', email)
@@ -76,20 +157,60 @@ export default function AdminLogin() {
         localStorage.removeItem('rememberedEmail')
       }
 
-      // Store session
-      localStorage.setItem('adminSession', JSON.stringify({
-        user: authData.user,
-        admin: adminData,
-        loggedInAt: new Date().toISOString()
-      }))
+      // Create complete session data
+      const sessionData = {
+        user: {
+          id: authData.user.id,
+          email: authData.user.email,
+          created_at: authData.user.created_at
+        },
+        admin: {
+          admin_id: adminData.admin_id,
+          full_name: adminData.full_name,
+          email: adminData.email,
+          is_active: adminData.is_active,
+          is_super_admin: adminData.is_super_admin,
+          phone_number: adminData.phone_number || '',
+          role_id: adminData.role_id
+        },
+        role: role,
+        sessionId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+        loggedInAt: new Date().toISOString(),
+        ipAddress: await getClientIP(),
+        userAgent: navigator.userAgent
+      }
 
-      document.cookie = `admin-session=1; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
+      console.log('💾 Storing session:', sessionData)
+      
+      // Store session in localStorage
+      localStorage.setItem('adminSession', JSON.stringify(sessionData))
 
+      // Set secure cookies
+      const expiryDate = new Date()
+      expiryDate.setDate(expiryDate.getDate() + 7)
+      document.cookie = `admin-session=1; path=/; expires=${expiryDate.toUTCString()}; samesite=lax`
+      document.cookie = `admin-email=${encodeURIComponent(authData.user.email)}; path=/; expires=${expiryDate.toUTCString()}; samesite=lax`
+
+      // Log successful login
+      await supabase
+        .from('admin_activity_logs')
+        .insert({
+          admin_id: adminData.admin_id,
+          activity_type: 'LOGIN',
+          activity_description: `Admin ${adminData.full_name} logged in successfully`,
+          ip_address: await getClientIP(),
+          device_info: navigator.userAgent,
+          created_at: new Date().toISOString()
+        })
+
+      console.log('🔄 Redirecting to dashboard...')
+      
+      // Redirect to dashboard
       await router.push('/admin/dashboard')
+      
     } catch (err) {
-      console.error('Login error:', err)
+      console.error('❌ Login error:', err)
       setError(err.message)
-    } finally {
       setLoading(false)
     }
   }
@@ -103,24 +224,6 @@ export default function AdminLogin() {
         .card-shadow {
           box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
         }
-        .input-group-text {
-          background-color: transparent;
-          border-right: none;
-        }
-        .form-control {
-          border-left: none;
-        }
-        .form-control:focus {
-          border-color: #ced4da;
-          box-shadow: none;
-        }
-        .input-group:focus-within {
-          box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-          border-radius: 0.375rem;
-        }
-        .input-group:focus-within .input-group-text {
-          border-color: #86b7fe;
-        }
         .btn-gradient {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border: none;
@@ -129,9 +232,6 @@ export default function AdminLogin() {
         .btn-gradient:hover {
           transform: translateY(-2px);
           box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-        }
-        .btn-gradient:active {
-          transform: translateY(0);
         }
       `}</style>
 
@@ -144,7 +244,7 @@ export default function AdminLogin() {
                 <i className="bi bi-tractor fs-1 text-primary"></i>
               </div>
               <h2 className="text-white fw-bold mb-2">Smart Farmer</h2>
-              <p className="text-white-50">Administrator Access</p>
+              <p className="text-white-50">Administrator Access Portal</p>
             </div>
 
             {/* Login Card */}
