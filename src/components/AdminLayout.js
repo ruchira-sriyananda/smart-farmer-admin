@@ -13,6 +13,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [loadingNotifications, setLoadingNotifications] = useState(true)
   const dropdownRef = useRef(null)
   const notificationRef = useRef(null)
 
@@ -33,8 +34,11 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     
-    fetchNotifications()
-    subscribeToNotifications()
+    // Fetch real notifications from database
+    fetchRealNotifications()
+    
+    // Subscribe to real-time notifications
+    subscribeToRealTimeNotifications()
     
     return () => {
       clearInterval(timer)
@@ -42,6 +46,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }, [router])
 
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -56,88 +61,158 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const fetchNotifications = async () => {
+  // Fetch real notifications from admin_activity_logs table
+  const fetchRealNotifications = async () => {
     try {
-      const { data, error } = await supabase
+      setLoadingNotifications(true)
+      
+      // Get real data from database
+      const { data: activities, error } = await supabase
         .from('admin_activity_logs')
         .select(`
-          *,
-          admin_users (
-            full_name
+          log_id,
+          activity_type,
+          activity_description,
+          created_at,
+          ip_address,
+          admin_users:admin_id (
+            full_name,
+            email
           )
         `)
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(20)
 
-      if (!error && data) {
-        const formattedNotifications = data.map(activity => ({
+      if (error) throw error
+
+      if (activities && activities.length > 0) {
+        const formattedNotifications = activities.map(activity => ({
           id: activity.log_id,
           title: getNotificationTitle(activity.activity_type),
           message: activity.activity_description,
           time: formatTimeAgo(activity.created_at),
-          read: false,
+          read: checkIfRead(activity.log_id),
           type: getNotificationType(activity.activity_type),
           icon: getNotificationIcon(activity.activity_type),
-          created_at: activity.created_at
+          user: activity.admin_users?.full_name || 'System',
+          createdAt: activity.created_at,
+          ipAddress: activity.ip_address
         }))
+        
         setNotifications(formattedNotifications)
-        setUnreadCount(formattedNotifications.filter(n => !n.read).length)
+        
+        // Count unread notifications (based on localStorage or session)
+        const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
+        const unread = formattedNotifications.filter(n => !readIds.includes(n.id)).length
+        setUnreadCount(unread)
+      } else {
+        // If no activities, show empty state
+        setNotifications([])
+        setUnreadCount(0)
       }
     } catch (err) {
       console.error('Error fetching notifications:', err)
+      setNotifications([])
+    } finally {
+      setLoadingNotifications(false)
     }
   }
 
-  const subscribeToNotifications = () => {
-    const subscription = supabase
-      .channel('admin_activity_logs_changes')
-      .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'admin_activity_logs' },
+  // Check if notification has been read
+  const checkIfRead = (notificationId) => {
+    const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
+    return readIds.includes(notificationId)
+  }
+
+  // Subscribe to real-time changes in admin_activity_logs
+  const subscribeToRealTimeNotifications = () => {
+    const channel = supabase
+      .channel('admin_activity_logs_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'admin_activity_logs'
+        },
         async (payload) => {
-          const { data, error } = await supabase
+          // Fetch full details of the new activity
+          const { data: newActivity, error } = await supabase
             .from('admin_activity_logs')
             .select(`
-              *,
-              admin_users (
-                full_name
+              log_id,
+              activity_type,
+              activity_description,
+              created_at,
+              ip_address,
+              admin_users:admin_id (
+                full_name,
+                email
               )
             `)
             .eq('log_id', payload.new.log_id)
             .single()
-          
-          if (!error && data) {
+
+          if (!error && newActivity) {
             const newNotification = {
-              id: data.log_id,
-              title: getNotificationTitle(data.activity_type),
-              message: data.activity_description,
+              id: newActivity.log_id,
+              title: getNotificationTitle(newActivity.activity_type),
+              message: newActivity.activity_description,
               time: 'Just now',
               read: false,
-              type: getNotificationType(data.activity_type),
-              icon: getNotificationIcon(data.activity_type),
-              created_at: data.created_at
+              type: getNotificationType(newActivity.activity_type),
+              icon: getNotificationIcon(newActivity.activity_type),
+              user: newActivity.admin_users?.full_name || 'System',
+              createdAt: newActivity.created_at,
+              ipAddress: newActivity.ip_address
             }
-            setNotifications(prev => [newNotification, ...prev.slice(0, 9)])
+            
+            // Add to top of list
+            setNotifications(prev => [newNotification, ...prev.slice(0, 19)])
             setUnreadCount(prev => prev + 1)
+            
+            // Show browser notification (optional)
+            if (Notification.permission === 'granted') {
+              new Notification(newNotification.title, {
+                body: newNotification.message,
+                icon: '/favicon.ico'
+              })
+            }
           }
         }
       )
       .subscribe()
 
-    return () => subscription.unsubscribe()
+    return () => {
+      channel.unsubscribe()
+    }
   }
 
+  // Request notification permission
+  const requestNotificationPermission = () => {
+    if ('Notification' in window && Notification.permission !== 'denied') {
+      Notification.requestPermission()
+    }
+  }
+
+  // Get notification title based on activity type
   const getNotificationTitle = (type) => {
     const titles = {
-      'LOGIN': 'New Login',
-      'LOGOUT': 'User Logout',
-      'USER_MANAGEMENT': 'User Management',
-      'CONTENT_MODERATION': 'Content Moderation',
-      'REPORT_HANDLING': 'Report Update',
-      'SECURITY_ALERT': 'Security Alert'
+      'LOGIN': '🔐 New Login',
+      'LOGOUT': '🚪 User Logout',
+      'USER_MANAGEMENT': '👥 User Management',
+      'CONTENT_MODERATION': '📝 Content Moderation',
+      'REPORT_HANDLING': '📋 Report Update',
+      'SECURITY_ALERT': '⚠️ Security Alert',
+      'PASSWORD_CHANGE': '🔑 Password Changed',
+      'SETTINGS_UPDATE': '⚙️ Settings Updated',
+      'BACKUP_CREATED': '💾 Backup Created',
+      'EXPORT_DATA': '📊 Data Exported'
     }
-    return titles[type] || 'New Activity'
+    return titles[type] || '📢 New Activity'
   }
 
+  // Get notification type for styling
   const getNotificationType = (type) => {
     const types = {
       'LOGIN': 'info',
@@ -145,11 +220,16 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       'USER_MANAGEMENT': 'primary',
       'CONTENT_MODERATION': 'warning',
       'REPORT_HANDLING': 'danger',
-      'SECURITY_ALERT': 'danger'
+      'SECURITY_ALERT': 'danger',
+      'PASSWORD_CHANGE': 'warning',
+      'SETTINGS_UPDATE': 'info',
+      'BACKUP_CREATED': 'success',
+      'EXPORT_DATA': 'success'
     }
     return types[type] || 'info'
   }
 
+  // Get notification icon
   const getNotificationIcon = (type) => {
     const icons = {
       'LOGIN': 'box-arrow-in-right',
@@ -157,11 +237,16 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       'USER_MANAGEMENT': 'people',
       'CONTENT_MODERATION': 'file-post',
       'REPORT_HANDLING': 'flag',
-      'SECURITY_ALERT': 'shield-exclamation'
+      'SECURITY_ALERT': 'shield-exclamation',
+      'PASSWORD_CHANGE': 'key',
+      'SETTINGS_UPDATE': 'gear',
+      'BACKUP_CREATED': 'database',
+      'EXPORT_DATA': 'download'
     }
     return icons[type] || 'bell'
   }
 
+  // Format time ago
   const formatTimeAgo = (dateString) => {
     const date = new Date(dateString)
     const now = new Date()
@@ -176,21 +261,45 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
   }
 
+  // Mark notification as read
   const markAsRead = (notificationId) => {
-    setNotifications(prev => 
-      prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
-    )
-    setUnreadCount(prev => Math.max(0, prev - 1))
+    const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
+    if (!readIds.includes(notificationId)) {
+      readIds.push(notificationId)
+      localStorage.setItem('readNotifications', JSON.stringify(readIds))
+      setUnreadCount(prev => Math.max(0, prev - 1))
+      setNotifications(prev => 
+        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+      )
+    }
   }
 
+  // Mark all notifications as read
   const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    const allIds = notifications.map(n => n.id)
+    localStorage.setItem('readNotifications', JSON.stringify(allIds))
     setUnreadCount(0)
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   }
 
+  // Clear all notifications (remove from UI only, not from database)
   const clearAllNotifications = () => {
     setNotifications([])
     setUnreadCount(0)
+  }
+
+  // Delete notification from database (admin only)
+  const deleteNotification = async (notificationId) => {
+    if (session?.admin?.is_super_admin) {
+      const { error } = await supabase
+        .from('admin_activity_logs')
+        .delete()
+        .eq('log_id', notificationId)
+      
+      if (!error) {
+        setNotifications(prev => prev.filter(n => n.id !== notificationId))
+      }
+    }
   }
 
   const handleLogout = async () => {
@@ -245,7 +354,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               <small className="text-success">Secure Connection</small>
             </div>
 
-            {/* Notifications Dropdown */}
+            {/* Real-time Notifications Dropdown */}
             <div className="position-relative" ref={notificationRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 position-relative"
@@ -256,37 +365,52 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                   <i className="bi bi-bell fs-5 text-secondary"></i>
                 </div>
                 {unreadCount > 0 && (
-                  <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style={{ fontSize: '10px' }}>
-                    {unreadCount}
+                  <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger animate-pulse" style={{ fontSize: '10px' }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
                 )}
               </button>
 
+              {/* Notifications Dropdown Menu */}
               {showNotifications && (
-                <div className="position-absolute end-0 mt-2" style={{ width: '380px', zIndex: 1050 }}>
+                <div className="position-absolute end-0 mt-2" style={{ width: '400px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
+                    {/* Header */}
                     <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
-                      <h6 className="mb-0 fw-bold">
-                        <i className="bi bi-bell me-2 text-primary"></i>
-                        Notifications
-                        {unreadCount > 0 && (
-                          <span className="badge bg-primary ms-2">{unreadCount} new</span>
-                        )}
-                      </h6>
+                      <div>
+                        <h6 className="mb-0 fw-bold">
+                          <i className="bi bi-bell me-2 text-primary"></i>
+                          Real-time Notifications
+                          {unreadCount > 0 && (
+                            <span className="badge bg-danger ms-2">{unreadCount} new</span>
+                          )}
+                        </h6>
+                        <small className="text-muted">Live updates from system</small>
+                      </div>
                       <div className="dropdown">
                         <button className="btn btn-sm btn-link text-decoration-none p-0" data-bs-toggle="dropdown">
                           <i className="bi bi-three-dots-vertical"></i>
                         </button>
                         <ul className="dropdown-menu dropdown-menu-end">
-                          <li><button className="dropdown-item small" onClick={markAllAsRead}>Mark all as read</button></li>
+                          <li><button className="dropdown-item small" onClick={markAllAsRead}>
+                            <i className="bi bi-check2-all me-2"></i>Mark all as read
+                          </button></li>
                           <li><hr className="dropdown-divider" /></li>
-                          <li><button className="dropdown-item small text-danger" onClick={clearAllNotifications}>Clear all</button></li>
+                          <li><button className="dropdown-item small text-danger" onClick={clearAllNotifications}>
+                            <i className="bi bi-trash me-2"></i>Clear all
+                          </button></li>
                         </ul>
                       </div>
                     </div>
 
-                    <div className="notifications-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                      {notifications.length > 0 ? (
+                    {/* Notifications List */}
+                    <div className="notifications-list" style={{ maxHeight: '450px', overflowY: 'auto' }}>
+                      {loadingNotifications ? (
+                        <div className="text-center py-5">
+                          <div className="spinner-border text-primary spinner-border-sm mb-2"></div>
+                          <p className="text-muted small mb-0">Loading notifications...</p>
+                        </div>
+                      ) : notifications.length > 0 ? (
                         notifications.map((notification) => (
                           <div 
                             key={notification.id} 
@@ -295,7 +419,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                             style={{ cursor: 'pointer' }}
                           >
                             <div className="d-flex gap-3">
-                              <div className={`flex-shrink-0 bg-${notification.type} bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center`} style={{ width: '40px', height: '40px' }}>
+                              <div className={`flex-shrink-0 bg-${notification.type} bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center`} style={{ width: '45px', height: '45px' }}>
                                 <i className={`bi bi-${notification.icon} text-${notification.type} fs-5`}></i>
                               </div>
                               <div className="flex-grow-1">
@@ -303,12 +427,35 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                                   <h6 className="mb-1 small fw-bold">{notification.title}</h6>
                                   <small className="text-muted" style={{ fontSize: '10px' }}>{notification.time}</small>
                                 </div>
-                                <p className="mb-0 small text-muted">{notification.message}</p>
+                                <p className="mb-1 small text-muted">{notification.message}</p>
+                                <div className="d-flex justify-content-between align-items-center">
+                                  <small className="text-muted" style={{ fontSize: '9px' }}>
+                                    <i className="bi bi-person-circle me-1"></i>
+                                    {notification.user}
+                                  </small>
+                                  {notification.ipAddress && (
+                                    <small className="text-muted" style={{ fontSize: '9px' }}>
+                                      <i className="bi bi-ip me-1"></i>
+                                      {notification.ipAddress}
+                                    </small>
+                                  )}
+                                </div>
                               </div>
                               {!notification.read && (
                                 <div className="flex-shrink-0">
                                   <div className="bg-primary rounded-circle" style={{ width: '8px', height: '8px' }}></div>
                                 </div>
+                              )}
+                              {session?.admin?.is_super_admin && (
+                                <button 
+                                  className="btn btn-sm btn-link text-danger p-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    deleteNotification(notification.id)
+                                  }}
+                                >
+                                  <i className="bi bi-x"></i>
+                                </button>
                               )}
                             </div>
                           </div>
@@ -317,11 +464,12 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         <div className="text-center py-5">
                           <i className="bi bi-bell-slash fs-1 text-muted"></i>
                           <p className="text-muted mt-2 mb-0">No notifications</p>
-                          <small className="text-muted">New activities will appear here</small>
+                          <small className="text-muted">System activities will appear here</small>
                         </div>
                       )}
                     </div>
 
+                    {/* Footer */}
                     <div className="card-footer bg-white py-2 text-center border-top">
                       <button 
                         className="btn btn-link btn-sm text-decoration-none p-0"
@@ -330,7 +478,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                           router.push('/admin/security/logs')
                         }}
                       >
-                        View All Activity <i className="bi bi-arrow-right ms-1"></i>
+                        View All Activity Logs <i className="bi bi-arrow-right ms-1"></i>
                       </button>
                     </div>
                   </div>
@@ -358,7 +506,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               </button>
 
               {showDropdown && (
-                <div className="position-absolute end-0 mt-2" style={{ width: '280px', zIndex: 1050 }}>
+                <div className="position-absolute end-0 mt-2" style={{ width: '300px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
                     <div className="bg-primary text-white px-4 py-3 text-center">
                       <div className="bg-white rounded-circle d-flex align-items-center justify-content-center mx-auto mb-2" style={{ width: '60px', height: '60px' }}>
@@ -390,19 +538,11 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         </div>
                       </button>
 
-                      <button className="dropdown-item-custom" onClick={() => { setShowDropdown(false); router.push('/admin/settings/security'); }}>
-                        <i className="bi bi-shield-lock me-3"></i>
-                        <div>
-                          <div className="fw-semibold small">Security Settings</div>
-                          <div className="text-muted" style={{ fontSize: '10px' }}>Manage 2FA and security</div>
-                        </div>
-                      </button>
-
                       <button className="dropdown-item-custom" onClick={() => { setShowDropdown(false); router.push('/admin/security/logs'); }}>
                         <i className="bi bi-activity me-3"></i>
                         <div>
                           <div className="fw-semibold small">Activity Logs</div>
-                          <div className="text-muted" style={{ fontSize: '10px' }}>View your activity history</div>
+                          <div className="text-muted" style={{ fontSize: '10px' }}>View all system activities</div>
                         </div>
                       </button>
 
@@ -415,19 +555,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                           <div className="text-muted" style={{ fontSize: '10px' }}>Configure system preferences</div>
                         </div>
                       </button>
-
-                      <hr className="my-2" />
-
-                      <div className="px-3 py-2">
-                        <small className="text-muted d-block" style={{ fontSize: '9px' }}>
-                          <i className="bi bi-hdd me-1"></i> 
-                          Session ID: {session.sessionId?.slice(0, 8) || 'ACTIVE'}...
-                        </small>
-                        <small className="text-muted d-block mt-1" style={{ fontSize: '9px' }}>
-                          <i className="bi bi-clock me-1"></i> 
-                          Logged in: {new Date(session.loggedInAt).toLocaleString()}
-                        </small>
-                      </div>
 
                       <hr className="my-2" />
 
@@ -467,6 +594,10 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           background-color: #f8f9fa;
         }
         
+        .notifications-list {
+          scrollbar-width: thin;
+        }
+        
         .notifications-list::-webkit-scrollbar {
           width: 4px;
         }
@@ -485,7 +616,20 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         }
         
         .notification-item:hover {
-          background-color: #f8f9fa;
+          background-color: #f8f9fa !important;
+        }
+        
+        @keyframes pulse {
+          0%, 100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.1);
+          }
+        }
+        
+        .animate-pulse {
+          animation: pulse 2s infinite;
         }
       `}</style>
     </div>
