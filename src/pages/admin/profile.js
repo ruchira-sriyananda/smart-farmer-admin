@@ -12,6 +12,7 @@ export default function Profile() {
   const [message, setMessage] = useState({ type: '', text: '' })
   const [session, setSession] = useState(null)
   const [userRole, setUserRole] = useState('')
+  const [debugInfo, setDebugInfo] = useState(null)
   
   const [formData, setFormData] = useState({
     full_name: '',
@@ -39,118 +40,85 @@ export default function Profile() {
       setSession(parsedSession)
       setUserRole(parsedSession.role || 'SUPER_ADMIN')
       await fetchProfile(parsedSession)
-      
-      // Subscribe to real-time profile updates
-      subscribeToProfileUpdates(parsedSession)
     }
     
     init()
-    
-    return () => {
-      supabase.removeAllChannels()
-    }
   }, [router])
-
-  const subscribeToProfileUpdates = (sessionData) => {
-    const adminId = sessionData.admin?.admin_id
-    
-    if (adminId) {
-      const subscription = supabase
-        .channel(`admin_user_${adminId}`)
-        .on('postgres_changes', 
-          { 
-            event: 'UPDATE', 
-            schema: 'public', 
-            table: 'admin_users',
-            filter: `admin_id=eq.${adminId}`
-          }, 
-          (payload) => {
-            // Update profile in real-time
-            setProfile(payload.new)
-            setFormData({
-              full_name: payload.new.full_name || '',
-              email: payload.new.email || '',
-              phone_number: payload.new.phone_number || '',
-              profile_image: payload.new.profile_image || '',
-              bio: payload.new.bio || '',
-              location: payload.new.location || '',
-              timezone: payload.new.timezone || 'Asia/Colombo',
-              notification_preferences: payload.new.notification_preferences || {
-                email_notifications: true,
-                security_alerts: true,
-                activity_summary: true
-              }
-            })
-            
-            // Update session storage
-            const updatedSession = JSON.parse(localStorage.getItem('adminSession'))
-            if (updatedSession) {
-              updatedSession.admin = payload.new
-              localStorage.setItem('adminSession', JSON.stringify(updatedSession))
-            }
-            
-            setMessage({ type: 'success', text: 'Profile updated in real-time!' })
-            setTimeout(() => setMessage({ type: '', text: '' }), 3000)
-          }
-        )
-        .subscribe()
-        
-      return () => subscription.unsubscribe()
-    }
-  }
 
   const fetchProfile = async (sessionData) => {
     try {
       const adminId = sessionData.admin?.admin_id
       
-      if (adminId) {
-        // First try to get from database
-        const { data, error } = await supabase
+      if (!adminId) {
+        console.error('No admin_id found in session')
+        setLoading(false)
+        return
+      }
+
+      console.log('Fetching profile for admin_id:', adminId)
+
+      // First, check if record exists
+      const { data: existingData, error: checkError } = await supabase
+        .from('admin_users')
+        .select('*')
+        .eq('admin_id', adminId)
+        .maybeSingle()
+
+      if (checkError) {
+        console.error('Error checking profile:', checkError)
+      }
+
+      if (!existingData) {
+        console.log('No profile found, creating one...')
+        // Create profile if it doesn't exist
+        const { data: newProfile, error: insertError } = await supabase
           .from('admin_users')
-          .select(`
-            *,
-            admin_roles!admin_users_role_id_fkey (
-              role_id,
-              role_name,
-              description
-            )
-          `)
-          .eq('admin_id', adminId)
+          .insert({
+            admin_id: adminId,
+            full_name: sessionData.admin?.full_name || 'Admin User',
+            email: sessionData.admin?.email || sessionData.user?.email,
+            password_hash: 'managed_by_auth',
+            role_id: sessionData.admin?.role_id || null,
+            is_active: true,
+            is_super_admin: sessionData.admin?.is_super_admin || false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select()
           .single()
 
-        if (!error && data) {
-          setProfile(data)
-          setUserRole(data.admin_roles?.role_name || sessionData.role || 'SUPER_ADMIN')
+        if (insertError) {
+          console.error('Error creating profile:', insertError)
+          setDebugInfo({ error: insertError })
+        } else if (newProfile) {
+          setProfile(newProfile)
           setFormData({
-            full_name: data.full_name || '',
-            email: data.email || '',
-            phone_number: data.phone_number || '',
-            profile_image: data.profile_image || '',
-            bio: data.bio || '',
-            location: data.location || '',
-            timezone: data.timezone || 'Asia/Colombo',
-            notification_preferences: data.notification_preferences || {
+            full_name: newProfile.full_name || '',
+            email: newProfile.email || '',
+            phone_number: newProfile.phone_number || '',
+            profile_image: newProfile.profile_image || '',
+            bio: newProfile.bio || '',
+            location: newProfile.location || '',
+            timezone: newProfile.timezone || 'Asia/Colombo',
+            notification_preferences: newProfile.notification_preferences || {
               email_notifications: true,
               security_alerts: true,
               activity_summary: true
             }
           })
-        } else {
-          // If no data in database, create it
-          await createAdminRecord(sessionData)
         }
       } else {
-        // Fallback to session data
-        setProfile(sessionData.admin)
+        console.log('Profile found:', existingData)
+        setProfile(existingData)
         setFormData({
-          full_name: sessionData.admin?.full_name || '',
-          email: sessionData.admin?.email || '',
-          phone_number: '',
-          profile_image: '',
-          bio: '',
-          location: '',
-          timezone: 'Asia/Colombo',
-          notification_preferences: {
+          full_name: existingData.full_name || '',
+          email: existingData.email || '',
+          phone_number: existingData.phone_number || '',
+          profile_image: existingData.profile_image || '',
+          bio: existingData.bio || '',
+          location: existingData.location || '',
+          timezone: existingData.timezone || 'Asia/Colombo',
+          notification_preferences: existingData.notification_preferences || {
             email_notifications: true,
             security_alerts: true,
             activity_summary: true
@@ -158,41 +126,10 @@ export default function Profile() {
         })
       }
     } catch (err) {
-      console.error('Error fetching profile:', err)
+      console.error('Error in fetchProfile:', err)
+      setDebugInfo({ error: err.message })
     } finally {
       setLoading(false)
-    }
-  }
-
-  const createAdminRecord = async (sessionData) => {
-    try {
-      // Get role_id for SUPER_ADMIN
-      const { data: roleData } = await supabase
-        .from('admin_roles')
-        .select('role_id')
-        .eq('role_name', 'SUPER_ADMIN')
-        .single()
-
-      const { data, error } = await supabase
-        .from('admin_users')
-        .insert({
-          admin_id: sessionData.admin?.admin_id || crypto.randomUUID(),
-          full_name: sessionData.admin?.full_name || 'Admin User',
-          email: sessionData.admin?.email || sessionData.user?.email,
-          password_hash: 'managed_by_auth',
-          role_id: roleData?.role_id,
-          is_active: true,
-          is_super_admin: true,
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single()
-
-      if (!error && data) {
-        setProfile(data)
-      }
-    } catch (err) {
-      console.error('Error creating admin record:', err)
     }
   }
 
@@ -229,30 +166,43 @@ export default function Profile() {
       const adminId = session?.admin?.admin_id
       
       if (!adminId) {
-        throw new Error('Admin ID not found')
+        throw new Error('Admin ID not found. Please logout and login again.')
       }
 
-      // Prepare update data
+      console.log('Updating profile for admin_id:', adminId)
+      console.log('Update data:', formData)
+
+      // Prepare update data - only include columns that exist
       const updateData = {
         full_name: formData.full_name,
-        phone_number: formData.phone_number,
-        bio: formData.bio,
-        location: formData.location,
+        phone_number: formData.phone_number || null,
+        bio: formData.bio || null,
+        location: formData.location || null,
         timezone: formData.timezone,
         notification_preferences: formData.notification_preferences,
         updated_at: new Date().toISOString()
       }
 
+      // Remove undefined values
+      Object.keys(updateData).forEach(key => {
+        if (updateData[key] === undefined) {
+          delete updateData[key]
+        }
+      })
+
       // Update profile in database
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('admin_users')
         .update(updateData)
         .eq('admin_id', adminId)
+        .select()
 
       if (error) {
-        console.error('Supabase error:', error)
-        throw new Error(error.message)
+        console.error('Supabase update error:', error)
+        throw new Error(`Database error: ${error.message}`)
       }
+
+      console.log('Update response:', data)
 
       // Log the activity
       await logActivity(`Profile updated by ${formData.full_name}`)
@@ -269,6 +219,9 @@ export default function Profile() {
 
       setMessage({ type: 'success', text: 'Profile updated successfully in database!' })
       setEditing(false)
+      
+      // Refresh profile data
+      await fetchProfile(session)
       
       // Auto-hide message after 3 seconds
       setTimeout(() => setMessage({ type: '', text: '' }), 3000)
@@ -322,6 +275,14 @@ export default function Profile() {
       const fileName = `${adminId}-${Date.now()}.${fileExt}`
       const filePath = `profile-images/${fileName}`
 
+      // Ensure bucket exists
+      const { data: buckets } = await supabase.storage.listBuckets()
+      const bucketExists = buckets?.some(b => b.name === 'admin-profiles')
+      
+      if (!bucketExists) {
+        await supabase.storage.createBucket('admin-profiles', { public: true })
+      }
+
       const { error: uploadError } = await supabase.storage
         .from('admin-profiles')
         .upload(filePath, file)
@@ -344,6 +305,7 @@ export default function Profile() {
       await logActivity('Profile image updated')
       
     } catch (err) {
+      console.error('Image upload error:', err)
       setMessage({ type: 'danger', text: err.message })
     } finally {
       setSaving(false)
@@ -362,6 +324,13 @@ export default function Profile() {
 
   return (
     <AdminLayout title="My Profile">
+      {/* Debug Info (remove in production) */}
+      {debugInfo && process.env.NODE_ENV !== 'production' && (
+        <div className="alert alert-warning small mb-3">
+          <strong>Debug:</strong> {JSON.stringify(debugInfo)}
+        </div>
+      )}
+
       {message.text && (
         <div className={`alert alert-${message.type} alert-dismissible fade show mb-4 shadow-sm`} role="alert">
           <i className={`bi bi-${message.type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2`}></i>
@@ -417,8 +386,8 @@ export default function Profile() {
                   Last Updated: {profile?.updated_at ? new Date(profile.updated_at).toLocaleString() : 'Never'}
                 </div>
                 <div>
-                  <i className="bi bi-arrow-repeat me-2"></i>
-                  Real-time Sync: Active
+                  <i className="bi bi-database me-2"></i>
+                  Supabase Sync: Active
                 </div>
               </div>
             </div>
@@ -464,7 +433,10 @@ export default function Profile() {
 
                 <div className="col-md-6">
                   <label className="form-label fw-semibold"><i className="bi bi-envelope me-1"></i>Email Address</label>
-                  <div className="border rounded p-2 bg-light text-muted">{profile?.email}<small className="d-block">Cannot be changed</small></div>
+                  <div className="border rounded p-2 bg-light text-muted">
+                    {profile?.email || formData.email}
+                    <small className="d-block text-muted">Cannot be changed</small>
+                  </div>
                 </div>
 
                 <div className="col-md-6">
@@ -519,17 +491,50 @@ export default function Profile() {
             </div>
             <div className="card-body">
               <div className="vstack gap-3">
-                {['email_notifications', 'security_alerts', 'activity_summary'].map(pref => (
-                  <div className="form-check form-switch" key={pref}>
-                    <input className="form-check-input" type="checkbox" id={pref}
-                      checked={formData.notification_preferences?.[pref]}
-                      onChange={(e) => setFormData({...formData, notification_preferences: {...formData.notification_preferences, [pref]: e.target.checked}})}
-                      disabled={!editing} />
-                    <label className="form-check-label fw-semibold" htmlFor={pref}>
-                      {pref.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-                    </label>
-                  </div>
-                ))}
+                <div className="form-check form-switch">
+                  <input className="form-check-input" type="checkbox" id="email_notifications"
+                    checked={formData.notification_preferences?.email_notifications}
+                    onChange={(e) => setFormData({
+                      ...formData, 
+                      notification_preferences: {
+                        ...formData.notification_preferences,
+                        email_notifications: e.target.checked
+                      }
+                    })}
+                    disabled={!editing} />
+                  <label className="form-check-label fw-semibold" htmlFor="email_notifications">Email Notifications</label>
+                  <div className="text-muted small">Receive system notifications via email</div>
+                </div>
+
+                <div className="form-check form-switch">
+                  <input className="form-check-input" type="checkbox" id="security_alerts"
+                    checked={formData.notification_preferences?.security_alerts}
+                    onChange={(e) => setFormData({
+                      ...formData, 
+                      notification_preferences: {
+                        ...formData.notification_preferences,
+                        security_alerts: e.target.checked
+                      }
+                    })}
+                    disabled={!editing} />
+                  <label className="form-check-label fw-semibold" htmlFor="security_alerts">Security Alerts</label>
+                  <div className="text-muted small">Get notified about security events</div>
+                </div>
+
+                <div className="form-check form-switch">
+                  <input className="form-check-input" type="checkbox" id="activity_summary"
+                    checked={formData.notification_preferences?.activity_summary}
+                    onChange={(e) => setFormData({
+                      ...formData, 
+                      notification_preferences: {
+                        ...formData.notification_preferences,
+                        activity_summary: e.target.checked
+                      }
+                    })}
+                    disabled={!editing} />
+                  <label className="form-check-label fw-semibold" htmlFor="activity_summary">Activity Summary</label>
+                  <div className="text-muted small">Receive weekly summary of platform activities</div>
+                </div>
               </div>
             </div>
           </div>
