@@ -14,6 +14,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loadingNotifications, setLoadingNotifications] = useState(true)
+  const [profileImage, setProfileImage] = useState(null)
+  const [profileName, setProfileName] = useState('')
   const dropdownRef = useRef(null)
   const notificationRef = useRef(null)
 
@@ -27,6 +29,11 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     try {
       const parsedSession = JSON.parse(storedSession)
       setSession(parsedSession)
+      setProfileName(parsedSession.admin?.full_name || parsedSession.user?.email?.split('@')[0] || 'Admin')
+      setProfileImage(parsedSession.admin?.profile_image || null)
+      
+      // Subscribe to real-time profile updates
+      subscribeToProfileUpdates(parsedSession)
     } catch (err) {
       console.error('Error parsing session:', err)
       router.push('/admin/login')
@@ -45,6 +52,47 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       supabase.removeAllChannels()
     }
   }, [router])
+
+  // Subscribe to profile changes in real-time
+  const subscribeToProfileUpdates = (sessionData) => {
+    const adminEmail = sessionData.admin?.email || sessionData.user?.email
+    
+    if (!adminEmail) return
+
+    const channel = supabase
+      .channel('profile_updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'admin_users',
+          filter: `email=eq.${adminEmail}`
+        },
+        async (payload) => {
+          // Update profile image and name in real-time
+          if (payload.new.profile_image) {
+            setProfileImage(payload.new.profile_image)
+          }
+          if (payload.new.full_name) {
+            setProfileName(payload.new.full_name)
+          }
+          
+          // Update session storage
+          const currentSession = JSON.parse(localStorage.getItem('adminSession'))
+          if (currentSession) {
+            currentSession.admin = { ...currentSession.admin, ...payload.new }
+            localStorage.setItem('adminSession', JSON.stringify(currentSession))
+            setSession(currentSession)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      channel.unsubscribe()
+    }
+  }
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -66,7 +114,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     try {
       setLoadingNotifications(true)
       
-      // Get real data from database
       const { data: activities, error } = await supabase
         .from('admin_activity_logs')
         .select(`
@@ -101,12 +148,10 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         
         setNotifications(formattedNotifications)
         
-        // Count unread notifications (based on localStorage or session)
         const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
         const unread = formattedNotifications.filter(n => !readIds.includes(n.id)).length
         setUnreadCount(unread)
       } else {
-        // If no activities, show empty state
         setNotifications([])
         setUnreadCount(0)
       }
@@ -118,13 +163,11 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }
 
-  // Check if notification has been read
   const checkIfRead = (notificationId) => {
     const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
     return readIds.includes(notificationId)
   }
 
-  // Subscribe to real-time changes in admin_activity_logs
   const subscribeToRealTimeNotifications = () => {
     const channel = supabase
       .channel('admin_activity_logs_realtime')
@@ -136,7 +179,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           table: 'admin_activity_logs'
         },
         async (payload) => {
-          // Fetch full details of the new activity
           const { data: newActivity, error } = await supabase
             .from('admin_activity_logs')
             .select(`
@@ -167,11 +209,9 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               ipAddress: newActivity.ip_address
             }
             
-            // Add to top of list
             setNotifications(prev => [newNotification, ...prev.slice(0, 19)])
             setUnreadCount(prev => prev + 1)
             
-            // Show browser notification (optional)
             if (Notification.permission === 'granted') {
               new Notification(newNotification.title, {
                 body: newNotification.message,
@@ -188,14 +228,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }
 
-  // Request notification permission
-  const requestNotificationPermission = () => {
-    if ('Notification' in window && Notification.permission !== 'denied') {
-      Notification.requestPermission()
-    }
-  }
-
-  // Get notification title based on activity type
   const getNotificationTitle = (type) => {
     const titles = {
       'LOGIN': '🔐 New Login',
@@ -212,7 +244,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return titles[type] || '📢 New Activity'
   }
 
-  // Get notification type for styling
   const getNotificationType = (type) => {
     const types = {
       'LOGIN': 'info',
@@ -229,7 +260,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return types[type] || 'info'
   }
 
-  // Get notification icon
   const getNotificationIcon = (type) => {
     const icons = {
       'LOGIN': 'box-arrow-in-right',
@@ -246,7 +276,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return icons[type] || 'bell'
   }
 
-  // Format time ago
   const formatTimeAgo = (dateString) => {
     const date = new Date(dateString)
     const now = new Date()
@@ -261,7 +290,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
   }
 
-  // Mark notification as read
   const markAsRead = (notificationId) => {
     const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
     if (!readIds.includes(notificationId)) {
@@ -274,7 +302,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }
 
-  // Mark all notifications as read
   const markAllAsRead = () => {
     const allIds = notifications.map(n => n.id)
     localStorage.setItem('readNotifications', JSON.stringify(allIds))
@@ -282,13 +309,11 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  // Clear all notifications (remove from UI only, not from database)
   const clearAllNotifications = () => {
     setNotifications([])
     setUnreadCount(0)
   }
 
-  // Delete notification from database (admin only)
   const deleteNotification = async (notificationId) => {
     if (session?.admin?.is_super_admin) {
       const { error } = await supabase
@@ -309,12 +334,11 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   }
 
   const getInitials = () => {
-    const name = session?.admin?.full_name || session?.user?.email || 'Admin'
-    return name.charAt(0).toUpperCase()
+    return profileName.charAt(0).toUpperCase() || 'A'
   }
 
   const getDisplayName = () => {
-    return session?.admin?.full_name || session?.user?.email?.split('@')[0] || 'Admin'
+    return profileName || session?.admin?.full_name || session?.user?.email?.split('@')[0] || 'Admin'
   }
 
   const getUserEmail = () => {
@@ -375,7 +399,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               {showNotifications && (
                 <div className="position-absolute end-0 mt-2" style={{ width: '400px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
-                    {/* Header */}
                     <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
                       <div>
                         <h6 className="mb-0 fw-bold">
@@ -403,7 +426,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                       </div>
                     </div>
 
-                    {/* Notifications List */}
                     <div className="notifications-list" style={{ maxHeight: '450px', overflowY: 'auto' }}>
                       {loadingNotifications ? (
                         <div className="text-center py-5">
@@ -469,7 +491,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                       )}
                     </div>
 
-                    {/* Footer */}
                     <div className="card-footer bg-white py-2 text-center border-top">
                       <button 
                         className="btn btn-link btn-sm text-decoration-none p-0"
@@ -486,7 +507,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               )}
             </div>
 
-            {/* Profile Dropdown */}
+            {/* Profile Dropdown with Real-time Image */}
             <div className="position-relative" ref={dropdownRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 d-flex align-items-center"
@@ -494,8 +515,21 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                 style={{ outline: 'none' }}
               >
                 <div className="d-flex align-items-center gap-2">
-                  <div className="bg-primary rounded-circle d-flex align-items-center justify-content-center text-white fw-bold" style={{ width: '40px', height: '40px' }}>
-                    {getInitials()}
+                  <div className="rounded-circle d-flex align-items-center justify-content-center text-white fw-bold" style={{ 
+                    width: '40px', 
+                    height: '40px',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    overflow: 'hidden'
+                  }}>
+                    {profileImage ? (
+                      <img 
+                        src={profileImage} 
+                        alt="Profile" 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <span>{getInitials()}</span>
+                    )}
                   </div>
                   <div className="text-start d-none d-md-block">
                     <div className="fw-bold small">{getDisplayName()}</div>
@@ -508,9 +542,17 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               {showDropdown && (
                 <div className="position-absolute end-0 mt-2" style={{ width: '300px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
-                    <div className="bg-primary text-white px-4 py-3 text-center">
-                      <div className="bg-white rounded-circle d-flex align-items-center justify-content-center mx-auto mb-2" style={{ width: '60px', height: '60px' }}>
-                        <span className="text-primary fw-bold fs-3">{getInitials()}</span>
+                    <div className="bg-gradient-primary text-white px-4 py-3 text-center">
+                      <div className="bg-white rounded-circle d-flex align-items-center justify-content-center mx-auto mb-2 shadow-sm" style={{ width: '70px', height: '70px', overflow: 'hidden' }}>
+                        {profileImage ? (
+                          <img 
+                            src={profileImage} 
+                            alt="Profile" 
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <span className="text-primary fw-bold fs-2">{getInitials()}</span>
+                        )}
                       </div>
                       <h6 className="mb-1 fw-bold">{getDisplayName()}</h6>
                       <p className="small mb-0 opacity-75">{getUserEmail()}</p>
@@ -577,6 +619,9 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       </div>
 
       <style jsx>{`
+        .bg-gradient-primary {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
         .dropdown-item-custom {
           display: flex;
           align-items: center;
