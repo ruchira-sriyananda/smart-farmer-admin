@@ -9,14 +9,15 @@ export default function EditUser() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [roles, setRoles] = useState([])
+  const [message, setMessage] = useState({ type: '', text: '' })
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
     role_id: '',
     is_active: true,
-    is_super_admin: false
+    is_super_admin: false,
+    phone_number: ''
   })
-  const [message, setMessage] = useState({ type: '', text: '' })
 
   useEffect(() => {
     if (id) {
@@ -33,13 +34,16 @@ export default function EditUser() {
         .eq('admin_id', id)
         .single()
 
-      if (!error && data) {
+      if (error) throw error
+
+      if (data) {
         setFormData({
-          full_name: data.full_name,
-          email: data.email,
+          full_name: data.full_name || '',
+          email: data.email || '',
           role_id: data.role_id || '',
-          is_active: data.is_active,
-          is_super_admin: data.is_super_admin
+          is_active: data.is_active || false,
+          is_super_admin: data.is_super_admin || false,
+          phone_number: data.phone_number || ''
         })
       }
     } catch (err) {
@@ -70,39 +74,66 @@ export default function EditUser() {
     setMessage({ type: '', text: '' })
 
     try {
-      const { error } = await supabase
+      // Get current session for activity logging
+      const sessionData = JSON.parse(localStorage.getItem('adminSession') || '{}')
+      
+      // Get client IP for logging
+      const clientIP = await getClientIP()
+
+      // Update user in database
+      const { error: updateError } = await supabase
         .from('admin_users')
         .update({
           full_name: formData.full_name,
           role_id: formData.role_id || null,
           is_active: formData.is_active,
           is_super_admin: formData.is_super_admin,
+          phone_number: formData.phone_number,
           updated_at: new Date().toISOString()
         })
         .eq('admin_id', id)
 
-      if (error) throw error
+      if (updateError) throw updateError
 
-      // Log activity
-      const session = JSON.parse(localStorage.getItem('adminSession'))
+      // Log the activity
       await supabase
         .from('admin_activity_logs')
         .insert({
-          admin_id: session?.admin?.admin_id,
+          admin_id: sessionData?.admin?.admin_id,
           activity_type: 'USER_MANAGEMENT',
           activity_description: `Updated user: ${formData.email}`,
+          ip_address: clientIP,
           created_at: new Date().toISOString()
         })
 
+      // Update session storage if this is the current user
+      if (sessionData?.admin?.admin_id === id) {
+        sessionData.admin.full_name = formData.full_name
+        localStorage.setItem('adminSession', JSON.stringify(sessionData))
+      }
+
       setMessage({ type: 'success', text: 'User updated successfully!' })
       
+      // Redirect after 1.5 seconds
       setTimeout(() => {
         router.push(`/admin/users/${id}`)
       }, 1500)
+      
     } catch (err) {
+      console.error('Error saving user:', err)
       setMessage({ type: 'danger', text: err.message })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const getClientIP = async () => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json')
+      const data = await response.json()
+      return data.ip
+    } catch {
+      return 'unknown'
     }
   }
 
@@ -123,7 +154,7 @@ export default function EditUser() {
           <div className="d-flex justify-content-between align-items-center">
             <h5 className="mb-0 fw-bold">
               <i className="bi bi-pencil-square me-2 text-primary"></i>
-              Edit User
+              Edit User Information
             </h5>
             <button className="btn btn-sm btn-outline-secondary" onClick={() => router.back()}>
               <i className="bi bi-arrow-left me-1"></i>Back
@@ -164,15 +195,26 @@ export default function EditUser() {
               </div>
 
               <div className="col-md-6 mb-3">
+                <label className="form-label fw-semibold">Phone Number</label>
+                <input
+                  type="tel"
+                  className="form-control"
+                  value={formData.phone_number}
+                  onChange={(e) => setFormData({...formData, phone_number: e.target.value})}
+                  placeholder="+94 XX XXX XXXX"
+                />
+              </div>
+
+              <div className="col-md-6 mb-3">
                 <label className="form-label fw-semibold">Role</label>
                 <select 
                   className="form-select"
                   value={formData.role_id}
                   onChange={(e) => setFormData({...formData, role_id: e.target.value})}
                 >
-                  <option value="">No Role</option>
+                  <option value="">Select Role</option>
                   {roles.map(role => (
-                    <option key={role.role_id} value={role.role_name}>
+                    <option key={role.role_id} value={role.role_id}>
                       {role.role_name} - {role.description}
                     </option>
                   ))}
@@ -194,8 +236,8 @@ export default function EditUser() {
                 </div>
               </div>
 
-              <div className="col-12 mb-3">
-                <div className="form-check">
+              <div className="col-md-6 mb-3">
+                <div className="form-check form-switch mt-4 pt-2">
                   <input
                     className="form-check-input"
                     type="checkbox"
@@ -207,9 +249,6 @@ export default function EditUser() {
                     <i className="bi bi-star-fill text-warning me-1"></i>
                     Super Admin Privileges
                   </label>
-                  <div className="text-muted small mt-1">
-                    Super admins have unrestricted access to all system features.
-                  </div>
                 </div>
               </div>
             </div>
