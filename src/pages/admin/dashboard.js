@@ -70,7 +70,21 @@ export default function AdminDashboard() {
     else if (hour < 18) setGreeting('Good Afternoon')
     else setGreeting('Good Evening')
   }, [])
+// Add this near the top of your dashboard component
+const [totalUserCount, setTotalUserCount] = useState(0)
 
+// Add this function
+const fetchTotalUserCount = async () => {
+  const { count } = await supabase
+    .from('users')
+    .select('*', { count: 'exact', head: true })
+  setTotalUserCount(count || 0)
+}
+
+// Call it in your useEffect
+useEffect(() => {
+  fetchTotalUserCount()
+}, [])
   // Fetch online users
   const fetchOnlineUsers = async () => {
     try {
