@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/router'
-import { supabase, safeLogActivity } from '@/lib/supabaseClient'
+import { supabase } from '@/lib/supabaseClient'
 import ReCAPTCHA from 'react-google-recaptcha'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import 'bootstrap-icons/font/bootstrap-icons.css'
@@ -64,12 +64,58 @@ export default function AdminLogin() {
             const ip = data.ip || data
             if (ip && ip !== 'unknown' && typeof ip === 'string') return ip
           }
-        } catch (e) { continue }
+        } catch (e) {
+          continue
+        }
       }
       return 'unknown'
     } catch (err) {
       console.error('Error getting IP:', err)
       return 'unknown'
+    }
+  }
+
+  // Safe logging function using async/await
+  const safeLogActivity = async (adminId, activityType, description, ipAddress) => {
+    if (!adminId) return
+    
+    try {
+      const { error } = await supabase
+        .from('admin_activity_logs')
+        .insert({
+          admin_id: adminId,
+          activity_type: activityType,
+          activity_description: description,
+          ip_address: ipAddress || 'unknown',
+          created_at: new Date().toISOString()
+        })
+      
+      if (error) {
+        console.warn('Activity logging failed:', error.message)
+      }
+    } catch (err) {
+      console.warn('Failed to log activity:', err.message)
+    }
+  }
+
+  // Update last login (async, don't await)
+  const updateLastLogin = async (adminId) => {
+    if (!adminId) return
+    
+    try {
+      const { error } = await supabase
+        .from('admin_users')
+        .update({ 
+          last_login: new Date().toISOString(), 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('admin_id', adminId)
+      
+      if (error) {
+        console.warn('Failed to update last_login:', error.message)
+      }
+    } catch (err) {
+      console.warn('Failed to update last_login:', err.message)
     }
   }
 
@@ -79,30 +125,35 @@ export default function AdminLogin() {
       return adminData
     }
     
-    // Create admin record if it doesn't exist
-    const { data: roleData } = await supabase
-      .from('admin_roles')
-      .select('role_id')
-      .eq('role_name', 'SUPER_ADMIN')
-      .single()
+    try {
+      // Get super admin role
+      const { data: roleData } = await supabase
+        .from('admin_roles')
+        .select('role_id')
+        .eq('role_name', 'SUPER_ADMIN')
+        .maybeSingle()
 
-    const { data: newAdmin, error: createError } = await supabase
-      .from('admin_users')
-      .insert({
-        admin_id: authUser.id,
-        full_name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'Admin',
-        email: authUser.email,
-        password_hash: 'managed_by_auth',
-        role_id: roleData?.role_id,
-        is_active: true,
-        is_super_admin: true,
-        created_at: new Date().toISOString()
-      })
-      .select()
-      .single()
+      // Create admin record
+      const { data: newAdmin, error: createError } = await supabase
+        .from('admin_users')
+        .insert({
+          admin_id: authUser.id,
+          full_name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'Admin',
+          email: authUser.email,
+          password_hash: 'managed_by_auth',
+          role_id: roleData?.role_id || null,
+          is_active: true,
+          is_super_admin: true,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single()
 
-    if (!createError && newAdmin) {
-      return newAdmin
+      if (!createError && newAdmin) {
+        return newAdmin
+      }
+    } catch (err) {
+      console.error('Error creating admin:', err)
     }
     return null
   }
@@ -115,11 +166,17 @@ export default function AdminLogin() {
     const clientIP = await getClientIP()
 
     try {
-      if (!email || !password) throw new Error('Please enter both email and password')
+      // Validate inputs
+      if (!email || !password) {
+        throw new Error('Please enter both email and password')
+      }
       
       const emailRegex = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/
-      if (!emailRegex.test(email)) throw new Error('Please enter a valid email address')
+      if (!emailRegex.test(email)) {
+        throw new Error('Please enter a valid email address')
+      }
 
+      // Execute reCAPTCHA
       let token
       try {
         token = await recaptchaRef.current.executeAsync()
@@ -127,8 +184,12 @@ export default function AdminLogin() {
       } catch (recaptchaError) {
         throw new Error('Security verification failed. Please refresh and try again.')
       }
-      if (!token) throw new Error('Security verification failed. Please try again.')
+      
+      if (!token) {
+        throw new Error('Security verification failed. Please try again.')
+      }
 
+      // Authenticate with Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password
@@ -137,20 +198,41 @@ export default function AdminLogin() {
       if (authError) {
         throw new Error(authError.message === 'Invalid login credentials' ? 'Invalid email or password' : authError.message)
       }
-      if (!authData.user) throw new Error('Authentication failed')
+      
+      if (!authData.user) {
+        throw new Error('Authentication failed')
+      }
 
+      // Query admin_users table
       const { data: adminData, error: adminError } = await supabase
         .from('admin_users')
         .select('*')
         .eq('email', email.trim().toLowerCase())
         .maybeSingle()
 
-      if (adminError) throw new Error('Database error occurred. Please try again.')
+      if (adminError) {
+        console.error('Admin query error:', adminError)
+        throw new Error('Database error occurred. Please try again.')
+      }
 
       // Ensure admin exists (create if needed)
       const verifiedAdmin = await ensureAdminExists(adminData, authData.user)
       
       if (!verifiedAdmin) {
+        // Log failed attempt
+        try {
+          await supabase
+            .from('failed_login_attempts')
+            .insert({
+              email: email.trim().toLowerCase(),
+              ip_address: clientIP,
+              failure_reason: 'Not authorized as admin',
+              device_info: navigator.userAgent,
+              attempt_time: new Date().toISOString()
+            })
+        } catch (logErr) {
+          console.warn('Failed to log attempt:', logErr)
+        }
         throw new Error('Access denied. You do not have administrator privileges.')
       }
 
@@ -165,27 +247,30 @@ export default function AdminLogin() {
           .from('admin_roles')
           .select('role_name')
           .eq('role_id', verifiedAdmin.role_id)
-          .single()
+          .maybeSingle()
         if (roleData) role = roleData.role_name
       }
 
       // Update last login (async, don't await)
-      supabase
-        .from('admin_users')
-        .update({ last_login: new Date().toISOString(), updated_at: new Date().toISOString() })
-        .eq('admin_id', verifiedAdmin.admin_id)
-        .catch(err => console.warn('Failed to update last_login:', err))
+      updateLastLogin(verifiedAdmin.admin_id)
 
-      // Safe log activity (with verified admin_id)
-      if (verifiedAdmin.admin_id) {
-        await safeLogActivity(verifiedAdmin.admin_id, 'LOGIN', `Admin logged in successfully`, clientIP)
+      // Log successful login (async, don't await)
+      safeLogActivity(verifiedAdmin.admin_id, 'LOGIN', `Admin logged in successfully`, clientIP)
+
+      // Save email if remember me is checked
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', email.trim().toLowerCase())
+      } else {
+        localStorage.removeItem('rememberedEmail')
       }
 
-      if (rememberMe) localStorage.setItem('rememberedEmail', email.trim().toLowerCase())
-      else localStorage.removeItem('rememberedEmail')
-
+      // Create session data
       const sessionData = {
-        user: { id: authData.user.id, email: authData.user.email, created_at: authData.user.created_at },
+        user: {
+          id: authData.user.id,
+          email: authData.user.email,
+          created_at: authData.user.created_at
+        },
         admin: {
           admin_id: verifiedAdmin.admin_id,
           full_name: verifiedAdmin.full_name,
@@ -210,6 +295,8 @@ export default function AdminLogin() {
       
     } catch (err) {
       console.error('Login error:', err)
+      
+      // Log failed attempt
       try {
         await supabase
           .from('failed_login_attempts')
@@ -220,7 +307,10 @@ export default function AdminLogin() {
             device_info: navigator.userAgent,
             attempt_time: new Date().toISOString()
           })
-      } catch (logErr) { console.warn('Failed to log attempt:', logErr) }
+      } catch (logErr) {
+        console.warn('Failed to log failed attempt:', logErr)
+      }
+      
       setError(err.message)
     } finally {
       setLoading(false)
@@ -248,6 +338,7 @@ export default function AdminLogin() {
       <div className="container">
         <div className="row justify-content-center">
           <div className="col-md-6 col-lg-5 col-xl-4">
+            {/* Brand Logo */}
             <div className="text-center mb-4">
               <div className="bg-white rounded-circle d-inline-flex p-3 shadow-lg mb-3">
                 <i className="bi bi-tractor fs-1 text-primary"></i>
@@ -256,6 +347,7 @@ export default function AdminLogin() {
               <p className="text-white-50">Administrator Access Portal</p>
             </div>
 
+            {/* Login Card */}
             <div className="card card-shadow border-0 rounded-4">
               <div className="card-body p-5">
                 <div className="text-center mb-4">
@@ -273,44 +365,112 @@ export default function AdminLogin() {
                 )}
 
                 <form onSubmit={handleLogin}>
+                  {/* Email Field */}
                   <div className="mb-3">
-                    <label className="form-label fw-semibold"><i className="bi bi-envelope me-1"></i> Email Address</label>
+                    <label className="form-label fw-semibold">
+                      <i className="bi bi-envelope me-1"></i> Email Address
+                    </label>
                     <div className="input-group">
-                      <span className="input-group-text bg-white"><i className="bi bi-envelope-fill text-muted"></i></span>
-                      <input type="email" className="form-control py-2" placeholder="admin@smartfarmer.com"
-                        value={email} onChange={(e) => setEmail(e.target.value)} required disabled={loading} autoComplete="off" />
+                      <span className="input-group-text bg-white">
+                        <i className="bi bi-envelope-fill text-muted"></i>
+                      </span>
+                      <input
+                        type="email"
+                        className="form-control py-2"
+                        placeholder="admin@smartfarmer.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        disabled={loading}
+                        autoComplete="off"
+                      />
                     </div>
                   </div>
 
+                  {/* Password Field */}
                   <div className="mb-3">
-                    <label className="form-label fw-semibold"><i className="bi bi-lock me-1"></i> Password</label>
+                    <label className="form-label fw-semibold">
+                      <i className="bi bi-lock me-1"></i> Password
+                    </label>
                     <div className="input-group">
-                      <span className="input-group-text bg-white"><i className="bi bi-key-fill text-muted"></i></span>
-                      <input type={showPassword ? "text" : "password"} className="form-control py-2" placeholder="Enter your password"
-                        value={password} onChange={(e) => setPassword(e.target.value)} required disabled={loading} autoComplete="off" />
-                      <button type="button" className="btn btn-outline-secondary bg-white" onClick={() => setShowPassword(!showPassword)}>
+                      <span className="input-group-text bg-white">
+                        <i className="bi bi-key-fill text-muted"></i>
+                      </span>
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        className="form-control py-2"
+                        placeholder="Enter your password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        disabled={loading}
+                        autoComplete="off"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary bg-white"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
                         <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`}></i>
                       </button>
                     </div>
                   </div>
 
+                  {/* Remember Me & Forgot Password */}
                   <div className="d-flex justify-content-between align-items-center mb-4">
                     <div className="form-check">
-                      <input type="checkbox" className="form-check-input" id="rememberMe" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
-                      <label className="form-check-label small" htmlFor="rememberMe">Remember me</label>
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        id="rememberMe"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                      />
+                      <label className="form-check-label small" htmlFor="rememberMe">
+                        Remember me
+                      </label>
                     </div>
-                    <a href="#" className="text-decoration-none small text-primary">Forgot Password?</a>
+                    <a href="#" className="text-decoration-none small text-primary">
+                      Forgot Password?
+                    </a>
                   </div>
 
-                  <ReCAPTCHA sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI'} size="invisible" ref={recaptchaRef} />
+                  {/* reCAPTCHA */}
+                  <ReCAPTCHA
+                    sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI'}
+                    size="invisible"
+                    ref={recaptchaRef}
+                  />
 
-                  <button type="submit" className="btn btn-gradient w-100 py-2 text-white fw-bold" disabled={loading}>
-                    {loading ? <><span className="spinner-border spinner-border-sm me-2"></span>Authenticating...</> : <><i className="bi bi-box-arrow-in-right me-2"></i>Login to Dashboard</>}
+                  {/* Login Button */}
+                  <button
+                    type="submit"
+                    className="btn btn-gradient w-100 py-2 text-white fw-bold"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <span className="spinner-border spinner-border-sm me-2"></span>
+                        Authenticating...
+                      </>
+                    ) : (
+                      <>
+                        <i className="bi bi-box-arrow-in-right me-2"></i>
+                        Login to Dashboard
+                      </>
+                    )}
                   </button>
                 </form>
 
-                <div className="position-relative my-4"><hr /><span className="position-absolute top-50 start-50 translate-middle bg-white px-3 text-muted small">Secure Access</span></div>
+                {/* Divider */}
+                <div className="position-relative my-4">
+                  <hr />
+                  <span className="position-absolute top-50 start-50 translate-middle bg-white px-3 text-muted small">
+                    Secure Access
+                  </span>
+                </div>
 
+                {/* Security Badges */}
                 <div className="text-center">
                   <div className="d-flex justify-content-center gap-3 mb-3">
                     <i className="bi bi-shield-check text-success fs-5" title="SSL Secure"></i>
@@ -318,13 +478,20 @@ export default function AdminLogin() {
                     <i className="bi bi-check-circle-fill text-info fs-5" title="2FA Ready"></i>
                     <i className="bi bi-incognito text-warning fs-5" title="IP Logging Enabled"></i>
                   </div>
-                  <p className="text-muted small mb-0"><i className="bi bi-shield-lock me-1"></i>Your connection is secure and encrypted.</p>
+                  <p className="text-muted small mb-0">
+                    <i className="bi bi-shield-lock me-1"></i>
+                    Your connection is secure and encrypted.
+                  </p>
                 </div>
               </div>
             </div>
 
+            {/* Footer */}
             <div className="text-center mt-4">
-              <p className="text-white-50 small"><i className="bi bi-c-circle me-1"></i>2026 Smart Farmer Platform. All rights reserved.</p>
+              <p className="text-white-50 small">
+                <i className="bi bi-c-circle me-1"></i>
+                2024 Smart Farmer Platform. All rights reserved.
+              </p>
             </div>
           </div>
         </div>
