@@ -115,6 +115,72 @@ const sessionData = {
 
 console.log('Storing session:', sessionData) // Debug log
 localStorage.setItem('adminSession', JSON.stringify(sessionData))
+// Add this function to get real client IP
+const getClientIP = async () => {
+  try {
+    // Try multiple IP detection services
+    const services = [
+      'https://api.ipify.org?format=json',
+      'https://api.my-ip.io/ip.json',
+      'https://ipapi.co/json/'
+    ]
+    
+    for (const service of services) {
+      try {
+        const response = await fetch(service)
+        const data = await response.json()
+        const ip = data.ip || data
+        if (ip && ip !== 'unknown') {
+          return ip
+        }
+      } catch (e) {
+        continue
+      }
+    }
+    return 'unknown'
+  } catch (err) {
+    console.error('Error getting IP:', err)
+    return 'unknown'
+  }
+}
+
+// Then in your login handler, use it:
+const handleLogin = async (e) => {
+  e.preventDefault()
+  setLoading(true)
+  setError('')
+
+  try {
+    // ... authentication code ...
+    
+    // Get real IP address
+    const clientIP = await getClientIP()
+    
+    // Log successful login with IP
+    await supabase
+      .from('admin_activity_logs')
+      .insert({
+        admin_id: adminData.admin_id,
+        activity_type: 'LOGIN',
+        activity_description: `Admin logged in successfully`,
+        ip_address: clientIP,
+        created_at: new Date().toISOString()
+      })
+    
+    // ... rest of login code ...
+  } catch (err) {
+    // Log failed attempt with IP
+    const clientIP = await getClientIP()
+    await supabase
+      .from('failed_login_attempts')
+      .insert({
+        email: email,
+        ip_address: clientIP,
+        failure_reason: err.message,
+        attempt_time: new Date().toISOString()
+      })
+  }
+}
   }
 
   return (
