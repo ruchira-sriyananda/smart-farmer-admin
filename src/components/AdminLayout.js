@@ -33,10 +33,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     
-    // Fetch notifications on mount
     fetchNotifications()
-    
-    // Subscribe to real-time notifications
     subscribeToNotifications()
     
     return () => {
@@ -45,7 +42,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }, [router])
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -62,7 +58,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
   const fetchNotifications = async () => {
     try {
-      // Fetch recent activities as notifications
       const { data, error } = await supabase
         .from('admin_activity_logs')
         .select(`
@@ -99,7 +94,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       .on('postgres_changes', 
         { event: 'INSERT', schema: 'public', table: 'admin_activity_logs' },
         async (payload) => {
-          // Fetch the complete activity with user details
           const { data, error } = await supabase
             .from('admin_activity_logs')
             .select(`
@@ -124,9 +118,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
             }
             setNotifications(prev => [newNotification, ...prev.slice(0, 9)])
             setUnreadCount(prev => prev + 1)
-            
-            // Play sound (optional)
-            // new Audio('/notification.mp3').play()
           }
         }
       )
@@ -185,7 +176,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
   }
 
-  const markAsRead = async (notificationId) => {
+  const markAsRead = (notificationId) => {
     setNotifications(prev => 
       prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
     )
@@ -240,7 +231,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       <AdminSidebar />
       
       <div style={{ marginLeft: '280px', width: '100%' }}>
-        {/* Top Navbar with Working Profile and Notifications Dropdowns */}
+        {/* Top Navbar */}
         <nav className="navbar navbar-light bg-white shadow-sm px-4 py-2 sticky-top">
           <div>
             <h5 className="mb-0 fw-bold text-primary">{title}</h5>
@@ -271,11 +262,9 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                 )}
               </button>
 
-              {/* Notifications Dropdown Menu */}
               {showNotifications && (
                 <div className="position-absolute end-0 mt-2" style={{ width: '380px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
-                    {/* Header */}
                     <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
                       <h6 className="mb-0 fw-bold">
                         <i className="bi bi-bell me-2 text-primary"></i>
@@ -296,7 +285,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                       </div>
                     </div>
 
-                    {/* Notifications List */}
                     <div className="notifications-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
                       {notifications.length > 0 ? (
                         notifications.map((notification) => (
@@ -334,7 +322,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                       )}
                     </div>
 
-                    {/* Footer */}
                     <div className="card-footer bg-white py-2 text-center border-top">
                       <button 
                         className="btn btn-link btn-sm text-decoration-none p-0"
@@ -370,7 +357,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                 </div>
               </button>
 
-              {/* Profile Dropdown Menu */}
               {showDropdown && (
                 <div className="position-absolute end-0 mt-2" style={{ width: '280px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
@@ -463,7 +449,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         <div className="p-4">{children}</div>
       </div>
 
-      <style jsx global>{`
+      <style jsx>{`
         .dropdown-item-custom {
           display: flex;
           align-items: center;
@@ -501,11 +487,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         .notification-item:hover {
           background-color: #f8f9fa;
         }
-        
-        .bg-gradient-primary {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
       `}</style>
-    </AdminLayout>
+    </div>
   )
 }
