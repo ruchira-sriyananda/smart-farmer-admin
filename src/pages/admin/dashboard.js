@@ -70,21 +70,7 @@ export default function AdminDashboard() {
     else if (hour < 18) setGreeting('Good Afternoon')
     else setGreeting('Good Evening')
   }, [])
-// Add this near the top of your dashboard component
-const [totalUserCount, setTotalUserCount] = useState(0)
 
-// Add this function
-const fetchTotalUserCount = async () => {
-  const { count } = await supabase
-    .from('users')
-    .select('*', { count: 'exact', head: true })
-  setTotalUserCount(count || 0)
-}
-
-// Call it in your useEffect
-useEffect(() => {
-  fetchTotalUserCount()
-}, [])
   // Fetch online users
   const fetchOnlineUsers = async () => {
     try {
@@ -103,89 +89,104 @@ useEffect(() => {
     }
   }
 
-  // Fetch all stats from database
-  const fetchAllStats = async () => {
-    try {
-      // Get role IDs
-      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
-      const roleMap = {}
-      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
-
-      // Get today's date range
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const tomorrow = new Date(today)
-      tomorrow.setDate(tomorrow.getDate() + 1)
-
-      // Fetch all counts in parallel
-      const [
-        totalUsersRes,
-        farmersRes,
-        vendorsRes,
-        adminsRes,
-        verifiedRes,
-        pendingRes,
-        postsRes,
-        barterRes,
-        messagesRes,
-        adsRes,
-        newUsersRes,
-        newPostsRes
-      ] = await Promise.all([
-        supabase.from('users').select('*', { count: 'exact', head: true }),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER']),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR']),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['ADMIN']),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
-        supabase.from('posts').select('*', { count: 'exact', head: true }),
-        supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
-        supabase.from('messages').select('*', { count: 'exact', head: true }),
-        supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
-        supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
-        supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString())
-      ])
-
-      setTotalUsers(totalUsersRes.count || 0)
-      setTotalFarmers(farmersRes.count || 0)
-      setTotalVendors(vendorsRes.count || 0)
-      setTotalAdmins(adminsRes.count || 0)
-      setVerifiedUsers(verifiedRes.count || 0)
-      setPendingVerification(pendingRes.count || 0)
-      setTotalPosts(postsRes.count || 0)
-      setTotalBarterListings(barterRes.count || 0)
-      setTotalMessages(messagesRes.count || 0)
-      setTotalAds(adsRes.count || 0)
-      setNewUsersToday(newUsersRes.count || 0)
-      setNewPostsToday(newPostsRes.count || 0)
-
-    } catch (err) {
-      console.error('Error fetching stats:', err)
+const fetchAllStats = async () => {
+  try {
+    // Get role IDs - handle if roles table is empty or different
+    const { data: roles, error: rolesError } = await supabase
+      .from('roles')
+      .select('role_id, role_name')
+    
+    if (rolesError) {
+      console.error('Roles fetch error:', rolesError)
     }
-  }
+    
+    const roleMap = {}
+    roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
 
-  // Fetch recent users
-  const fetchRecentUsers = async () => {
-    try {
-      const { data, error } = await supabase
+    // Get total users - this is the most important
+    const { count: totalCount, error: totalError } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+    
+    if (totalError) {
+      console.error('Total users count error:', totalError)
+    }
+    
+    console.log('Total users from DB:', totalCount) // Debug log
+    
+    // Get farmers - use direct count if role exists
+    let farmersCount = 0
+    if (roleMap['FARMER']) {
+      const { count } = await supabase
         .from('users')
-        .select(`
-          user_id,
-          full_name,
-          email,
-          phone_number,
-          profile_image,
-          district,
-          is_verified,
-          created_at,
-          roles!left (role_name)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(6)
-
-      if (!error && data) setDashboardData(prev => ({ ...prev, recentUsers: data }))
-    } catch (err) { console.error('Error:', err) }
+        .select('*', { count: 'exact', head: true })
+        .eq('role_id', roleMap['FARMER'])
+      farmersCount = count || 0
+    } else {
+      // If no role assigned, count all users as farmers (fallback)
+      farmersCount = totalCount || 0
+    }
+    
+    // Get vendors
+    let vendorsCount = 0
+    if (roleMap['VENDOR']) {
+      const { count } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('role_id', roleMap['VENDOR'])
+      vendorsCount = count || 0
+    }
+    
+    setTotalUsers(totalCount || 0)
+    setTotalFarmers(farmersCount)
+    setTotalVendors(vendorsCount)
+    
+    console.log('Stats updated - Users:', totalCount, 'Farmers:', farmersCount, 'Vendors:', vendorsCount)
+    
+  } catch (err) {
+    console.error('Error fetching stats:', err)
   }
+}
+
+  // Fix for fetchRecentUsers - Handle NULL roles properly
+const fetchRecentUsers = async () => {
+  try {
+    // First, get users without join to ensure we get data
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(6)
+
+    if (usersError) {
+      console.error('Users fetch error:', usersError)
+      return
+    }
+
+    if (users && users.length > 0) {
+      // Get roles separately if needed
+      const { data: roles } = await supabase
+        .from('roles')
+        .select('*')
+      
+      const roleMap = {}
+      roles?.forEach(r => { roleMap[r.role_id] = r.role_name })
+      
+      // Add role names to users
+      const usersWithRoles = users.map(user => ({
+        ...user,
+        roles: user.role_id ? { role_name: roleMap[user.role_id] || 'UNKNOWN' } : null
+      }))
+      
+      setDashboardData(prev => ({ ...prev, recentUsers: usersWithRoles }))
+    } else {
+      console.log('No users found in database')
+      setDashboardData(prev => ({ ...prev, recentUsers: [] }))
+    }
+  } catch (err) { 
+    console.error('Error in fetchRecentUsers:', err) 
+  }
+}
 
   // Fetch recent posts
   const fetchRecentPosts = async () => {
