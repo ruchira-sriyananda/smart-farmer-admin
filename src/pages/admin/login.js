@@ -15,6 +15,18 @@ export default function AdminLogin() {
   const router = useRouter()
   const recaptchaRef = useRef(null)
 
+  // Check for timeout or security params in URL
+  useEffect(() => {
+    const { timeout, security, deactivated } = router.query
+    if (timeout) {
+      setError('Your session expired due to inactivity. Please login again.')
+    } else if (security) {
+      setError('Security verification failed. Please login again.')
+    } else if (deactivated) {
+      setError('Your account has been deactivated. Please contact support.')
+    }
+  }, [router.query])
+
   useEffect(() => {
     // Check for saved email
     const savedEmail = localStorage.getItem('rememberedEmail')
@@ -27,18 +39,21 @@ export default function AdminLogin() {
     const checkExistingSession = async () => {
       const session = localStorage.getItem('adminSession')
       if (session) {
-        const sessionData = JSON.parse(session)
-        // Verify session is still valid
-        const { data: { session: currentSession } } = await supabase.auth.getSession()
-        if (currentSession) {
-          router.push('/admin/dashboard')
+        try {
+          const sessionData = JSON.parse(session)
+          const { data: { session: currentSession } } = await supabase.auth.getSession()
+          if (currentSession && sessionData.user?.id === currentSession.user?.id) {
+            router.push('/admin/dashboard')
+          }
+        } catch (err) {
+          console.error('Session check error:', err)
         }
       }
     }
     checkExistingSession()
   }, [router])
 
-  // Get real client IP address
+  // Get real client IP address with fallback
   const getClientIP = async () => {
     try {
       const services = [
@@ -49,11 +64,17 @@ export default function AdminLogin() {
       
       for (const service of services) {
         try {
-          const response = await fetch(service)
-          const data = await response.json()
-          const ip = data.ip || data
-          if (ip && ip !== 'unknown') {
-            return ip
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 3000)
+          const response = await fetch(service, { signal: controller.signal })
+          clearTimeout(timeoutId)
+          
+          if (response.ok) {
+            const data = await response.json()
+            const ip = data.ip || data
+            if (ip && ip !== 'unknown' && typeof ip === 'string') {
+              return ip
+            }
           }
         } catch (e) {
           continue
@@ -66,20 +87,18 @@ export default function AdminLogin() {
     }
   }
 
-  // Log activity to database
-  const logActivity = async (adminId, type, description, ip) => {
+  // Safe logging function that doesn't break login flow
+  const safeLogActivity = async (adminId, activityType, description, ipAddress) => {
     try {
-      await supabase
-        .from('admin_activity_logs')
-        .insert({
-          admin_id: adminId,
-          activity_type: type,
-          activity_description: description,
-          ip_address: ip,
-          created_at: new Date().toISOString()
-        })
+      // Use fetch API to log without blocking
+      fetch('/api/log-activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminId, activityType, description, ipAddress })
+      }).catch(err => console.warn('Logging failed:', err))
     } catch (err) {
-      console.error('Error logging activity:', err)
+      // Silently fail - logging shouldn't break login
+      console.warn('Activity logging failed:', err.message)
     }
   }
 
@@ -94,6 +113,12 @@ export default function AdminLogin() {
       // Validate inputs
       if (!email || !password) {
         throw new Error('Please enter both email and password')
+      }
+
+      // Email format validation
+      const emailRegex = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/
+      if (!emailRegex.test(email)) {
+        throw new Error('Please enter a valid email address')
       }
 
       // Execute reCAPTCHA
@@ -112,7 +137,7 @@ export default function AdminLogin() {
 
       // Authenticate with Supabase
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         password
       })
       
@@ -138,23 +163,36 @@ export default function AdminLogin() {
           is_super_admin,
           role_id,
           created_at,
-          last_login
+          last_login,
+          profile_image
         `)
-        .eq('email', email.toLowerCase().trim())
+        .eq('email', email.trim().toLowerCase())
         .maybeSingle()
 
       if (adminError) {
         console.error('Admin query error:', adminError)
-        throw new Error('Database error occurred')
+        throw new Error('Database error occurred. Please try again.')
       }
 
       if (!adminData) {
-        await logActivity(null, 'LOGIN_FAILED', `Failed login attempt for non-admin user: ${email}`, clientIP)
+        // Log failed attempt without blocking
+        try {
+          await supabase
+            .from('failed_login_attempts')
+            .insert({
+              email: email.trim().toLowerCase(),
+              ip_address: clientIP,
+              failure_reason: 'Not authorized as admin',
+              device_info: navigator.userAgent,
+              attempt_time: new Date().toISOString()
+            })
+        } catch (logErr) {
+          console.warn('Failed to log attempt:', logErr)
+        }
         throw new Error('Access denied. You do not have administrator privileges.')
       }
 
       if (!adminData.is_active) {
-        await logActivity(adminData.admin_id, 'LOGIN_FAILED', `Login attempt on disabled account: ${email}`, clientIP)
         throw new Error('Your account has been disabled. Please contact support.')
       }
 
@@ -174,21 +212,24 @@ export default function AdminLogin() {
         role = 'SUPER_ADMIN'
       }
 
-      // Update last login timestamp
-      await supabase
+      // Update last login timestamp (don't await to speed up response)
+      supabase
         .from('admin_users')
         .update({ 
           last_login: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('admin_id', adminData.admin_id)
+        .then(({ error }) => {
+          if (error) console.warn('Failed to update last_login:', error)
+        })
 
-      // Log successful login
-      await logActivity(adminData.admin_id, 'LOGIN', `Admin logged in successfully from IP: ${clientIP}`, clientIP)
+      // Log successful login (async, don't await)
+      safeLogActivity(adminData.admin_id, 'LOGIN', `Admin logged in successfully`, clientIP)
 
       // Save email if remember me is checked
       if (rememberMe) {
-        localStorage.setItem('rememberedEmail', email)
+        localStorage.setItem('rememberedEmail', email.trim().toLowerCase())
       } else {
         localStorage.removeItem('rememberedEmail')
       }
@@ -209,7 +250,8 @@ export default function AdminLogin() {
           is_super_admin: adminData.is_super_admin,
           role_id: adminData.role_id,
           created_at: adminData.created_at,
-          last_login: new Date().toISOString()
+          last_login: new Date().toISOString(),
+          profile_image: adminData.profile_image
         },
         role: role,
         sessionId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
@@ -217,13 +259,6 @@ export default function AdminLogin() {
         ipAddress: clientIP,
         userAgent: navigator.userAgent
       }
-
-      console.log('Session created:', {
-        admin: sessionData.admin.full_name,
-        role: sessionData.role,
-        email: sessionData.admin.email,
-        ip: sessionData.ipAddress
-      })
 
       // Store session in localStorage
       localStorage.setItem('adminSession', JSON.stringify(sessionData))
@@ -239,19 +274,19 @@ export default function AdminLogin() {
     } catch (err) {
       console.error('Login error:', err)
       
-      // Log failed attempt
+      // Log failed attempt to database (don't await)
       try {
         await supabase
           .from('failed_login_attempts')
           .insert({
-            email: email,
+            email: email.trim().toLowerCase(),
             ip_address: clientIP,
             failure_reason: err.message,
             device_info: navigator.userAgent,
             attempt_time: new Date().toISOString()
           })
       } catch (logErr) {
-        console.error('Error logging failed attempt:', logErr)
+        console.warn('Failed to log failed attempt:', logErr)
       }
       
       setError(err.message)
@@ -303,6 +338,13 @@ export default function AdminLogin() {
           opacity: 0.7;
           transform: none;
         }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .alert-animated {
+          animation: fadeIn 0.3s ease-out;
+        }
       `}</style>
 
       <div className="container">
@@ -327,7 +369,7 @@ export default function AdminLogin() {
                 </div>
 
                 {error && (
-                  <div className="alert alert-danger alert-dismissible fade show" role="alert">
+                  <div className="alert alert-danger alert-dismissible fade show alert-animated" role="alert">
                     <i className="bi bi-exclamation-triangle-fill me-2"></i>
                     {error}
                     <button type="button" className="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
