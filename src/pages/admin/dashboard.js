@@ -61,9 +61,9 @@ export default function AdminDashboard() {
   const [recentUsers, setRecentUsers] = useState([])
   const [recentPosts, setRecentPosts] = useState([])
   const [recentBarterListings, setRecentBarterListings] = useState([])
-  const [userGrowthData, setUserGrowthData] = useState([])
+  const [userGrowthData, setUserGrowthData] = useState([0, 0, 0, 0])
   const [roleDistribution, setRoleDistribution] = useState({})
-  const [weeklyActivity, setWeeklyActivity] = useState([])
+  const [weeklyActivity, setWeeklyActivity] = useState([0, 0, 0, 0, 0, 0, 0])
   const [topContributors, setTopContributors] = useState([])
 
   // Set greeting based on time
@@ -76,39 +76,36 @@ export default function AdminDashboard() {
 
   // Fetch all data from Supabase
   const fetchAllData = async () => {
-    await Promise.all([
-      fetchStats(),
-      fetchOnlineUsers(),
-      fetchRecentUsers(),
-      fetchRecentPosts(),
-      fetchRecentBarterListings(),
-      fetchUserGrowth(),
-      fetchRoleDistribution(),
-      fetchWeeklyActivity(),
-      fetchTopContributors()
-    ])
-    setLoading(false)
+    try {
+      await Promise.all([
+        fetchStats(),
+        fetchOnlineUsers(),
+        fetchRecentUsers(),
+        fetchRecentPosts(),
+        fetchRecentBarterListings(),
+        fetchUserGrowth(),
+        fetchRoleDistribution(),
+        fetchWeeklyActivity(),
+        fetchTopContributors()
+      ])
+    } catch (err) {
+      console.error('Error fetching data:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const fetchStats = async () => {
     try {
-      // Direct counts without role filtering first to debug
-      const { count: totalUsersCount, error: totalError } = await supabase
+      // Direct counts without role filtering
+      const { count: totalUsersCount } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
 
-      console.log('Total users count:', totalUsersCount)
-
       // Get role IDs from roles table
-      const { data: roles, error: rolesError } = await supabase
+      const { data: roles } = await supabase
         .from('roles')
         .select('role_id, role_name')
-
-      console.log('Roles found:', roles)
-
-      if (rolesError) {
-        console.error('Roles error:', rolesError)
-      }
 
       const roleMap = {}
       roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
@@ -116,34 +113,29 @@ export default function AdminDashboard() {
       // Get farmers count
       let farmersCount = 0
       if (roleMap['FARMER']) {
-        const { count, error } = await supabase
+        const { count } = await supabase
           .from('users')
           .select('*', { count: 'exact', head: true })
           .eq('role_id', roleMap['FARMER'])
-        
-        if (!error) farmersCount = count || 0
-        console.log('Farmers count:', farmersCount)
+        farmersCount = count || 0
       }
 
       // Get vendors count
       let vendorsCount = 0
       if (roleMap['VENDOR']) {
-        const { count, error } = await supabase
+        const { count } = await supabase
           .from('users')
           .select('*', { count: 'exact', head: true })
           .eq('role_id', roleMap['VENDOR'])
-        
-        if (!error) vendorsCount = count || 0
-        console.log('Vendors count:', vendorsCount)
+        vendorsCount = count || 0
       }
 
-      // Get verified users count
+      // Get verified and pending counts
       const { count: verifiedCount } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
         .eq('is_verified', true)
 
-      // Get pending verification count
       const { count: pendingCount } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
@@ -155,15 +147,15 @@ export default function AdminDashboard() {
 
       // Get other counts
       const [
-        postsRes,
-        barterRes,
-        messagesRes,
-        adsRes,
-        commentsRes,
-        barterRequestsRes,
-        newUsersRes,
-        newPostsRes,
-        activeBarterRes
+        { count: postsCount },
+        { count: barterCount },
+        { count: messagesCount },
+        { count: adsCount },
+        { count: commentsCount },
+        { count: barterRequestsCount },
+        { count: newUsersCount },
+        { count: newPostsCount },
+        { count: activeBarterCount }
       ] = await Promise.all([
         supabase.from('posts').select('*', { count: 'exact', head: true }),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
@@ -182,15 +174,15 @@ export default function AdminDashboard() {
         totalVendors: vendorsCount,
         verifiedUsers: verifiedCount || 0,
         pendingVerification: pendingCount || 0,
-        totalPosts: postsRes.count || 0,
-        totalBarterListings: barterRes.count || 0,
-        totalMessages: messagesRes.count || 0,
-        totalAds: adsRes.count || 0,
-        totalComments: commentsRes.count || 0,
-        totalBarterRequests: barterRequestsRes.count || 0,
-        newUsersToday: newUsersRes.count || 0,
-        newPostsToday: newPostsRes.count || 0,
-        activeBarterTrades: activeBarterRes.count || 0
+        totalPosts: postsCount || 0,
+        totalBarterListings: barterCount || 0,
+        totalMessages: messagesCount || 0,
+        totalAds: adsCount || 0,
+        totalComments: commentsCount || 0,
+        totalBarterRequests: barterRequestsCount || 0,
+        newUsersToday: newUsersCount || 0,
+        newPostsToday: newPostsCount || 0,
+        activeBarterTrades: activeBarterCount || 0
       })
     } catch (err) {
       console.error('Error fetching stats:', err)
@@ -200,9 +192,9 @@ export default function AdminDashboard() {
   const fetchOnlineUsers = async () => {
     try {
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-      const { data, error, count } = await supabase
+      const { data, error } = await supabase
         .from('user_sessions')
-        .select('user_id, session_status, login_time')
+        .select('user_id, login_time')
         .eq('session_status', 'ACTIVE')
         .gte('login_time', fiveMinutesAgo)
 
@@ -233,12 +225,12 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('user_id, full_name, email, profile_image, is_verified, created_at')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(5)
 
       if (!error && data) {
-        // Get role names separately
+        // Get role names
         const { data: rolesData } = await supabase.from('roles').select('role_id, role_name')
         const roleMap = {}
         rolesData?.forEach(r => { roleMap[r.role_id] = r.role_name })
@@ -257,12 +249,12 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('posts')
-        .select('post_id, title, content, image_url, created_at, user_id')
+        .select('*')
         .order('created_at', { ascending: false })
-        .limit(3)  // Only 3 recent posts
+        .limit(3)
 
       if (!error && data) {
-        // Get user names for posts
+        // Get user names
         const userIds = [...new Set(data.map(p => p.user_id))]
         const { data: usersData } = await supabase
           .from('users')
@@ -286,7 +278,7 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('barter_listings')
-        .select('listing_id, title, description, quantity, unit, status, created_at, user_id')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(5)
 
@@ -388,30 +380,27 @@ export default function AdminDashboard() {
           }
         })
         
-        const topUserIds = Object.entries(userCounts)
+        const sorted = Object.entries(userCounts)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5)
-          .map(([id]) => id)
+          .map(([id, count]) => ({ user_id: id, post_count: count }))
         
-        if (topUserIds.length > 0) {
+        if (sorted.length > 0) {
+          const userIds = sorted.map(s => s.user_id)
           const { data: usersData } = await supabase
             .from('users')
             .select('user_id, full_name')
-            .in('user_id', topUserIds)
+            .in('user_id', userIds)
           
           const userMap = {}
           usersData?.forEach(u => { userMap[u.user_id] = u.full_name })
           
-          const sorted = Object.entries(userCounts)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5)
-            .map(([id, count]) => ({ 
-              user_id: id, 
-              post_count: count,
-              full_name: userMap[id] || 'Unknown'
-            }))
+          const contributorsWithNames = sorted.map(s => ({
+            ...s,
+            full_name: userMap[s.user_id] || 'Unknown'
+          }))
           
-          setTopContributors(sorted)
+          setTopContributors(contributorsWithNames)
         }
       }
     } catch (err) { console.error('Error:', err) }
@@ -422,37 +411,18 @@ export default function AdminDashboard() {
       const storedSession = localStorage.getItem('adminSession')
       if (!storedSession) { router.push('/admin/login'); return }
       setSession(JSON.parse(storedSession))
-      
       await fetchAllData()
-      
-      // Real-time subscriptions
-      const usersChannel = supabase
-        .channel('users_changes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchStats())
-        .subscribe()
-
-      const postsChannel = supabase
-        .channel('posts_changes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => {
-          fetchStats()
-          fetchRecentPosts()
-        })
-        .subscribe()
-
-      const interval = setInterval(() => {
-        fetchStats()
-        fetchOnlineUsers()
-        setLastUpdate(new Date())
-      }, 30000)
-
-      return () => {
-        usersChannel.unsubscribe()
-        postsChannel.unsubscribe()
-        clearInterval(interval)
-      }
     }
-    
     init()
+
+    // Refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchStats()
+      fetchOnlineUsers()
+      setLastUpdate(new Date())
+    }, 30000)
+
+    return () => clearInterval(interval)
   }, [router])
 
   const refreshData = async () => {
@@ -508,7 +478,10 @@ export default function AdminDashboard() {
       legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 10, font: { size: 11 } } },
       tooltip: { backgroundColor: '#1f2937', titleColor: '#fff', bodyColor: '#9ca3af', padding: 10, cornerRadius: 8 }
     },
-    scales: { y: { beginAtZero: true, grid: { color: '#e5e7eb' }, ticks: { stepSize: 1 } }, x: { grid: { display: false } } }
+    scales: {
+      y: { beginAtZero: true, grid: { color: '#e5e7eb' }, ticks: { stepSize: 1 } },
+      x: { grid: { display: false } }
+    }
   }
 
   const getRoleBadge = (roleName) => {
@@ -946,7 +919,6 @@ export default function AdminDashboard() {
           margin: 0 auto;
         }
 
-        /* Welcome Section */
         .welcome-section {
           display: flex;
           justify-content: space-between;
@@ -1029,7 +1001,6 @@ export default function AdminDashboard() {
           transform: rotate(15deg);
         }
 
-        /* Main Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -1097,7 +1068,6 @@ export default function AdminDashboard() {
           color: #10b981;
         }
 
-        /* Secondary Stats */
         .secondary-stats {
           display: grid;
           grid-template-columns: repeat(6, 1fr);
@@ -1164,7 +1134,6 @@ export default function AdminDashboard() {
           color: #10b981;
         }
 
-        /* Charts */
         .charts-row {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1205,7 +1174,6 @@ export default function AdminDashboard() {
           height: 280px;
         }
 
-        /* Two Columns */
         .two-columns {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -1284,7 +1252,6 @@ export default function AdminDashboard() {
           color: #1f2937;
         }
 
-        /* Contributors */
         .contributors-list {
           display: flex;
           flex-direction: column;
@@ -1337,7 +1304,6 @@ export default function AdminDashboard() {
           color: #9ca3af;
         }
 
-        /* Online Section */
         .online-section {
           background: white;
           border-radius: 24px;
@@ -1435,7 +1401,6 @@ export default function AdminDashboard() {
           color: #9ca3af;
         }
 
-        /* Recent Users Table */
         .recent-table {
           background: white;
           border-radius: 24px;
@@ -1573,7 +1538,6 @@ export default function AdminDashboard() {
         .badge-vendor { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
         .badge-pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
 
-        /* Recent Posts Grid - Only 3 cards */
         .recent-posts-section {
           background: white;
           border-radius: 24px;
@@ -1638,7 +1602,6 @@ export default function AdminDashboard() {
           margin-right: 4px;
         }
 
-        /* Recent Barter Section */
         .recent-barter-section {
           background: white;
           border-radius: 24px;
@@ -1725,7 +1688,6 @@ export default function AdminDashboard() {
           display: block;
         }
 
-        /* Quick Actions */
         .quick-actions {
           background: white;
           border-radius: 24px;
@@ -1778,7 +1740,6 @@ export default function AdminDashboard() {
           font-weight: 500;
         }
 
-        /* Animations */
         @keyframes pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(1.1); }
@@ -1792,48 +1753,22 @@ export default function AdminDashboard() {
           to { transform: rotate(360deg); }
         }
 
-        /* Responsive */
         @media (max-width: 1200px) {
-          .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .secondary-stats {
-            grid-template-columns: repeat(3, 1fr);
-          }
-          .charts-row, .two-columns {
-            grid-template-columns: 1fr;
-          }
-          .online-list {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .posts-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .barter-grid {
-            grid-template-columns: 1fr;
-          }
-          .actions-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
+          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .secondary-stats { grid-template-columns: repeat(3, 1fr); }
+          .charts-row, .two-columns { grid-template-columns: 1fr; }
+          .online-list { grid-template-columns: repeat(2, 1fr); }
+          .posts-grid { grid-template-columns: repeat(2, 1fr); }
+          .barter-grid { grid-template-columns: 1fr; }
+          .actions-grid { grid-template-columns: repeat(2, 1fr); }
         }
 
         @media (max-width: 768px) {
-          .stats-grid, .secondary-stats {
-            grid-template-columns: 1fr;
-          }
-          .welcome-section {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          .online-list {
-            grid-template-columns: 1fr;
-          }
-          .posts-grid {
-            grid-template-columns: 1fr;
-          }
-          .actions-grid {
-            grid-template-columns: 1fr;
-          }
+          .stats-grid, .secondary-stats { grid-template-columns: 1fr; }
+          .welcome-section { flex-direction: column; align-items: flex-start; }
+          .online-list { grid-template-columns: 1fr; }
+          .posts-grid { grid-template-columns: 1fr; }
+          .actions-grid { grid-template-columns: 1fr; }
         }
       `}</style>
     </AdminLayout>
