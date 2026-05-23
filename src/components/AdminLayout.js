@@ -40,10 +40,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         const parsedSession = JSON.parse(storedSession)
         setSession(parsedSession)
         
-        // Fetch fresh profile data from admin_users table
         await fetchFreshProfile(parsedSession)
-        
-        // Subscribe to real-time profile updates
         subscribeToProfileUpdates(parsedSession)
       } catch (err) {
         console.error('Error parsing session:', err)
@@ -55,8 +52,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     
-    fetchRealNotifications()
-    subscribeToRealTimeNotifications()
+    fetchNotifications()
+    subscribeToRealtimeNotifications()
     
     return () => {
       clearInterval(timer)
@@ -64,64 +61,29 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }, [router])
 
-  // Fetch fresh profile data from admin_users table (not users table)
   const fetchFreshProfile = async (sessionData) => {
     try {
-      const adminId = sessionData.admin?.admin_id || sessionData.user?.id
       const adminEmail = sessionData.admin?.email || sessionData.user?.email
       
-      if (!adminId && !adminEmail) return
+      if (!adminEmail) return
 
-      // First try to get by admin_id, then by email
-      let query = supabase
-        .from('admin_users')
-        .select('admin_id, full_name, email, profile_image, is_super_admin, role_id')
-      
-      if (adminId) {
-        query = query.eq('admin_id', adminId)
-      } else {
-        query = query.eq('email', adminEmail)
-      }
-      
-      const { data: adminUser, error } = await query.maybeSingle()
+      const { data: adminUser, error } = await supabase
+        .from('users')
+        .select('full_name, email, profile_image')
+        .eq('email', adminEmail)
+        .maybeSingle()
 
       if (error) {
-        console.error('Error fetching profile from admin_users:', error)
+        console.error('Error fetching profile:', error)
         return
       }
 
       if (adminUser) {
-        // Get role name from admin_roles if role_id exists
-        let roleName = sessionData.role || 'Administrator'
-        if (adminUser.role_id) {
-          const { data: roleData } = await supabase
-            .from('admin_roles')
-            .select('role_name')
-            .eq('role_id', adminUser.role_id)
-            .maybeSingle()
-          if (roleData) {
-            roleName = roleData.role_name
-          }
-        } else if (adminUser.is_super_admin) {
-          roleName = 'SUPER_ADMIN'
-        }
-        
         setProfileImage(adminUser.profile_image || null)
         setProfileName(adminUser.full_name || sessionData.admin?.full_name || 'Admin')
         setProfileEmail(adminUser.email || sessionData.admin?.email || 'admin@smartfarmer.com')
-        setProfileRole(roleName)
-        
-        // Update session with latest profile data
-        const updatedSession = { ...sessionData }
-        if (!updatedSession.admin) updatedSession.admin = {}
-        updatedSession.admin.profile_image = adminUser.profile_image
-        updatedSession.admin.full_name = adminUser.full_name
-        updatedSession.admin.email = adminUser.email
-        updatedSession.role = roleName
-        localStorage.setItem('adminSession', JSON.stringify(updatedSession))
-        setSession(updatedSession)
+        setProfileRole(sessionData.role || 'Administrator')
       } else {
-        // Fallback to session data
         setProfileImage(sessionData.admin?.profile_image || null)
         setProfileName(sessionData.admin?.full_name || sessionData.user?.email?.split('@')[0] || 'Admin')
         setProfileEmail(sessionData.admin?.email || sessionData.user?.email || 'admin@smartfarmer.com')
@@ -132,52 +94,34 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }
 
-  // Subscribe to profile changes in admin_users table
   const subscribeToProfileUpdates = (sessionData) => {
-    const adminId = sessionData.admin?.admin_id || sessionData.user?.id
     const adminEmail = sessionData.admin?.email || sessionData.user?.email
     
-    if (!adminId && !adminEmail) return
-
-    // Build filter condition
-    let filter = ''
-    if (adminId) {
-      filter = `admin_id=eq.${adminId}`
-    } else {
-      filter = `email=eq.${adminEmail}`
-    }
+    if (!adminEmail) return
 
     const channel = supabase
-      .channel('admin_profile_updates')
+      .channel('profile_updates')
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'admin_users',
-          filter: filter
+          table: 'users',
+          filter: `email=eq.${adminEmail}`
         },
         async (payload) => {
-          console.log('Profile update received:', payload.new)
-          
-          // Update profile image and name in real-time
           if (payload.new.profile_image !== undefined) {
             setProfileImage(payload.new.profile_image)
           }
           if (payload.new.full_name) {
             setProfileName(payload.new.full_name)
           }
-          if (payload.new.email) {
-            setProfileEmail(payload.new.email)
-          }
           
-          // Update session storage
           const currentSession = JSON.parse(localStorage.getItem('adminSession'))
           if (currentSession) {
             if (!currentSession.admin) currentSession.admin = {}
             currentSession.admin.profile_image = payload.new.profile_image
             currentSession.admin.full_name = payload.new.full_name
-            currentSession.admin.email = payload.new.email
             localStorage.setItem('adminSession', JSON.stringify(currentSession))
             setSession(currentSession)
           }
@@ -190,7 +134,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -205,41 +148,29 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Fetch real notifications from admin_activity_logs table
-  const fetchRealNotifications = async () => {
+  const fetchNotifications = async () => {
     try {
       setLoadingNotifications(true)
       
-      const { data: activities, error } = await supabase
+      // Fetch recent activity logs as notifications
+      const { data: logs, error } = await supabase
         .from('admin_activity_logs')
-        .select(`
-          log_id,
-          activity_type,
-          activity_description,
-          created_at,
-          ip_address,
-          admin_users:admin_id (
-            full_name,
-            email
-          )
-        `)
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(20)
 
       if (error) throw error
 
-      if (activities && activities.length > 0) {
-        const formattedNotifications = activities.map(activity => ({
-          id: activity.log_id,
-          title: getNotificationTitle(activity.activity_type),
-          message: activity.activity_description,
-          time: formatTimeAgo(activity.created_at),
-          read: checkIfRead(activity.log_id),
-          type: getNotificationType(activity.activity_type),
-          icon: getNotificationIcon(activity.activity_type),
-          user: activity.admin_users?.full_name || 'System',
-          createdAt: activity.created_at,
-          ipAddress: activity.ip_address
+      if (logs && logs.length > 0) {
+        const formattedNotifications = logs.map(log => ({
+          id: log.log_id,
+          title: getNotificationTitle(log.activity_type),
+          message: log.activity_description,
+          time: formatTimeAgo(log.created_at),
+          read: checkIfRead(log.log_id),
+          type: getNotificationType(log.activity_type),
+          icon: getNotificationIcon(log.activity_type),
+          createdAt: log.created_at
         }))
         
         setNotifications(formattedNotifications)
@@ -247,13 +178,9 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
         const unread = formattedNotifications.filter(n => !readIds.includes(n.id)).length
         setUnreadCount(unread)
-      } else {
-        setNotifications([])
-        setUnreadCount(0)
       }
     } catch (err) {
       console.error('Error fetching notifications:', err)
-      setNotifications([])
     } finally {
       setLoadingNotifications(false)
     }
@@ -264,7 +191,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return readIds.includes(notificationId)
   }
 
-  const subscribeToRealTimeNotifications = () => {
+  const subscribeToRealtimeNotifications = () => {
     const channel = supabase
       .channel('admin_activity_logs_realtime')
       .on(
@@ -275,19 +202,10 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           table: 'admin_activity_logs'
         },
         async (payload) => {
+          // Fetch full details of the new activity
           const { data: newActivity, error } = await supabase
             .from('admin_activity_logs')
-            .select(`
-              log_id,
-              activity_type,
-              activity_description,
-              created_at,
-              ip_address,
-              admin_users:admin_id (
-                full_name,
-                email
-              )
-            `)
+            .select('*')
             .eq('log_id', payload.new.log_id)
             .single()
 
@@ -300,20 +218,14 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               read: false,
               type: getNotificationType(newActivity.activity_type),
               icon: getNotificationIcon(newActivity.activity_type),
-              user: newActivity.admin_users?.full_name || 'System',
-              createdAt: newActivity.created_at,
-              ipAddress: newActivity.ip_address
+              createdAt: newActivity.created_at
             }
             
             setNotifications(prev => [newNotification, ...prev.slice(0, 19)])
             setUnreadCount(prev => prev + 1)
             
-            if (Notification.permission === 'granted') {
-              new Notification(newNotification.title, {
-                body: newNotification.message,
-                icon: '/favicon.ico'
-              })
-            }
+            // Play sound (optional)
+            // new Audio('/notification.mp3').play()
           }
         }
       )
@@ -334,8 +246,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       'SECURITY_ALERT': '⚠️ Security Alert',
       'PASSWORD_CHANGE': '🔑 Password Changed',
       'SETTINGS_UPDATE': '⚙️ Settings Updated',
-      'BACKUP_CREATED': '💾 Backup Created',
-      'EXPORT_DATA': '📊 Data Exported'
+      'PROFILE_UPDATE': '👤 Profile Updated',
+      'BARTER_UPDATE': '🔄 Barter Update'
     }
     return titles[type] || '📢 New Activity'
   }
@@ -350,8 +262,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       'SECURITY_ALERT': 'danger',
       'PASSWORD_CHANGE': 'warning',
       'SETTINGS_UPDATE': 'info',
-      'BACKUP_CREATED': 'success',
-      'EXPORT_DATA': 'success'
+      'PROFILE_UPDATE': 'success',
+      'BARTER_UPDATE': 'primary'
     }
     return types[type] || 'info'
   }
@@ -366,8 +278,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       'SECURITY_ALERT': 'shield-exclamation',
       'PASSWORD_CHANGE': 'key',
       'SETTINGS_UPDATE': 'gear',
-      'BACKUP_CREATED': 'database',
-      'EXPORT_DATA': 'download'
+      'PROFILE_UPDATE': 'person-gear',
+      'BARTER_UPDATE': 'arrow-left-right'
     }
     return icons[type] || 'bell'
   }
@@ -410,21 +322,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     setUnreadCount(0)
   }
 
-  const deleteNotification = async (notificationId) => {
-    if (session?.admin?.is_super_admin) {
-      const { error } = await supabase
-        .from('admin_activity_logs')
-        .delete()
-        .eq('log_id', notificationId)
-      
-      if (!error) {
-        setNotifications(prev => prev.filter(n => n.id !== notificationId))
-      }
-    }
-  }
-
   const handleLogout = async () => {
-    // Remove from online users
     if (userId) {
       await fetch('/api/online-status', {
         method: 'POST',
@@ -445,6 +343,10 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     router.push('/admin/login')
   }
 
+  const getInitials = () => {
+    return profileName.charAt(0).toUpperCase() || 'A'
+  }
+
   if (!session) {
     return (
       <div className="min-vh-100 d-flex align-items-center justify-content-center">
@@ -457,7 +359,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
   return (
     <div className="d-flex">
-      {/* Online Heartbeat Component - Tracks real-time online status */}
       {userId && (
         <OnlineHeartbeat 
           userId={userId}
@@ -484,7 +385,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               <small className="text-success">Secure Connection</small>
             </div>
 
-            {/* Real-time Notifications Dropdown */}
+            {/* Notifications Dropdown */}
             <div className="position-relative" ref={notificationRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 position-relative"
@@ -503,18 +404,19 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
               {/* Notifications Dropdown Menu */}
               {showNotifications && (
-                <div className="position-absolute end-0 mt-2" style={{ width: '400px', zIndex: 1050 }}>
+                <div className="position-absolute end-0 mt-2" style={{ width: '380px', zIndex: 1050 }}>
                   <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
+                    {/* Header */}
                     <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
                       <div>
                         <h6 className="mb-0 fw-bold">
                           <i className="bi bi-bell me-2 text-primary"></i>
-                          Real-time Notifications
+                          Notifications
                           {unreadCount > 0 && (
                             <span className="badge bg-danger ms-2">{unreadCount} new</span>
                           )}
                         </h6>
-                        <small className="text-muted">Live updates from system</small>
+                        <small className="text-muted">Real-time updates</small>
                       </div>
                       <div className="dropdown">
                         <button className="btn btn-sm btn-link text-decoration-none p-0" data-bs-toggle="dropdown">
@@ -532,7 +434,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                       </div>
                     </div>
 
-                    <div className="notifications-list" style={{ maxHeight: '450px', overflowY: 'auto' }}>
+                    {/* Notifications List */}
+                    <div className="notifications-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
                       {loadingNotifications ? (
                         <div className="text-center py-5">
                           <div className="spinner-border text-primary spinner-border-sm mb-2"></div>
@@ -547,7 +450,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                             style={{ cursor: 'pointer' }}
                           >
                             <div className="d-flex gap-3">
-                              <div className={`flex-shrink-0 bg-${notification.type} bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center`} style={{ width: '45px', height: '45px' }}>
+                              <div className={`flex-shrink-0 bg-${notification.type} bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center`} style={{ width: '40px', height: '40px' }}>
                                 <i className={`bi bi-${notification.icon} text-${notification.type} fs-5`}></i>
                               </div>
                               <div className="flex-grow-1">
@@ -555,35 +458,12 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                                   <h6 className="mb-1 small fw-bold">{notification.title}</h6>
                                   <small className="text-muted" style={{ fontSize: '10px' }}>{notification.time}</small>
                                 </div>
-                                <p className="mb-1 small text-muted">{notification.message}</p>
-                                <div className="d-flex justify-content-between align-items-center">
-                                  <small className="text-muted" style={{ fontSize: '9px' }}>
-                                    <i className="bi bi-person-circle me-1"></i>
-                                    {notification.user}
-                                  </small>
-                                  {notification.ipAddress && (
-                                    <small className="text-muted" style={{ fontSize: '9px' }}>
-                                      <i className="bi bi-ip me-1"></i>
-                                      {notification.ipAddress}
-                                    </small>
-                                  )}
-                                </div>
+                                <p className="mb-0 small text-muted">{notification.message}</p>
                               </div>
                               {!notification.read && (
                                 <div className="flex-shrink-0">
                                   <div className="bg-primary rounded-circle" style={{ width: '8px', height: '8px' }}></div>
                                 </div>
-                              )}
-                              {session?.admin?.is_super_admin && (
-                                <button 
-                                  className="btn btn-sm btn-link text-danger p-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    deleteNotification(notification.id)
-                                  }}
-                                >
-                                  <i className="bi bi-x"></i>
-                                </button>
                               )}
                             </div>
                           </div>
@@ -592,11 +472,12 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         <div className="text-center py-5">
                           <i className="bi bi-bell-slash fs-1 text-muted"></i>
                           <p className="text-muted mt-2 mb-0">No notifications</p>
-                          <small className="text-muted">System activities will appear here</small>
+                          <small className="text-muted">New activities will appear here</small>
                         </div>
                       )}
                     </div>
 
+                    {/* Footer */}
                     <div className="card-footer bg-white py-2 text-center border-top">
                       <button 
                         className="btn btn-link btn-sm text-decoration-none p-0"
@@ -605,7 +486,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                           router.push('/admin/security/logs')
                         }}
                       >
-                        View All Activity Logs <i className="bi bi-arrow-right ms-1"></i>
+                        View All Activity <i className="bi bi-arrow-right ms-1"></i>
                       </button>
                     </div>
                   </div>
@@ -613,7 +494,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               )}
             </div>
 
-            {/* Profile Dropdown with Real-time Image from admin_users */}
+            {/* Profile Dropdown */}
             <div className="position-relative" ref={dropdownRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 d-flex align-items-center"
@@ -634,7 +515,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
                     ) : (
-                      <i className="bi bi-person-circle fs-2 text-white"></i>
+                      <span className="text-white fw-bold">{getInitials()}</span>
                     )}
                   </div>
                   <div className="text-start d-none d-md-block">
@@ -657,7 +538,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                         ) : (
-                          <i className="bi bi-person-circle fs-1 text-primary"></i>
+                          <span className="text-primary fw-bold fs-2">{getInitials()}</span>
                         )}
                       </div>
                       <h6 className="mb-1 fw-bold">{profileName}</h6>
