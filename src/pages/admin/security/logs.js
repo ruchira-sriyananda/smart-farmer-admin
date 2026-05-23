@@ -7,6 +7,7 @@ export default function ActivityLogs() {
   const router = useRouter()
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [dateRange, setDateRange] = useState('all')
@@ -59,6 +60,29 @@ export default function ActivityLogs() {
 
   const fetchLogs = async () => {
     try {
+      setLoading(true)
+      setError(null)
+      
+      // First, check if table has any records
+      const { count, error: countError } = await supabase
+        .from('admin_activity_logs')
+        .select('*', { count: 'exact', head: true })
+
+      if (countError) {
+        console.error('Count error:', countError)
+        setError(`Database error: ${countError.message}`)
+        setLoading(false)
+        return
+      }
+
+      console.log('Total logs count:', count)
+
+      if (count === 0) {
+        setError('No activity logs found. Please run the SQL to insert sample logs.')
+        setLoading(false)
+        return
+      }
+
       const { data, error } = await supabase
         .from('admin_activity_logs')
         .select(`
@@ -71,12 +95,24 @@ export default function ActivityLogs() {
         .order('created_at', { ascending: false })
         .limit(100)
 
-      if (!error && data) {
+      if (error) {
+        console.error('Fetch error:', error)
+        setError(`Error fetching logs: ${error.message}`)
+        return
+      }
+
+      console.log('Fetched logs:', data?.length || 0)
+
+      if (data && data.length > 0) {
         setLogs(data)
         calculateStats(data)
+      } else {
+        setLogs([])
+        setError('No activity logs found')
       }
     } catch (err) {
       console.error('Error fetching logs:', err)
+      setError(err.message)
     } finally {
       setLoading(false)
     }
@@ -221,6 +257,111 @@ export default function ActivityLogs() {
     )
   }
 
+  if (error) {
+    return (
+      <AdminLayout title="Activity Logs">
+        <div className="error-container">
+          <i className="bi bi-exclamation-triangle-fill"></i>
+          <h3>No Activity Logs Found</h3>
+          <p>{error}</p>
+          <div className="error-actions">
+            <button className="btn-primary" onClick={fetchLogs}>
+              <i className="bi bi-arrow-repeat"></i> Retry
+            </button>
+            <button className="btn-secondary" onClick={() => router.push('/admin/dashboard')}>
+              <i className="bi bi-house"></i> Back to Dashboard
+            </button>
+          </div>
+          <div className="info-box">
+            <i className="bi bi-info-circle-fill"></i>
+            <div>
+              <strong>Need sample data?</strong>
+              <p>Run this SQL in Supabase SQL Editor to add sample activity logs:</p>
+              <pre>{`INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
+SELECT 
+    uuid_generate_v4(),
+    (SELECT admin_id FROM admin_users LIMIT 1),
+    'LOGIN',
+    'Admin logged in successfully',
+    '192.168.1.1',
+    NOW()
+WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
+            </div>
+          </div>
+        </div>
+        <style jsx>{`
+          .error-container {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 24px;
+            max-width: 600px;
+            margin: 40px auto;
+          }
+          .error-container i {
+            font-size: 48px;
+            color: #f59e0b;
+            margin-bottom: 16px;
+          }
+          .error-container h3 {
+            margin-bottom: 8px;
+            color: #1f2937;
+          }
+          .error-container p {
+            color: #6c757d;
+            margin-bottom: 24px;
+          }
+          .error-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-bottom: 24px;
+          }
+          .btn-primary {
+            padding: 10px 20px;
+            background: #4f46e5;
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-weight: 500;
+            cursor: pointer;
+          }
+          .btn-secondary {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            color: #495057;
+            font-weight: 500;
+            cursor: pointer;
+          }
+          .info-box {
+            background: #e7f1ff;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: left;
+            display: flex;
+            gap: 16px;
+          }
+          .info-box i {
+            font-size: 24px;
+            color: #0d6efd;
+            margin: 0;
+          }
+          .info-box pre {
+            background: #1f2937;
+            color: #10b981;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-top: 8px;
+            overflow-x: auto;
+          }
+        `}</style>
+      </AdminLayout>
+    )
+  }
+
   return (
     <AdminLayout title="Activity Logs">
       <div className="logs-container">
@@ -336,23 +477,25 @@ export default function ActivityLogs() {
         </div>
 
         {/* Activity Type Distribution */}
-        <div className="distribution-card">
-          <h5><i className="bi bi-pie-chart"></i> Activity Distribution</h5>
-          <div className="distribution-tags">
-            {Object.entries(stats.byType).map(([type, count]) => (
-              <div 
-                key={type} 
-                className={`dist-tag ${getActivityColor(type)}`}
-                onClick={() => setFilter(type)}
-                style={{ cursor: 'pointer' }}
-              >
-                <i className={`bi ${getActivityIcon(type)}`}></i>
-                <span>{getActivityLabel(type)}</span>
-                <span className="dist-count">{count}</span>
-              </div>
-            ))}
+        {Object.keys(stats.byType).length > 0 && (
+          <div className="distribution-card">
+            <h5><i className="bi bi-pie-chart"></i> Activity Distribution</h5>
+            <div className="distribution-tags">
+              {Object.entries(stats.byType).map(([type, count]) => (
+                <div 
+                  key={type} 
+                  className={`dist-tag ${getActivityColor(type)}`}
+                  onClick={() => setFilter(type)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <i className={`bi ${getActivityIcon(type)}`}></i>
+                  <span>{getActivityLabel(type)}</span>
+                  <span className="dist-count">{count}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Logs Table */}
         <div className="logs-table-container">
@@ -434,10 +577,10 @@ export default function ActivityLogs() {
             </table>
           </div>
           
-          {filteredLogs.length === 0 && (
+          {filteredLogs.length === 0 && logs.length > 0 && (
             <div className="empty-state">
-              <i className="bi bi-inbox"></i>
-              <h4>No activity logs found</h4>
+              <i className="bi bi-search"></i>
+              <h4>No matching logs</h4>
               <p>Try adjusting your search or filter criteria</p>
             </div>
           )}
@@ -496,18 +639,6 @@ export default function ActivityLogs() {
                   </div>
                 </div>
               </div>
-              {selectedLog.affected_table && (
-                <div className="detail-section">
-                  <label>Affected Table</label>
-                  <div className="detail-value">{selectedLog.affected_table}</div>
-                </div>
-              )}
-              {selectedLog.affected_record_id && (
-                <div className="detail-section">
-                  <label>Affected Record ID</label>
-                  <div className="detail-value"><code>{selectedLog.affected_record_id}</code></div>
-                </div>
-              )}
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
@@ -522,7 +653,6 @@ export default function ActivityLogs() {
           margin: 0 auto;
         }
 
-        /* Header */
         .page-header {
           display: flex;
           justify-content: space-between;
@@ -584,7 +714,6 @@ export default function ActivityLogs() {
           transform: translateY(-1px);
         }
 
-        /* Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -648,7 +777,6 @@ export default function ActivityLogs() {
           color: #9ca3af;
         }
 
-        /* Filters Card */
         .filters-card {
           background: white;
           border-radius: 20px;
@@ -753,7 +881,6 @@ export default function ActivityLogs() {
           background: #e9ecef;
         }
 
-        /* Distribution Card */
         .distribution-card {
           background: white;
           border-radius: 20px;
@@ -810,7 +937,6 @@ export default function ActivityLogs() {
           font-weight: 600;
         }
 
-        /* Logs Table */
         .logs-table-container {
           background: white;
           border-radius: 24px;
@@ -858,7 +984,6 @@ export default function ActivityLogs() {
           background: #fafbfc;
         }
 
-        /* Time Cell */
         .time-wrapper {
           display: flex;
           align-items: center;
@@ -872,7 +997,6 @@ export default function ActivityLogs() {
           font-size: 12px;
         }
 
-        /* Admin Cell */
         .admin-wrapper {
           display: flex;
           align-items: center;
@@ -903,7 +1027,6 @@ export default function ActivityLogs() {
           color: #6c757d;
         }
 
-        /* Activity Badge */
         .activity-badge {
           display: inline-flex;
           align-items: center;
@@ -921,7 +1044,6 @@ export default function ActivityLogs() {
         .activity-badge.danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
         .activity-badge.secondary { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
 
-        /* Description Cell */
         .description-cell {
           max-width: 350px;
         }
@@ -933,7 +1055,6 @@ export default function ActivityLogs() {
           line-height: 1.4;
         }
 
-        /* IP Code */
         .ip-code {
           display: inline-flex;
           align-items: center;
@@ -953,7 +1074,6 @@ export default function ActivityLogs() {
           color: #9ca3af;
         }
 
-        /* View Details Button */
         .view-details-btn {
           width: 32px;
           height: 32px;
@@ -974,7 +1094,6 @@ export default function ActivityLogs() {
           transform: translateY(-2px);
         }
 
-        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 60px 20px;
@@ -997,7 +1116,6 @@ export default function ActivityLogs() {
           color: #94a3b8;
         }
 
-        /* Modal */
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -1141,17 +1259,14 @@ export default function ActivityLogs() {
           }
         }
 
-        /* Responsive */
         @media (max-width: 1024px) {
           .stats-grid {
             grid-template-columns: repeat(2, 1fr);
           }
-          
           .filters-body {
             flex-direction: column;
             align-items: stretch;
           }
-          
           .detail-row {
             grid-template-columns: 1fr;
           }
@@ -1161,12 +1276,10 @@ export default function ActivityLogs() {
           .stats-grid {
             grid-template-columns: 1fr;
           }
-          
           .logs-table {
             display: block;
             overflow-x: auto;
           }
-          
           .page-header {
             flex-direction: column;
             align-items: flex-start;
