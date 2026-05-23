@@ -14,17 +14,12 @@ export default function UserDetails() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [currentAdmin, setCurrentAdmin] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
-  const [roles, setRoles] = useState([])
-  const [selectedRole, setSelectedRole] = useState('')
-  const [showRoleModal, setShowRoleModal] = useState(false)
-  const [updatingRole, setUpdatingRole] = useState(false)
 
   useEffect(() => {
     if (id) {
       fetchCurrentAdmin()
       fetchUserDetails()
       fetchUserActivities()
-      fetchRoles()
     }
   }, [id])
 
@@ -33,21 +28,6 @@ export default function UserDetails() {
     if (session) {
       const parsed = JSON.parse(session)
       setCurrentAdmin(parsed.admin)
-    }
-  }
-
-  const fetchRoles = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('admin_roles')
-        .select('role_id, role_name, description')
-        .order('role_name')
-
-      if (!error && data) {
-        setRoles(data)
-      }
-    } catch (err) {
-      console.error('Error fetching roles:', err)
     }
   }
 
@@ -68,7 +48,6 @@ export default function UserDetails() {
 
       if (!error && data) {
         setUser(data)
-        setSelectedRole(data.role_id || '')
       }
     } catch (err) {
       console.error('Error fetching user:', err)
@@ -98,32 +77,8 @@ export default function UserDetails() {
     return currentAdmin?.admin_id === user?.admin_id
   }
 
-  const handleRoleChange = async () => {
-    if (isCurrentUser()) {
-      alert('You cannot change your own role!')
-      return
-    }
-
-    setUpdatingRole(true)
-    const { error } = await supabase
-      .from('admin_users')
-      .update({ 
-        role_id: selectedRole || null,
-        updated_at: new Date().toISOString()
-      })
-      .eq('admin_id', id)
-
-    if (!error) {
-      fetchUserDetails()
-      setShowRoleModal(false)
-      alert('Role updated successfully!')
-    } else {
-      alert('Error updating role: ' + error.message)
-    }
-    setUpdatingRole(false)
-  }
-
   const handleStatusToggle = async () => {
+    // Prevent self-deactivation
     if (isCurrentUser()) {
       alert('You cannot deactivate your own account!')
       return
@@ -146,6 +101,7 @@ export default function UserDetails() {
   }
 
   const handleDeleteUser = async () => {
+    // Prevent self-deletion
     if (isCurrentUser()) {
       alert('You cannot delete your own account!')
       return
@@ -163,27 +119,18 @@ export default function UserDetails() {
     setUpdating(false)
   }
 
-  const handleSuperAdminToggle = async () => {
-    if (isCurrentUser()) {
-      alert('You cannot change your own super admin status!')
-      return
-    }
-
+  const handleRoleChange = async (newRoleId) => {
     setUpdating(true)
-    const newStatus = !user.is_super_admin
     const { error } = await supabase
       .from('admin_users')
       .update({ 
-        is_super_admin: newStatus,
+        role_id: newRoleId,
         updated_at: new Date().toISOString()
       })
       .eq('admin_id', id)
 
     if (!error) {
       fetchUserDetails()
-      alert(`Super admin status ${newStatus ? 'granted' : 'revoked'} successfully!`)
-    } else {
-      alert('Error updating super admin status: ' + error.message)
     }
     setUpdating(false)
   }
@@ -212,8 +159,7 @@ export default function UserDetails() {
       'CONTENT_MODERATION': 'bi-file-post',
       'REPORT_HANDLING': 'bi-flag',
       'SECURITY_ALERT': 'bi-shield-exclamation',
-      'PROFILE_UPDATE': 'bi-person-gear',
-      'ROLE_CHANGE': 'bi-badge'
+      'PROFILE_UPDATE': 'bi-person-gear'
     }
     return icons[type] || 'bi-activity'
   }
@@ -226,8 +172,7 @@ export default function UserDetails() {
       'CONTENT_MODERATION': 'info',
       'REPORT_HANDLING': 'danger',
       'SECURITY_ALERT': 'danger',
-      'PROFILE_UPDATE': 'secondary',
-      'ROLE_CHANGE': 'primary'
+      'PROFILE_UPDATE': 'secondary'
     }
     return colors[type] || 'secondary'
   }
@@ -339,19 +284,19 @@ export default function UserDetails() {
             Overview
           </button>
           <button 
-            className={`tab-btn ${activeTab === 'permissions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('permissions')}
-          >
-            <i className="bi bi-shield-lock"></i>
-            Permissions
-          </button>
-          <button 
             className={`tab-btn ${activeTab === 'activity' ? 'active' : ''}`}
             onClick={() => setActiveTab('activity')}
           >
             <i className="bi bi-clock-history"></i>
             Activity Log
             {activities.length > 0 && <span className="tab-badge">{activities.length}</span>}
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'permissions' ? 'active' : ''}`}
+            onClick={() => setActiveTab('permissions')}
+          >
+            <i className="bi bi-shield-lock"></i>
+            Permissions
           </button>
         </div>
 
@@ -417,6 +362,35 @@ export default function UserDetails() {
                 </div>
               </div>
 
+              <div className="profile-contact">
+                <h4>Contact Information</h4>
+                <div className="contact-item">
+                  <i className="bi bi-envelope-fill"></i>
+                  <div>
+                    <span>Email Address</span>
+                    <p>{user.email}</p>
+                  </div>
+                </div>
+                {user.phone_number && (
+                  <div className="contact-item">
+                    <i className="bi bi-telephone-fill"></i>
+                    <div>
+                      <span>Phone Number</span>
+                      <p>{user.phone_number}</p>
+                    </div>
+                  </div>
+                )}
+                {user.location && (
+                  <div className="contact-item">
+                    <i className="bi bi-geo-alt-fill"></i>
+                    <div>
+                      <span>Location</span>
+                      <p>{user.location}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {user.bio && (
                 <div className="profile-bio">
                   <h4>Bio</h4>
@@ -436,13 +410,6 @@ export default function UserDetails() {
                   >
                     <i className="bi bi-pencil-square"></i>
                     Edit User
-                  </button>
-                  <button 
-                    className="action-btn permission-btn"
-                    onClick={() => setActiveTab('permissions')}
-                  >
-                    <i className="bi bi-shield-lock"></i>
-                    Manage Permissions
                   </button>
                   {!isSelf ? (
                     <>
@@ -477,220 +444,14 @@ export default function UserDetails() {
                   <code>{user.admin_id?.slice(0, 8)}...</code>
                 </div>
                 <div className="info-item">
-                  <span>Role</span>
-                  <strong>{user.admin_roles?.role_name || 'No Role'}</strong>
+                  <span>Role ID</span>
+                  <code>{user.role_id?.slice(0, 8) || 'None'}</code>
                 </div>
                 <div className="info-item">
                   <span>Super Admin</span>
                   <span className={user.is_super_admin ? 'text-success' : 'text-muted'}>
                     {user.is_super_admin ? 'Yes' : 'No'}
                   </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Permissions Tab - NEW */}
-        {activeTab === 'permissions' && (
-          <div className="permissions-container">
-            <div className="permissions-header">
-              <div>
-                <h2><i className="bi bi-shield-lock"></i> Permission Management</h2>
-                <p>Manage user roles and access permissions for {user.full_name}</p>
-              </div>
-              {!isSelf && (
-                <button 
-                  className="save-permissions-btn"
-                  onClick={() => setShowRoleModal(true)}
-                  disabled={updatingRole}
-                >
-                  <i className="bi bi-save"></i>
-                  Save Changes
-                </button>
-              )}
-            </div>
-
-            {isSelf && (
-              <div className="warning-banner">
-                <i className="bi bi-shield-exclamation"></i>
-                <div>
-                  <strong>Cannot modify your own permissions</strong>
-                  <p>You cannot change your own role or permissions for security reasons.</p>
-                </div>
-              </div>
-            )}
-
-            {/* Role Selection Card */}
-            <div className="permission-card-large">
-              <div className="permission-card-header">
-                <div className="permission-card-icon">
-                  <i className="bi bi-badge"></i>
-                </div>
-                <div>
-                  <h3>User Role</h3>
-                  <p>Assign a role to determine what actions this user can perform</p>
-                </div>
-              </div>
-              <div className="permission-card-body">
-                <div className="role-selector">
-                  <label className="role-label">Select Role</label>
-                  <select 
-                    className="role-select"
-                    value={selectedRole}
-                    onChange={(e) => setSelectedRole(e.target.value)}
-                    disabled={isSelf}
-                  >
-                    <option value="">No Role</option>
-                    {roles.map(role => (
-                      <option key={role.role_id} value={role.role_id}>
-                        {role.role_name} - {role.description}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedRole !== user.role_id && !isSelf && (
-                    <div className="unsaved-changes">
-                      <i className="bi bi-exclamation-circle"></i>
-                      You have unsaved role changes. Click "Save Changes" to apply.
-                    </div>
-                  )}
-                </div>
-                <div className="current-role-info">
-                  <div className="info-row">
-                    <span>Current Role:</span>
-                    <strong>{user.admin_roles?.role_name || 'No Role Assigned'}</strong>
-                  </div>
-                  <div className="info-row">
-                    <span>Role Description:</span>
-                    <span>{user.admin_roles?.description || 'No description available'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Super Admin Toggle Card */}
-            <div className="permission-card-large">
-              <div className="permission-card-header">
-                <div className="permission-card-icon">
-                  <i className="bi bi-star-fill"></i>
-                </div>
-                <div>
-                  <h3>Super Administrator</h3>
-                  <p>Grants unrestricted access to all system features</p>
-                </div>
-              </div>
-              <div className="permission-card-body">
-                <div className="toggle-container">
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={user.is_super_admin}
-                      onChange={handleSuperAdminToggle}
-                      disabled={isSelf}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
-                  <div className="toggle-info">
-                    <strong>{user.is_super_admin ? 'Enabled' : 'Disabled'}</strong>
-                    <p>
-                      {user.is_super_admin 
-                        ? 'User has full access to all system features and settings.' 
-                        : 'User access is limited by their assigned role.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Permission Matrix */}
-            <div className="permission-card-large">
-              <div className="permission-card-header">
-                <div className="permission-card-icon">
-                  <i className="bi bi-grid-3x3-gap-fill"></i>
-                </div>
-                <div>
-                  <h3>Permission Matrix</h3>
-                  <p>Detailed breakdown of user capabilities</p>
-                </div>
-              </div>
-              <div className="permission-matrix">
-                <div className="matrix-item">
-                  <div className="matrix-info">
-                    <i className="bi bi-people"></i>
-                    <div>
-                      <strong>User Management</strong>
-                      <span>Create, edit, and delete users</span>
-                    </div>
-                  </div>
-                  <div className={`matrix-status ${(user.is_super_admin || user.admin_roles?.role_name === 'SUPER_ADMIN') ? 'enabled' : (user.admin_roles?.role_name === 'CONTENT_ADMIN' ? 'partial' : 'disabled')}`}>
-                    {user.is_super_admin || user.admin_roles?.role_name === 'SUPER_ADMIN' ? '✓ Enabled' : 
-                     user.admin_roles?.role_name === 'CONTENT_ADMIN' ? 'Limited' : '✗ Disabled'}
-                  </div>
-                </div>
-
-                <div className="matrix-item">
-                  <div className="matrix-info">
-                    <i className="bi bi-file-post"></i>
-                    <div>
-                      <strong>Content Moderation</strong>
-                      <span>Manage and moderate posts</span>
-                    </div>
-                  </div>
-                  <div className={`matrix-status ${(user.is_super_admin || user.admin_roles?.role_name === 'SUPER_ADMIN' || user.admin_roles?.role_name === 'CONTENT_ADMIN') ? 'enabled' : 'disabled'}`}>
-                    {user.is_super_admin || user.admin_roles?.role_name === 'SUPER_ADMIN' || user.admin_roles?.role_name === 'CONTENT_ADMIN' ? '✓ Enabled' : '✗ Disabled'}
-                  </div>
-                </div>
-
-                <div className="matrix-item">
-                  <div className="matrix-info">
-                    <i className="bi bi-shield-shaded"></i>
-                    <div>
-                      <strong>Security Management</strong>
-                      <span>Configure security settings</span>
-                    </div>
-                  </div>
-                  <div className={`matrix-status ${(user.is_super_admin || user.admin_roles?.role_name === 'SECURITY_ADMIN') ? 'enabled' : 'disabled'}`}>
-                    {user.is_super_admin || user.admin_roles?.role_name === 'SECURITY_ADMIN' ? '✓ Enabled' : '✗ Disabled'}
-                  </div>
-                </div>
-
-                <div className="matrix-item">
-                  <div className="matrix-info">
-                    <i className="bi bi-headset"></i>
-                    <div>
-                      <strong>Support Access</strong>
-                      <span>Handle user support tickets</span>
-                    </div>
-                  </div>
-                  <div className={`matrix-status ${(user.is_super_admin || user.admin_roles?.role_name === 'SUPPORT_ADMIN') ? 'enabled' : 'disabled'}`}>
-                    {user.is_super_admin || user.admin_roles?.role_name === 'SUPPORT_ADMIN' ? '✓ Enabled' : '✗ Disabled'}
-                  </div>
-                </div>
-
-                <div className="matrix-item">
-                  <div className="matrix-info">
-                    <i className="bi bi-graph-up"></i>
-                    <div>
-                      <strong>Analytics Access</strong>
-                      <span>View platform analytics</span>
-                    </div>
-                  </div>
-                  <div className={`matrix-status ${user.is_super_admin ? 'enabled' : 'disabled'}`}>
-                    {user.is_super_admin ? '✓ Enabled' : '✗ Disabled'}
-                  </div>
-                </div>
-
-                <div className="matrix-item">
-                  <div className="matrix-info">
-                    <i className="bi bi-gear"></i>
-                    <div>
-                      <strong>System Settings</strong>
-                      <span>Modify system configuration</span>
-                    </div>
-                  </div>
-                  <div className={`matrix-status ${user.is_super_admin ? 'enabled' : 'disabled'}`}>
-                    {user.is_super_admin ? '✓ Enabled' : '✗ Disabled'}
-                  </div>
                 </div>
               </div>
             </div>
@@ -735,49 +496,97 @@ export default function UserDetails() {
             </div>
           </div>
         )}
-      </div>
 
-      {/* Role Change Modal */}
-      {showRoleModal && (
-        <div className="modal-overlay" onClick={() => setShowRoleModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header warning">
-              <div className="modal-icon">
-                <i className="bi bi-badge"></i>
-              </div>
-              <h3>Confirm Role Change</h3>
-              <button className="modal-close" onClick={() => setShowRoleModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-            <div className="modal-body">
-              <p>
-                Are you sure you want to change the role for <strong>{user.full_name}</strong>?
-              </p>
-              <div className="role-change-info">
-                <div className="role-change-item">
-                  <span>Current Role:</span>
-                  <strong>{user.admin_roles?.role_name || 'No Role'}</strong>
+        {/* Permissions Tab */}
+        {activeTab === 'permissions' && (
+          <div className="permissions-container">
+            <div className="permissions-card">
+              <h3><i className="bi bi-shield-lock"></i> User Permissions</h3>
+              <p>Access levels and capabilities</p>
+              
+              <div className="permissions-list">
+                <div className="permission-item">
+                  <div className="permission-info">
+                    <i className="bi bi-people"></i>
+                    <div>
+                      <strong>User Management</strong>
+                      <span>Create, edit, and delete users</span>
+                    </div>
+                  </div>
+                  <span className={`permission-status ${user.is_super_admin ? 'enabled' : (user.admin_roles?.role_name === 'SUPER_ADMIN' ? 'enabled' : 'disabled')}`}>
+                    {user.is_super_admin || user.admin_roles?.role_name === 'SUPER_ADMIN' ? 'Enabled' : 'Disabled'}
+                  </span>
                 </div>
-                <div className="role-change-item">
-                  <span>New Role:</span>
-                  <strong>{roles.find(r => r.role_id === selectedRole)?.role_name || 'No Role'}</strong>
+
+                <div className="permission-item">
+                  <div className="permission-info">
+                    <i className="bi bi-file-post"></i>
+                    <div>
+                      <strong>Content Moderation</strong>
+                      <span>Manage and moderate posts</span>
+                    </div>
+                  </div>
+                  <span className={`permission-status ${user.is_super_admin || user.admin_roles?.role_name === 'CONTENT_ADMIN' ? 'enabled' : 'disabled'}`}>
+                    {user.is_super_admin || user.admin_roles?.role_name === 'CONTENT_ADMIN' ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+
+                <div className="permission-item">
+                  <div className="permission-info">
+                    <i className="bi bi-shield-shaded"></i>
+                    <div>
+                      <strong>Security Management</strong>
+                      <span>Configure security settings</span>
+                    </div>
+                  </div>
+                  <span className={`permission-status ${user.is_super_admin || user.admin_roles?.role_name === 'SECURITY_ADMIN' ? 'enabled' : 'disabled'}`}>
+                    {user.is_super_admin || user.admin_roles?.role_name === 'SECURITY_ADMIN' ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+
+                <div className="permission-item">
+                  <div className="permission-info">
+                    <i className="bi bi-headset"></i>
+                    <div>
+                      <strong>Support Access</strong>
+                      <span>Handle user support tickets</span>
+                    </div>
+                  </div>
+                  <span className={`permission-status ${user.is_super_admin || user.admin_roles?.role_name === 'SUPPORT_ADMIN' ? 'enabled' : 'disabled'}`}>
+                    {user.is_super_admin || user.admin_roles?.role_name === 'SUPPORT_ADMIN' ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+
+                <div className="permission-item">
+                  <div className="permission-info">
+                    <i className="bi bi-graph-up"></i>
+                    <div>
+                      <strong>Analytics Access</strong>
+                      <span>View platform analytics</span>
+                    </div>
+                  </div>
+                  <span className={`permission-status ${user.is_super_admin ? 'enabled' : 'disabled'}`}>
+                    {user.is_super_admin ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+
+                <div className="permission-item">
+                  <div className="permission-info">
+                    <i className="bi bi-gear"></i>
+                    <div>
+                      <strong>System Settings</strong>
+                      <span>Modify system configuration</span>
+                    </div>
+                  </div>
+                  <span className={`permission-status ${user.is_super_admin ? 'enabled' : 'disabled'}`}>
+                    {user.is_super_admin ? 'Enabled' : 'Disabled'}
+                  </span>
                 </div>
               </div>
-              <div className="warning-message">
-                <i className="bi bi-info-circle-fill"></i>
-                Role changes will take effect immediately on the user's next login.
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowRoleModal(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handleRoleChange} disabled={updatingRole}>
-                {updatingRole ? 'Saving...' : 'Confirm Change'}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Deactivate Confirmation Modal */}
       {showDeactivateModal && (
@@ -794,7 +603,7 @@ export default function UserDetails() {
             </div>
             <div className="modal-body">
               <p>
-                Are you sure you want to <strong>{user.is_active ? 'deactivate' : 'activate'}</strong>
+                Are you sure you want to <strong>{user.is_active ? 'deactivate' : 'activate'}</strong> 
                 <br />
                 <span className="user-highlight">{user.full_name}</span>?
               </p>
@@ -894,6 +703,10 @@ export default function UserDetails() {
           color: #6c757d;
           margin: 0;
           font-size: 14px;
+        }
+
+        .header-subtitle i {
+          margin-right: 6px;
         }
 
         .back-button {
@@ -1017,15 +830,27 @@ export default function UserDetails() {
           border: 2px solid white;
         }
 
+        .super-badge i {
+          font-size: 12px;
+        }
+
+        .profile-info {
+          flex: 1;
+        }
+
         .profile-info h2 {
           margin: 0 0 4px 0;
           font-size: 24px;
         }
 
+        .profile-info p {
+          margin: 0 0 12px 0;
+          opacity: 0.9;
+        }
+
         .profile-meta {
           display: flex;
           gap: 12px;
-          margin-top: 12px;
           flex-wrap: wrap;
         }
 
@@ -1062,6 +887,12 @@ export default function UserDetails() {
           background: #ef4444;
         }
 
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+
+        /* Profile Stats */
         .profile-stats {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1081,13 +912,61 @@ export default function UserDetails() {
           color: #667eea;
         }
 
+        .stat-item div {
+          display: flex;
+          flex-direction: column;
+        }
+
         .stat-label {
           font-size: 12px;
           color: #6c757d;
         }
 
-        .profile-bio {
+        .stat-item strong {
+          font-size: 16px;
+          color: #1f2937;
+        }
+
+        /* Profile Contact */
+        .profile-contact, .profile-bio {
           padding: 20px 28px;
+          border-bottom: 1px solid #e9ecef;
+        }
+
+        .profile-contact h4, .profile-bio h4 {
+          margin: 0 0 16px 0;
+          font-size: 16px;
+          color: #1f2937;
+        }
+
+        .contact-item {
+          display: flex;
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+
+        .contact-item i {
+          font-size: 20px;
+          color: #667eea;
+          margin-top: 2px;
+        }
+
+        .contact-item span {
+          font-size: 12px;
+          color: #6c757d;
+          display: block;
+        }
+
+        .contact-item p {
+          margin: 0;
+          font-weight: 500;
+          color: #1f2937;
+        }
+
+        .profile-bio p {
+          margin: 0;
+          color: #4b5563;
+          line-height: 1.6;
         }
 
         /* Actions Sidebar */
@@ -1104,9 +983,10 @@ export default function UserDetails() {
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
 
-        .action-card h4 {
+        .action-card h4, .info-card h4 {
           margin: 0 0 16px 0;
           font-size: 16px;
+          color: #1f2937;
         }
 
         .action-buttons {
@@ -1128,13 +1008,43 @@ export default function UserDetails() {
           transition: all 0.3s ease;
         }
 
-        .edit-btn { background: #4f46e5; color: white; }
-        .permission-btn { background: #8b5cf6; color: white; }
-        .deactivate-btn { background: #f59e0b; color: white; }
-        .activate-btn { background: #10b981; color: white; }
-        .delete-btn { background: #ef4444; color: white; }
+        .edit-btn {
+          background: #4f46e5;
+          color: white;
+        }
 
-        .action-btn:hover {
+        .edit-btn:hover {
+          background: #4338ca;
+          transform: translateY(-1px);
+        }
+
+        .deactivate-btn {
+          background: #f59e0b;
+          color: white;
+        }
+
+        .deactivate-btn:hover {
+          background: #d97706;
+          transform: translateY(-1px);
+        }
+
+        .activate-btn {
+          background: #10b981;
+          color: white;
+        }
+
+        .activate-btn:hover {
+          background: #059669;
+          transform: translateY(-1px);
+        }
+
+        .delete-btn {
+          background: #ef4444;
+          color: white;
+        }
+
+        .delete-btn:hover {
+          background: #dc2626;
           transform: translateY(-1px);
         }
 
@@ -1160,286 +1070,15 @@ export default function UserDetails() {
           color: #6c757d;
         }
 
-        /* Permissions Container */
-        .permissions-container {
-          background: white;
-          border-radius: 24px;
-          padding: 28px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        }
-
-        .permissions-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-          flex-wrap: wrap;
-          gap: 16px;
-        }
-
-        .permissions-header h2 {
-          margin: 0 0 4px 0;
-          font-size: 20px;
-        }
-
-        .permissions-header p {
-          margin: 0;
-          color: #6c757d;
-          font-size: 14px;
-        }
-
-        .save-permissions-btn {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 20px;
-          background: #10b981;
-          border: none;
-          border-radius: 12px;
-          color: white;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .save-permissions-btn:hover {
-          background: #059669;
-          transform: translateY(-1px);
-        }
-
-        .warning-banner {
-          background: #fef3c7;
-          border-left: 4px solid #f59e0b;
-          padding: 16px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 24px;
-        }
-
-        .warning-banner i {
-          font-size: 24px;
-          color: #f59e0b;
-        }
-
-        /* Permission Cards */
-        .permission-card-large {
+        .info-item code {
           background: #f8f9fa;
-          border-radius: 20px;
-          margin-bottom: 24px;
-          overflow: hidden;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 11px;
         }
 
-        .permission-card-header {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          padding: 20px 24px;
-          background: white;
-          border-bottom: 1px solid #e9ecef;
-        }
-
-        .permission-card-icon {
-          width: 48px;
-          height: 48px;
-          background: rgba(79, 70, 229, 0.1);
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .permission-card-icon i {
-          font-size: 24px;
-          color: #4f46e5;
-        }
-
-        .permission-card-header h3 {
-          margin: 0 0 4px 0;
-          font-size: 16px;
-        }
-
-        .permission-card-header p {
-          margin: 0;
-          font-size: 13px;
-          color: #6c757d;
-        }
-
-        .permission-card-body {
-          padding: 24px;
-        }
-
-        .role-selector {
-          margin-bottom: 20px;
-        }
-
-        .role-label {
-          display: block;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 8px;
-          color: #374151;
-        }
-
-        .role-select {
-          width: 100%;
-          padding: 12px 16px;
-          border: 2px solid #e9ecef;
-          border-radius: 12px;
-          font-size: 14px;
-          background: white;
-        }
-
-        .unsaved-changes {
-          margin-top: 8px;
-          font-size: 12px;
-          color: #f59e0b;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .current-role-info {
-          background: #f8f9fa;
-          padding: 16px;
-          border-radius: 12px;
-          margin-top: 16px;
-        }
-
-        .info-row {
-          display: flex;
-          margin-bottom: 8px;
-          font-size: 13px;
-        }
-
-        .info-row span:first-child {
-          width: 120px;
-          color: #6c757d;
-        }
-
-        .toggle-container {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          flex-wrap: wrap;
-        }
-
-        .toggle-switch {
-          position: relative;
-          display: inline-block;
-          width: 52px;
-          height: 28px;
-        }
-
-        .toggle-switch input {
-          opacity: 0;
-          width: 0;
-          height: 0;
-        }
-
-        .toggle-slider {
-          position: absolute;
-          cursor: pointer;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background-color: #cbd5e1;
-          transition: 0.3s;
-          border-radius: 28px;
-        }
-
-        .toggle-slider:before {
-          position: absolute;
-          content: "";
-          height: 22px;
-          width: 22px;
-          left: 3px;
-          bottom: 3px;
-          background-color: white;
-          transition: 0.3s;
-          border-radius: 50%;
-        }
-
-        .toggle-switch input:checked + .toggle-slider {
-          background-color: #f59e0b;
-        }
-
-        .toggle-info {
-          flex: 1;
-        }
-
-        .toggle-info p {
-          margin: 4px 0 0 0;
-          font-size: 12px;
-          color: #6c757d;
-        }
-
-        /* Permission Matrix */
-        .permission-matrix {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .matrix-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 16px;
-          background: white;
-          border-radius: 12px;
-          transition: all 0.3s ease;
-        }
-
-        .matrix-item:hover {
-          background: #f8f9fa;
-        }
-
-        .matrix-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .matrix-info i {
-          font-size: 20px;
-          color: #4f46e5;
-        }
-
-        .matrix-info strong {
-          display: block;
-          font-size: 14px;
-          margin-bottom: 2px;
-        }
-
-        .matrix-info span {
-          font-size: 12px;
-          color: #6c757d;
-        }
-
-        .matrix-status {
-          font-size: 13px;
-          font-weight: 500;
-          padding: 4px 12px;
-          border-radius: 20px;
-        }
-
-        .matrix-status.enabled {
-          background: #d1fae5;
-          color: #065f46;
-        }
-
-        .matrix-status.disabled {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-
-        .matrix-status.partial {
-          background: #fef3c7;
-          color: #92400e;
-        }
+        .text-success { color: #10b981; }
+        .text-muted { color: #6c757d; }
 
         /* Activity Container */
         .activity-container {
@@ -1451,6 +1090,18 @@ export default function UserDetails() {
 
         .activity-header {
           margin-bottom: 24px;
+        }
+
+        .activity-header h3 {
+          margin: 0 0 4px 0;
+          font-size: 18px;
+          color: #1f2937;
+        }
+
+        .activity-header p {
+          margin: 0;
+          color: #6c757d;
+          font-size: 14px;
         }
 
         .activity-timeline {
@@ -1525,6 +1176,90 @@ export default function UserDetails() {
           color: #9ca3af;
         }
 
+        .empty-activities i {
+          font-size: 48px;
+          margin-bottom: 12px;
+          display: block;
+        }
+
+        /* Permissions Container */
+        .permissions-container {
+          background: white;
+          border-radius: 24px;
+          padding: 28px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .permissions-card h3 {
+          margin: 0 0 4px 0;
+          font-size: 18px;
+          color: #1f2937;
+        }
+
+        .permissions-card > p {
+          margin: 0 0 24px 0;
+          color: #6c757d;
+          font-size: 14px;
+        }
+
+        .permissions-list {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .permission-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px;
+          background: #f8f9fa;
+          border-radius: 16px;
+        }
+
+        .permission-info {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+
+        .permission-info i {
+          font-size: 24px;
+          color: #4f46e5;
+        }
+
+        .permission-info div {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .permission-info strong {
+          font-size: 14px;
+          margin-bottom: 2px;
+        }
+
+        .permission-info span {
+          font-size: 12px;
+          color: #6c757d;
+        }
+
+        .permission-status {
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .permission-status.enabled {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .permission-status.disabled {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+
         /* Modals */
         .modal-overlay {
           position: fixed;
@@ -1546,6 +1281,7 @@ export default function UserDetails() {
           width: 90%;
           max-width: 450px;
           animation: slideUp 0.3s ease;
+          overflow: hidden;
         }
 
         .modal-header {
@@ -1591,18 +1327,17 @@ export default function UserDetails() {
           padding: 0 24px 24px;
         }
 
-        .role-change-info {
-          background: #f8f9fa;
-          padding: 16px;
-          border-radius: 12px;
-          margin: 16px 0;
+        .modal-body p {
+          margin: 0 0 16px;
+          line-height: 1.5;
+          color: #4b5563;
         }
 
-        .role-change-item {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 8px;
-          font-size: 13px;
+        .user-highlight {
+          font-weight: 600;
+          color: #1f2937;
+          display: inline-block;
+          margin-top: 4px;
         }
 
         .warning-message {
@@ -1614,6 +1349,11 @@ export default function UserDetails() {
           gap: 8px;
           font-size: 13px;
           color: #856404;
+        }
+
+        .warning-message.danger {
+          background: #f8d7da;
+          color: #721c24;
         }
 
         .modal-footer {
@@ -1638,8 +1378,6 @@ export default function UserDetails() {
           border-radius: 10px;
           font-weight: 600;
           cursor: pointer;
-          background: #4f46e5;
-          color: white;
         }
 
         .btn-primary.danger { background: #ef4444; color: white; }
@@ -1661,11 +1399,6 @@ export default function UserDetails() {
           }
         }
 
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(1.1); }
-        }
-
         /* Responsive */
         @media (max-width: 768px) {
           .content-grid {
@@ -1685,23 +1418,12 @@ export default function UserDetails() {
             grid-template-columns: 1fr;
           }
 
-          .permissions-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-
           .tabs-container {
             flex-wrap: wrap;
           }
 
           .tab-btn {
             flex: auto;
-          }
-
-          .matrix-item {
-            flex-direction: column;
-            gap: 12px;
-            align-items: flex-start;
           }
         }
       `}</style>

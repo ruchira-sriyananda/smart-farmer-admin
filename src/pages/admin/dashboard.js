@@ -61,11 +61,9 @@ export default function AdminDashboard() {
   const [recentUsers, setRecentUsers] = useState([])
   const [recentPosts, setRecentPosts] = useState([])
   const [recentBarterListings, setRecentBarterListings] = useState([])
-  const [recentMessages, setRecentMessages] = useState([])
   const [userGrowthData, setUserGrowthData] = useState([])
   const [roleDistribution, setRoleDistribution] = useState({})
   const [weeklyActivity, setWeeklyActivity] = useState([])
-  const [recentActivities, setRecentActivities] = useState([])
   const [topContributors, setTopContributors] = useState([])
 
   // Set greeting based on time
@@ -84,11 +82,9 @@ export default function AdminDashboard() {
       fetchRecentUsers(),
       fetchRecentPosts(),
       fetchRecentBarterListings(),
-      fetchRecentMessages(),
       fetchUserGrowth(),
       fetchRoleDistribution(),
       fetchWeeklyActivity(),
-      fetchRecentActivities(),
       fetchTopContributors()
     ])
     setLoading(false)
@@ -96,19 +92,69 @@ export default function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
+      // Direct counts without role filtering first to debug
+      const { count: totalUsersCount, error: totalError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+
+      console.log('Total users count:', totalUsersCount)
+
+      // Get role IDs from roles table
+      const { data: roles, error: rolesError } = await supabase
+        .from('roles')
+        .select('role_id, role_name')
+
+      console.log('Roles found:', roles)
+
+      if (rolesError) {
+        console.error('Roles error:', rolesError)
+      }
+
       const roleMap = {}
       roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
 
+      // Get farmers count
+      let farmersCount = 0
+      if (roleMap['FARMER']) {
+        const { count, error } = await supabase
+          .from('users')
+          .select('*', { count: 'exact', head: true })
+          .eq('role_id', roleMap['FARMER'])
+        
+        if (!error) farmersCount = count || 0
+        console.log('Farmers count:', farmersCount)
+      }
+
+      // Get vendors count
+      let vendorsCount = 0
+      if (roleMap['VENDOR']) {
+        const { count, error } = await supabase
+          .from('users')
+          .select('*', { count: 'exact', head: true })
+          .eq('role_id', roleMap['VENDOR'])
+        
+        if (!error) vendorsCount = count || 0
+        console.log('Vendors count:', vendorsCount)
+      }
+
+      // Get verified users count
+      const { count: verifiedCount } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_verified', true)
+
+      // Get pending verification count
+      const { count: pendingCount } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_verified', false)
+
+      // Get today's date range
       const today = new Date()
       today.setHours(0, 0, 0, 0)
 
+      // Get other counts
       const [
-        totalUsersRes,
-        farmersRes,
-        vendorsRes,
-        verifiedRes,
-        pendingRes,
         postsRes,
         barterRes,
         messagesRes,
@@ -119,11 +165,6 @@ export default function AdminDashboard() {
         newPostsRes,
         activeBarterRes
       ] = await Promise.all([
-        supabase.from('users').select('*', { count: 'exact', head: true }),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER']),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR']),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
         supabase.from('posts').select('*', { count: 'exact', head: true }),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
         supabase.from('messages').select('*', { count: 'exact', head: true }),
@@ -136,11 +177,11 @@ export default function AdminDashboard() {
       ])
 
       setStats({
-        totalUsers: totalUsersRes.count || 0,
-        totalFarmers: farmersRes.count || 0,
-        totalVendors: vendorsRes.count || 0,
-        verifiedUsers: verifiedRes.count || 0,
-        pendingVerification: pendingRes.count || 0,
+        totalUsers: totalUsersCount || 0,
+        totalFarmers: farmersCount,
+        totalVendors: vendorsCount,
+        verifiedUsers: verifiedCount || 0,
+        pendingVerification: pendingCount || 0,
         totalPosts: postsRes.count || 0,
         totalBarterListings: barterRes.count || 0,
         totalMessages: messagesRes.count || 0,
@@ -166,7 +207,6 @@ export default function AdminDashboard() {
         .gte('login_time', fiveMinutesAgo)
 
       if (!error && data && data.length > 0) {
-        // Get user details for online users
         const userIds = data.map(s => s.user_id)
         const { data: usersData } = await supabase
           .from('users')
@@ -193,11 +233,23 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('user_id, full_name, email, profile_image, is_verified, created_at, roles!left(role_name)')
+        .select('user_id, full_name, email, profile_image, is_verified, created_at')
         .order('created_at', { ascending: false })
         .limit(5)
 
-      if (!error && data) setRecentUsers(data)
+      if (!error && data) {
+        // Get role names separately
+        const { data: rolesData } = await supabase.from('roles').select('role_id, role_name')
+        const roleMap = {}
+        rolesData?.forEach(r => { roleMap[r.role_id] = r.role_name })
+        
+        const usersWithRoles = data.map(user => ({
+          ...user,
+          role_name: roleMap[user.role_id] || 'PENDING'
+        }))
+        
+        setRecentUsers(usersWithRoles)
+      }
     } catch (err) { console.error('Error:', err) }
   }
 
@@ -205,37 +257,13 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('posts')
-        .select('post_id, title, content, image_url, created_at, users!left(full_name, profile_image), post_categories!left(category_name)')
+        .select('post_id, title, content, image_url, created_at, user_id')
         .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (!error && data) setRecentPosts(data)
-    } catch (err) { console.error('Error:', err) }
-  }
-
-  const fetchRecentBarterListings = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('barter_listings')
-        .select('listing_id, title, description, quantity, unit, status, created_at, users!left(full_name)')
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (!error && data) setRecentBarterListings(data)
-    } catch (err) { console.error('Error:', err) }
-  }
-
-  const fetchRecentMessages = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('message_id, message_text, sent_at, is_read, sender_id, receiver_id')
-        .order('sent_at', { ascending: false })
-        .limit(5)
+        .limit(3)  // Only 3 recent posts
 
       if (!error && data) {
-        // Get user details for messages
-        const userIds = [...new Set(data.flatMap(m => [m.sender_id, m.receiver_id]))]
+        // Get user names for posts
+        const userIds = [...new Set(data.map(p => p.user_id))]
         const { data: usersData } = await supabase
           .from('users')
           .select('user_id, full_name')
@@ -244,13 +272,40 @@ export default function AdminDashboard() {
         const userMap = {}
         usersData?.forEach(u => { userMap[u.user_id] = u.full_name })
         
-        const messagesWithUsers = data.map(msg => ({
-          ...msg,
-          sender_name: userMap[msg.sender_id] || 'Unknown',
-          receiver_name: userMap[msg.receiver_id] || 'Unknown'
+        const postsWithUsers = data.map(post => ({
+          ...post,
+          author_name: userMap[post.user_id] || 'Anonymous'
         }))
         
-        setRecentMessages(messagesWithUsers)
+        setRecentPosts(postsWithUsers)
+      }
+    } catch (err) { console.error('Error:', err) }
+  }
+
+  const fetchRecentBarterListings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('barter_listings')
+        .select('listing_id, title, description, quantity, unit, status, created_at, user_id')
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      if (!error && data) {
+        const userIds = [...new Set(data.map(l => l.user_id))]
+        const { data: usersData } = await supabase
+          .from('users')
+          .select('user_id, full_name')
+          .in('user_id', userIds)
+        
+        const userMap = {}
+        usersData?.forEach(u => { userMap[u.user_id] = u.full_name })
+        
+        const listingsWithUsers = data.map(listing => ({
+          ...listing,
+          owner_name: userMap[listing.user_id] || 'Anonymous'
+        }))
+        
+        setRecentBarterListings(listingsWithUsers)
       }
     } catch (err) { console.error('Error:', err) }
   }
@@ -280,15 +335,19 @@ export default function AdminDashboard() {
 
   const fetchRoleDistribution = async () => {
     try {
-      const { data } = await supabase.from('users').select('roles!left(role_name)')
-      if (data) {
-        const distribution = {}
-        data.forEach(user => {
-          const role = user.roles?.role_name || 'PENDING'
-          distribution[role] = (distribution[role] || 0) + 1
-        })
-        setRoleDistribution(distribution)
-      }
+      const { data: users } = await supabase.from('users').select('role_id')
+      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
+      
+      const roleMap = {}
+      roles?.forEach(r => { roleMap[r.role_id] = r.role_name })
+      
+      const distribution = {}
+      users?.forEach(user => {
+        const roleName = roleMap[user.role_id] || 'PENDING'
+        distribution[roleName] = (distribution[roleName] || 0) + 1
+      })
+      
+      setRoleDistribution(distribution)
     } catch (err) { console.error('Error:', err) }
   }
 
@@ -315,25 +374,13 @@ export default function AdminDashboard() {
     } catch (err) { console.error('Error:', err) }
   }
 
-  const fetchRecentActivities = async () => {
-    try {
-      const { data } = await supabase
-        .from('audit_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5)
-      
-      setRecentActivities(data || [])
-    } catch (err) { console.error('Error:', err) }
-  }
-
   const fetchTopContributors = async () => {
     try {
       const { data } = await supabase
         .from('posts')
-        .select('user_id, users!inner(full_name)')
+        .select('user_id')
       
-      if (data) {
+      if (data && data.length > 0) {
         const userCounts = {}
         data.forEach(post => {
           if (post.user_id) {
@@ -341,16 +388,31 @@ export default function AdminDashboard() {
           }
         })
         
-        const sorted = Object.entries(userCounts)
+        const topUserIds = Object.entries(userCounts)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5)
-          .map(([id, count]) => ({ 
-            user_id: id, 
-            post_count: count,
-            full_name: data.find(p => p.user_id === id)?.users?.full_name || 'Unknown'
-          }))
+          .map(([id]) => id)
         
-        setTopContributors(sorted)
+        if (topUserIds.length > 0) {
+          const { data: usersData } = await supabase
+            .from('users')
+            .select('user_id, full_name')
+            .in('user_id', topUserIds)
+          
+          const userMap = {}
+          usersData?.forEach(u => { userMap[u.user_id] = u.full_name })
+          
+          const sorted = Object.entries(userCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([id, count]) => ({ 
+              user_id: id, 
+              post_count: count,
+              full_name: userMap[id] || 'Unknown'
+            }))
+          
+          setTopContributors(sorted)
+        }
       }
     } catch (err) { console.error('Error:', err) }
   }
@@ -377,14 +439,6 @@ export default function AdminDashboard() {
         })
         .subscribe()
 
-      const barterChannel = supabase
-        .channel('barter_changes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'barter_listings' }, () => {
-          fetchStats()
-          fetchRecentBarterListings()
-        })
-        .subscribe()
-
       const interval = setInterval(() => {
         fetchStats()
         fetchOnlineUsers()
@@ -394,7 +448,6 @@ export default function AdminDashboard() {
       return () => {
         usersChannel.unsubscribe()
         postsChannel.unsubscribe()
-        barterChannel.unsubscribe()
         clearInterval(interval)
       }
     }
@@ -464,7 +517,7 @@ export default function AdminDashboard() {
       'FARMER': <span className="badge-farmer"><i className="bi bi-tree-fill me-1"></i>Farmer</span>,
       'VENDOR': <span className="badge-vendor"><i className="bi bi-shop me-1"></i>Vendor</span>
     }
-    return badges[roleName] || <span className="badge-pending"><i className="bi bi-clock me-1"></i>Pending</span>
+    return badges[roleName] || <span className="badge-pending"><i className="bi bi-clock me-1"></i>{roleName || 'Pending'}</span>
   }
 
   if (loading) {
@@ -589,7 +642,7 @@ export default function AdminDashboard() {
             <div className="stat-mini-info">
               <div className="stat-mini-value">{stats.verifiedUsers.toLocaleString()}</div>
               <div className="stat-mini-label">Verified Users</div>
-              <div className="stat-mini-trend">{Math.round((stats.verifiedUsers / stats.totalUsers) * 100)}% of total</div>
+              <div className="stat-mini-trend">{stats.totalUsers > 0 ? Math.round((stats.verifiedUsers / stats.totalUsers) * 100) : 0}% of total</div>
             </div>
           </div>
           <div className="stat-card-mini">
@@ -674,7 +727,11 @@ export default function AdminDashboard() {
               <p>Breakdown by user role</p>
             </div>
             <div className="donut-container">
-              <Doughnut data={roleDistributionChart} options={chartOptions} />
+              {Object.keys(roleDistribution).length > 0 ? (
+                <Doughnut data={roleDistributionChart} options={chartOptions} />
+              ) : (
+                <div className="no-data-message">No role data available</div>
+              )}
             </div>
             <div className="legend-stats">
               {Object.entries(roleDistribution).map(([role, count]) => (
@@ -779,7 +836,7 @@ export default function AdminDashboard() {
                         <div className="user-email">{user.email}</div>
                       </div>
                     </td>
-                    <td>{getRoleBadge(user.roles?.role_name)}</td>
+                    <td>{getRoleBadge(user.role_name)}</td>
                     <td>
                       {user.is_verified ? (
                         <span className="status-verified"><i className="bi bi-check-circle"></i> Verified</span>
@@ -795,89 +852,71 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Recent Posts & Barter Listings */}
-        <div className="two-columns">
-          <div className="recent-posts">
-            <div className="section-header">
-              <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
-              <button className="view-all" onClick={() => router.push('/admin/mobile-posts')}>
-                View All <i className="bi bi-arrow-right"></i>
-              </button>
-            </div>
-            <div className="posts-list">
-              {recentPosts.map((post) => (
-                <div key={post.post_id} className="post-item">
-                  {post.image_url && (
-                    <div className="post-image">
-                      <img src={post.image_url} alt={post.title} />
-                    </div>
-                  )}
-                  <div className="post-content">
-                    <h6>{post.title}</h6>
-                    <p>{post.content?.substring(0, 80)}...</p>
-                    <div className="post-meta">
-                      <span><i className="bi bi-person-circle"></i> {post.users?.full_name || 'Anonymous'}</span>
-                      <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="recent-barter">
-            <div className="section-header">
-              <h5><i className="bi bi-arrow-left-right"></i> Recent Barter Listings</h5>
-              <button className="view-all" onClick={() => router.push('/admin/mobile-barter')}>
-                View All <i className="bi bi-arrow-right"></i>
-              </button>
-            </div>
-            <div className="barter-list">
-              {recentBarterListings.map((listing) => (
-                <div key={listing.listing_id} className="barter-item">
-                  <div className="barter-info">
-                    <h6>{listing.title}</h6>
-                    <p>{listing.description?.substring(0, 60)}...</p>
-                    <div className="barter-meta">
-                      <span><i className="bi bi-box"></i> {listing.quantity} {listing.unit}</span>
-                      <span><i className="bi bi-person"></i> {listing.users?.full_name || 'Anonymous'}</span>
-                    </div>
-                  </div>
-                  <div className={`barter-status ${listing.status === 'ACTIVE' ? 'active' : 'inactive'}`}>
-                    {listing.status}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Messages */}
-        <div className="recent-messages">
+        {/* Recent Posts - Only 3 */}
+        <div className="recent-posts-section">
           <div className="section-header">
-            <h5><i className="bi bi-chat-dots"></i> Recent Messages</h5>
-            <button className="view-all" onClick={() => router.push('/admin/mobile-messages')}>
+            <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
+            <button className="view-all" onClick={() => router.push('/admin/mobile-posts')}>
               View All <i className="bi bi-arrow-right"></i>
             </button>
           </div>
-          <div className="messages-list">
-            {recentMessages.map((msg) => (
-              <div key={msg.message_id} className="message-item">
-                <div className="message-avatar">
-                  <i className="bi bi-person-circle"></i>
-                </div>
-                <div className="message-content">
-                  <div className="message-header">
-                    <span className="message-sender">{msg.sender_name}</span>
-                    <span className="message-arrow">→</span>
-                    <span className="message-receiver">{msg.receiver_name}</span>
-                    <span className="message-time">{new Date(msg.sent_at).toLocaleString()}</span>
+          <div className="posts-grid">
+            {recentPosts.map((post) => (
+              <div key={post.post_id} className="post-card">
+                {post.image_url && (
+                  <div className="post-card-image">
+                    <img src={post.image_url} alt={post.title} />
                   </div>
-                  <p className="message-text">{msg.message_text}</p>
-                  {!msg.is_read && <span className="message-unread">Unread</span>}
+                )}
+                <div className="post-card-content">
+                  <h6>{post.title}</h6>
+                  <p>{post.content?.substring(0, 80)}...</p>
+                  <div className="post-card-meta">
+                    <span><i className="bi bi-person-circle"></i> {post.author_name}</span>
+                    <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>
+                  </div>
                 </div>
               </div>
             ))}
+            {recentPosts.length === 0 && (
+              <div className="no-data-card">
+                <i className="bi bi-inbox"></i>
+                <p>No posts available</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Recent Barter Listings */}
+        <div className="recent-barter-section">
+          <div className="section-header">
+            <h5><i className="bi bi-arrow-left-right"></i> Recent Barter Listings</h5>
+            <button className="view-all" onClick={() => router.push('/admin/mobile-barter')}>
+              View All <i className="bi bi-arrow-right"></i>
+            </button>
+          </div>
+          <div className="barter-grid">
+            {recentBarterListings.map((listing) => (
+              <div key={listing.listing_id} className="barter-card">
+                <div className="barter-card-header">
+                  <h6>{listing.title}</h6>
+                  <span className={`barter-status ${listing.status === 'ACTIVE' ? 'active' : 'inactive'}`}>
+                    {listing.status}
+                  </span>
+                </div>
+                <p>{listing.description?.substring(0, 80)}...</p>
+                <div className="barter-card-meta">
+                  <span><i className="bi bi-box"></i> {listing.quantity} {listing.unit}</span>
+                  <span><i className="bi bi-person"></i> {listing.owner_name}</span>
+                </div>
+              </div>
+            ))}
+            {recentBarterListings.length === 0 && (
+              <div className="no-data-card">
+                <i className="bi bi-inbox"></i>
+                <p>No barter listings available</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -896,10 +935,6 @@ export default function AdminDashboard() {
             <button className="action-item" onClick={() => router.push('/admin/mobile-barter')}>
               <i className="bi bi-arrow-left-right"></i>
               <span>Barter Oversight</span>
-            </button>
-            <button className="action-item" onClick={() => router.push('/admin/mobile-messages')}>
-              <i className="bi bi-chat-dots"></i>
-              <span>Message Monitor</span>
             </button>
           </div>
         </div>
@@ -1211,6 +1246,14 @@ export default function AdminDashboard() {
           margin-bottom: 20px;
         }
 
+        .no-data-message {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 200px;
+          color: #6c757d;
+        }
+
         .legend-stats {
           display: flex;
           flex-wrap: wrap;
@@ -1392,7 +1435,7 @@ export default function AdminDashboard() {
           color: #9ca3af;
         }
 
-        /* Recent Tables */
+        /* Recent Users Table */
         .recent-table {
           background: white;
           border-radius: 24px;
@@ -1530,111 +1573,132 @@ export default function AdminDashboard() {
         .badge-vendor { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
         .badge-pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
 
-        /* Recent Posts & Barter */
-        .recent-posts, .recent-barter {
+        /* Recent Posts Grid - Only 3 cards */
+        .recent-posts-section {
           background: white;
           border-radius: 24px;
           padding: 20px;
           margin-bottom: 28px;
         }
 
-        .posts-list, .barter-list {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
+        .posts-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 20px;
         }
 
-        .post-item {
-          display: flex;
-          gap: 16px;
-          padding: 12px;
+        .post-card {
           background: #f8f9fa;
           border-radius: 16px;
+          overflow: hidden;
           transition: all 0.3s ease;
         }
 
-        .post-item:hover {
-          background: #e9ecef;
+        .post-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
         }
 
-        .post-image {
-          width: 80px;
-          height: 80px;
-          border-radius: 12px;
+        .post-card-image {
+          height: 160px;
           overflow: hidden;
-          flex-shrink: 0;
         }
 
-        .post-image img {
+        .post-card-image img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
 
-        .post-content {
-          flex: 1;
+        .post-card-content {
+          padding: 16px;
         }
 
-        .post-content h6 {
-          margin: 0 0 4px 0;
+        .post-card-content h6 {
+          margin: 0 0 8px 0;
           font-size: 14px;
           font-weight: 600;
         }
 
-        .post-content p {
-          margin: 0 0 8px 0;
+        .post-card-content p {
+          margin: 0 0 12px 0;
           font-size: 12px;
           color: #6c757d;
+          line-height: 1.4;
         }
 
-        .post-meta {
+        .post-card-meta {
           display: flex;
-          gap: 16px;
+          justify-content: space-between;
           font-size: 11px;
           color: #9ca3af;
         }
 
-        .post-meta i {
+        .post-card-meta i {
           margin-right: 4px;
         }
 
-        .barter-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 12px;
+        /* Recent Barter Section */
+        .recent-barter-section {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          margin-bottom: 28px;
+        }
+
+        .barter-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 20px;
+        }
+
+        .barter-card {
           background: #f8f9fa;
           border-radius: 16px;
+          padding: 16px;
           transition: all 0.3s ease;
         }
 
-        .barter-item:hover {
-          background: #e9ecef;
+        .barter-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         }
 
-        .barter-info h6 {
-          margin: 0 0 4px 0;
+        .barter-card-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+
+        .barter-card-header h6 {
+          margin: 0;
           font-size: 14px;
           font-weight: 600;
         }
 
-        .barter-info p {
-          margin: 0 0 8px 0;
+        .barter-card p {
+          margin: 0 0 12px 0;
           font-size: 12px;
           color: #6c757d;
+          line-height: 1.4;
         }
 
-        .barter-meta {
+        .barter-card-meta {
           display: flex;
-          gap: 16px;
+          justify-content: space-between;
           font-size: 11px;
           color: #9ca3af;
         }
 
+        .barter-card-meta i {
+          margin-right: 4px;
+        }
+
         .barter-status {
-          padding: 4px 12px;
-          border-radius: 20px;
-          font-size: 11px;
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-size: 10px;
           font-weight: 600;
         }
 
@@ -1648,94 +1712,17 @@ export default function AdminDashboard() {
           color: #991b1b;
         }
 
-        /* Recent Messages */
-        .recent-messages {
-          background: white;
-          border-radius: 24px;
-          padding: 20px;
-          margin-bottom: 28px;
-        }
-
-        .messages-list {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .message-item {
-          display: flex;
-          gap: 14px;
-          padding: 12px;
-          background: #f8f9fa;
-          border-radius: 16px;
-          transition: all 0.3s ease;
-        }
-
-        .message-item:hover {
-          background: #e9ecef;
-        }
-
-        .message-avatar {
-          width: 44px;
-          height: 44px;
-          background: #e9ecef;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .message-avatar i {
-          font-size: 24px;
-          color: #6c757d;
-        }
-
-        .message-content {
-          flex: 1;
-        }
-
-        .message-header {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          flex-wrap: wrap;
-          margin-bottom: 6px;
-        }
-
-        .message-sender {
-          font-weight: 600;
-          font-size: 13px;
-          color: #1f2937;
-        }
-
-        .message-arrow {
+        .no-data-card {
+          grid-column: span 3;
+          text-align: center;
+          padding: 60px 20px;
           color: #9ca3af;
         }
 
-        .message-receiver {
-          font-size: 13px;
-          color: #6c757d;
-        }
-
-        .message-time {
-          font-size: 10px;
-          color: #9ca3af;
-          margin-left: auto;
-        }
-
-        .message-text {
-          margin: 0 0 6px 0;
-          font-size: 12px;
-          color: #4b5563;
-        }
-
-        .message-unread {
-          display: inline-block;
-          padding: 2px 8px;
-          background: #ef4444;
-          color: white;
-          border-radius: 10px;
-          font-size: 9px;
+        .no-data-card i {
+          font-size: 48px;
+          margin-bottom: 12px;
+          display: block;
         }
 
         /* Quick Actions */
@@ -1758,7 +1745,7 @@ export default function AdminDashboard() {
 
         .actions-grid {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(3, 1fr);
           gap: 16px;
         }
 
@@ -1819,6 +1806,12 @@ export default function AdminDashboard() {
           .online-list {
             grid-template-columns: repeat(2, 1fr);
           }
+          .posts-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .barter-grid {
+            grid-template-columns: 1fr;
+          }
           .actions-grid {
             grid-template-columns: repeat(2, 1fr);
           }
@@ -1835,20 +1828,11 @@ export default function AdminDashboard() {
           .online-list {
             grid-template-columns: 1fr;
           }
-          .actions-grid {
+          .posts-grid {
             grid-template-columns: 1fr;
           }
-          .post-item {
-            flex-direction: column;
-          }
-          .post-image {
-            width: 100%;
-            height: 120px;
-          }
-          .barter-item {
-            flex-direction: column;
-            gap: 12px;
-            text-align: center;
+          .actions-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
