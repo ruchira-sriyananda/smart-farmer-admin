@@ -9,6 +9,9 @@ export default function CreateUser() {
   const [roles, setRoles] = useState([])
   const [fetchingRoles, setFetchingRoles] = useState(true)
   const [roleError, setRoleError] = useState(null)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [passwordStrength, setPasswordStrength] = useState(0)
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -19,8 +22,9 @@ export default function CreateUser() {
     is_super_admin: false
   })
   const [errors, setErrors] = useState({})
+  const [touched, setTouched] = useState({})
 
-  // Fetch roles from admin_roles table
+  // Fetch roles
   useEffect(() => {
     fetchRoles()
   }, [])
@@ -30,35 +34,11 @@ export default function CreateUser() {
       setFetchingRoles(true)
       setRoleError(null)
       
-      console.log('Fetching roles from admin_roles...')
-      
-      // Try direct query
       const { data, error } = await supabase
         .from('admin_roles')
         .select('role_id, role_name, description')
 
-      console.log('Query result:', { data, error })
-
-      if (error) {
-        console.error('Supabase error:', error)
-        
-        // If RLS error, try using the API endpoint as fallback
-        if (error.message.includes('row-level security') || error.code === '42501') {
-          console.log('RLS policy blocking, trying API fallback...')
-          const response = await fetch('/api/get-roles')
-          const apiData = await response.json()
-          
-          if (apiData.success && apiData.roles) {
-            setRoles(apiData.roles)
-            setRoleError(null)
-            return
-          }
-        }
-        
-        setRoleError(`Database error: ${error.message}`)
-        setRoles([])
-        return
-      }
+      if (error) throw error
 
       if (!data || data.length === 0) {
         setRoleError('No roles found. Please add roles to admin_roles table.')
@@ -66,39 +46,107 @@ export default function CreateUser() {
         return
       }
 
-      console.log('Roles fetched successfully:', data)
       setRoles(data)
       
     } catch (err) {
-      console.error('Error in fetchRoles:', err)
+      console.error('Error:', err)
       setRoleError(err.message)
     } finally {
       setFetchingRoles(false)
     }
   }
 
+  // Calculate password strength
+  const calculatePasswordStrength = (password) => {
+    let strength = 0
+    if (password.length >= 8) strength++
+    if (password.match(/[a-z]/) && password.match(/[A-Z]/)) strength++
+    if (password.match(/[0-9]/)) strength++
+    if (password.match(/[^a-zA-Z0-9]/)) strength++
+    return strength
+  }
+
+  const handlePasswordChange = (e) => {
+    const password = e.target.value
+    setFormData({ ...formData, password })
+    setPasswordStrength(calculatePasswordStrength(password))
+  }
+
+  const getPasswordStrengthColor = () => {
+    if (passwordStrength === 0) return 'bg-secondary'
+    if (passwordStrength === 1) return 'bg-danger'
+    if (passwordStrength === 2) return 'bg-warning'
+    if (passwordStrength === 3) return 'bg-info'
+    return 'bg-success'
+  }
+
+  const getPasswordStrengthText = () => {
+    if (passwordStrength === 0) return 'Enter a password'
+    if (passwordStrength === 1) return 'Weak'
+    if (passwordStrength === 2) return 'Fair'
+    if (passwordStrength === 3) return 'Good'
+    return 'Strong'
+  }
+
+  const validateField = (name, value) => {
+    switch (name) {
+      case 'full_name':
+        if (!value.trim()) return 'Full name is required'
+        if (value.length < 3) return 'Name must be at least 3 characters'
+        return ''
+      case 'email':
+        if (!value.trim()) return 'Email is required'
+        if (!/\S+@\S+\.\S+/.test(value)) return 'Email is invalid'
+        return ''
+      case 'password':
+        if (!value) return 'Password is required'
+        if (value.length < 8) return 'Password must be at least 8 characters'
+        return ''
+      case 'confirm_password':
+        if (value !== formData.password) return 'Passwords do not match'
+        return ''
+      default:
+        return ''
+    }
+  }
+
+  const handleBlur = (field) => {
+    setTouched({ ...touched, [field]: true })
+    const error = validateField(field, formData[field])
+    if (error) {
+      setErrors({ ...errors, [field]: error })
+    } else {
+      const newErrors = { ...errors }
+      delete newErrors[field]
+      setErrors(newErrors)
+    }
+  }
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target
+    const newValue = type === 'checkbox' ? checked : value
+    setFormData({ ...formData, [name]: newValue })
+    
+    if (touched[name]) {
+      const error = validateField(name, newValue)
+      if (error) {
+        setErrors({ ...errors, [name]: error })
+      } else {
+        const newErrors = { ...errors }
+        delete newErrors[name]
+        setErrors(newErrors)
+      }
+    }
+  }
+
   const validateForm = () => {
     const newErrors = {}
-    
-    if (!formData.full_name.trim()) {
-      newErrors.full_name = 'Full name is required'
-    }
-    
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required'
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email is invalid'
-    }
-    
-    if (!formData.password) {
-      newErrors.password = 'Password is required'
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters'
-    }
-    
-    if (formData.password !== formData.confirm_password) {
-      newErrors.confirm_password = 'Passwords do not match'
-    }
+    if (!formData.full_name.trim()) newErrors.full_name = 'Full name is required'
+    if (!formData.email.trim()) newErrors.email = 'Email is required'
+    else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Email is invalid'
+    if (!formData.password) newErrors.password = 'Password is required'
+    else if (formData.password.length < 8) newErrors.password = 'Password must be at least 8 characters'
+    if (formData.password !== formData.confirm_password) newErrors.confirm_password = 'Passwords do not match'
     
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
@@ -108,26 +156,23 @@ export default function CreateUser() {
     e.preventDefault()
     
     if (!validateForm()) {
+      // Scroll to first error
+      const firstError = document.querySelector('.is-invalid')
+      if (firstError) firstError.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
     
     setLoading(true)
 
     try {
-      // Create auth user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
-        options: {
-          data: { 
-            full_name: formData.full_name
-          }
-        }
+        options: { data: { full_name: formData.full_name } }
       })
 
       if (authError) throw authError
 
-      // Prepare admin user data
       const adminData = {
         admin_id: authData.user.id,
         full_name: formData.full_name,
@@ -143,8 +188,6 @@ export default function CreateUser() {
         adminData.role_id = formData.role_id
       }
 
-      console.log('Inserting admin user:', adminData)
-
       const { error: adminError } = await supabase
         .from('admin_users')
         .insert(adminData)
@@ -153,7 +196,6 @@ export default function CreateUser() {
 
       router.push('/admin/users')
     } catch (err) {
-      console.error('Error:', err)
       setErrors({ submit: err.message })
     } finally {
       setLoading(false)
@@ -163,184 +205,787 @@ export default function CreateUser() {
   if (fetchingRoles) {
     return (
       <AdminLayout title="Create New User">
-        <div className="d-flex justify-content-center py-5">
-          <div className="text-center">
-            <div className="spinner-border text-primary mb-3" style={{ width: '3rem', height: '3rem' }}></div>
-            <p>Loading roles from database...</p>
+        <div className="skeleton-loader">
+          <div className="skeleton-card">
+            <div className="skeleton-header"></div>
+            <div className="skeleton-body">
+              <div className="skeleton-line"></div>
+              <div className="skeleton-line"></div>
+              <div className="skeleton-line"></div>
+            </div>
           </div>
         </div>
+        <style jsx>{`
+          .skeleton-loader {
+            min-height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .skeleton-card {
+            width: 100%;
+            max-width: 800px;
+            background: white;
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+          }
+          .skeleton-header {
+            height: 32px;
+            width: 200px;
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+            margin-bottom: 24px;
+          }
+          .skeleton-body {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+          }
+          .skeleton-line {
+            height: 48px;
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 12px;
+          }
+          @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
 
   return (
-    <AdminLayout title="Create New Admin User">
-      <div className="card border-0 shadow-sm">
-        <div className="card-header bg-white border-0 pt-4">
-          <div className="d-flex justify-content-between align-items-center">
-            <h5 className="mb-0 fw-bold">
-              <i className="bi bi-person-plus me-2 text-primary"></i>
-              Add New Administrator
-            </h5>
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => router.back()}>
-              <i className="bi bi-arrow-left me-1"></i>Back
-            </button>
+    <AdminLayout title="Create New Administrator">
+      <div className="create-user-container">
+        {/* Header Section */}
+        <div className="page-header">
+          <div className="header-content">
+            <div className="header-icon">
+              <i className="bi bi-person-plus-fill"></i>
+            </div>
+            <div className="header-text">
+              <h1 className="header-title">Add New Administrator</h1>
+              <p className="header-subtitle">Create a new admin user with specific role and permissions</p>
+            </div>
           </div>
+          <button className="back-button" onClick={() => router.back()}>
+            <i className="bi bi-arrow-left"></i>
+            <span>Back</span>
+          </button>
         </div>
-        <div className="card-body">
-          {/* Debug Info */}
-          <div className="alert alert-secondary small mb-3">
-            <strong>Database Status:</strong> Found {roles.length} roles in admin_roles table
-            {roles.length > 0 && (
-              <div className="mt-2">
-                <strong>Available Roles:</strong>
-                <ul className="mb-0 mt-1">
-                  {roles.map(role => (
-                    <li key={role.role_id}>{role.role_name} - {role.description}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
 
-          {/* Role Error Message */}
+        {/* Main Form Card */}
+        <div className="form-card">
+          {/* Success Message */}
           {roleError && (
-            <div className="alert alert-warning">
-              <i className="bi bi-exclamation-triangle-fill me-2"></i>
-              {roleError}
-              <button className="btn btn-sm btn-primary ms-3" onClick={fetchRoles}>
-                <i className="bi bi-arrow-repeat me-1"></i>Retry
+            <div className="alert-warning-card">
+              <i className="bi bi-exclamation-triangle-fill"></i>
+              <div>
+                <strong>Warning</strong>
+                <p>{roleError}</p>
+              </div>
+              <button className="retry-btn" onClick={fetchRoles}>
+                <i className="bi bi-arrow-repeat"></i> Retry
               </button>
             </div>
           )}
 
           {/* Submit Error */}
           {errors.submit && (
-            <div className="alert alert-danger">{errors.submit}</div>
+            <div className="alert-error-card">
+              <i className="bi bi-x-circle-fill"></i>
+              <div>
+                <strong>Error</strong>
+                <p>{errors.submit}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Roles Info */}
+          {!roleError && roles.length > 0 && (
+            <div className="info-card">
+              <i className="bi bi-shield-check"></i>
+              <div>
+                <strong>{roles.length} Roles Available</strong>
+                <p>Select a role to assign permissions to this administrator</p>
+              </div>
+            </div>
           )}
 
           <form onSubmit={handleSubmit}>
-            <div className="row">
-              <div className="col-md-6 mb-3">
-                <label className="form-label fw-semibold">Full Name *</label>
-                <input
-                  type="text"
-                  className={`form-control ${errors.full_name ? 'is-invalid' : ''}`}
-                  value={formData.full_name}
-                  onChange={(e) => setFormData({...formData, full_name: e.target.value})}
-                />
-                {errors.full_name && <div className="invalid-feedback">{errors.full_name}</div>}
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <label className="form-label fw-semibold">Email Address *</label>
-                <input
-                  type="email"
-                  className={`form-control ${errors.email ? 'is-invalid' : ''}`}
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                />
-                {errors.email && <div className="invalid-feedback">{errors.email}</div>}
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <label className="form-label fw-semibold">Password *</label>
-                <input
-                  type="password"
-                  className={`form-control ${errors.password ? 'is-invalid' : ''}`}
-                  value={formData.password}
-                  onChange={(e) => setFormData({...formData, password: e.target.value})}
-                />
-                {errors.password && <div className="invalid-feedback">{errors.password}</div>}
-                <small className="text-muted">Minimum 8 characters</small>
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <label className="form-label fw-semibold">Confirm Password *</label>
-                <input
-                  type="password"
-                  className={`form-control ${errors.confirm_password ? 'is-invalid' : ''}`}
-                  value={formData.confirm_password}
-                  onChange={(e) => setFormData({...formData, confirm_password: e.target.value})}
-                />
-                {errors.confirm_password && <div className="invalid-feedback">{errors.confirm_password}</div>}
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <label className="form-label fw-semibold">Role</label>
-                <select 
-                  className={`form-select ${errors.role_id ? 'is-invalid' : ''}`}
-                  value={formData.role_id}
-                  onChange={(e) => setFormData({...formData, role_id: e.target.value})}
-                  disabled={roles.length === 0}
-                >
-                  <option value="">Select a Role</option>
-                  {roles.map(role => (
-                    <option key={role.role_id} value={role.role_id}>
-                      {role.role_name} - {role.description}
-                    </option>
-                  ))}
-                </select>
-                {errors.role_id && <div className="invalid-feedback">{errors.role_id}</div>}
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <div className="form-check form-switch mt-4 pt-2">
+            <div className="form-grid">
+              {/* Full Name Field */}
+              <div className="form-group">
+                <label className="form-label">
+                  <i className="bi bi-person"></i>
+                  Full Name
+                  <span className="required">*</span>
+                </label>
+                <div className="input-wrapper">
                   <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="isActive"
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
+                    type="text"
+                    name="full_name"
+                    className={`form-input ${errors.full_name && touched.full_name ? 'error' : ''}`}
+                    placeholder="Enter full name"
+                    value={formData.full_name}
+                    onChange={handleChange}
+                    onBlur={() => handleBlur('full_name')}
                   />
-                  <label className="form-check-label" htmlFor="isActive">
-                    Active Account
-                  </label>
+                  {errors.full_name && touched.full_name && (
+                    <div className="error-message">
+                      <i className="bi bi-exclamation-circle"></i>
+                      {errors.full_name}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="col-12 mb-3">
-                <div className="form-check">
+              {/* Email Field */}
+              <div className="form-group">
+                <label className="form-label">
+                  <i className="bi bi-envelope"></i>
+                  Email Address
+                  <span className="required">*</span>
+                </label>
+                <div className="input-wrapper">
                   <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="isSuperAdmin"
-                    checked={formData.is_super_admin}
-                    onChange={(e) => setFormData({...formData, is_super_admin: e.target.checked})}
+                    type="email"
+                    name="email"
+                    className={`form-input ${errors.email && touched.email ? 'error' : ''}`}
+                    placeholder="admin@example.com"
+                    value={formData.email}
+                    onChange={handleChange}
+                    onBlur={() => handleBlur('email')}
                   />
-                  <label className="form-check-label" htmlFor="isSuperAdmin">
-                    <i className="bi bi-star-fill text-warning me-1"></i>
-                    Super Admin (Full system access)
-                  </label>
-                  <div className="text-muted small mt-1">
-                    Super admins have unrestricted access to all features and settings.
+                  {errors.email && touched.email && (
+                    <div className="error-message">
+                      <i className="bi bi-exclamation-circle"></i>
+                      {errors.email}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Password Field */}
+              <div className="form-group">
+                <label className="form-label">
+                  <i className="bi bi-lock"></i>
+                  Password
+                  <span className="required">*</span>
+                </label>
+                <div className="input-wrapper">
+                  <div className="password-input-wrapper">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      className={`form-input ${errors.password && touched.password ? 'error' : ''}`}
+                      placeholder="Enter password"
+                      value={formData.password}
+                      onChange={handlePasswordChange}
+                      onBlur={() => handleBlur('password')}
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`}></i>
+                    </button>
                   </div>
+                  {formData.password && (
+                    <div className="password-strength">
+                      <div className="strength-bar">
+                        <div className={`strength-fill ${getPasswordStrengthColor()}`} style={{ width: `${(passwordStrength / 4) * 100}%` }}></div>
+                      </div>
+                      <span className="strength-text">{getPasswordStrengthText()}</span>
+                    </div>
+                  )}
+                  {errors.password && touched.password && (
+                    <div className="error-message">
+                      <i className="bi bi-exclamation-circle"></i>
+                      {errors.password}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Confirm Password Field */}
+              <div className="form-group">
+                <label className="form-label">
+                  <i className="bi bi-shield-lock"></i>
+                  Confirm Password
+                  <span className="required">*</span>
+                </label>
+                <div className="input-wrapper">
+                  <div className="password-input-wrapper">
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      name="confirm_password"
+                      className={`form-input ${errors.confirm_password && touched.confirm_password ? 'error' : ''}`}
+                      placeholder="Confirm password"
+                      value={formData.confirm_password}
+                      onChange={handleChange}
+                      onBlur={() => handleBlur('confirm_password')}
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      <i className={`bi ${showConfirmPassword ? 'bi-eye-slash' : 'bi-eye'}`}></i>
+                    </button>
+                  </div>
+                  {errors.confirm_password && touched.confirm_password && (
+                    <div className="error-message">
+                      <i className="bi bi-exclamation-circle"></i>
+                      {errors.confirm_password}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Role Selection */}
+              <div className="form-group">
+                <label className="form-label">
+                  <i className="bi bi-badge"></i>
+                  Role
+                </label>
+                <div className="input-wrapper">
+                  <select
+                    name="role_id"
+                    className="form-select"
+                    value={formData.role_id}
+                    onChange={handleChange}
+                  >
+                    <option value="">Select a Role</option>
+                    {roles.map(role => (
+                      <option key={role.role_id} value={role.role_id}>
+                        {role.role_name} - {role.description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Active Status */}
+              <div className="form-group">
+                <label className="form-label">
+                  <i className="bi bi-check-circle"></i>
+                  Account Status
+                </label>
+                <div className="toggle-wrapper">
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      name="is_active"
+                      checked={formData.is_active}
+                      onChange={handleChange}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                  <span className="toggle-label">
+                    {formData.is_active ? 'Active' : 'Inactive'}
+                  </span>
                 </div>
               </div>
             </div>
 
-            <hr className="my-4" />
+            {/* Super Admin Option */}
+            <div className="super-admin-card">
+              <div className="super-admin-checkbox">
+                <label className="checkbox-wrapper">
+                  <input
+                    type="checkbox"
+                    name="is_super_admin"
+                    checked={formData.is_super_admin}
+                    onChange={handleChange}
+                  />
+                  <span className="checkbox-custom">
+                    <i className="bi bi-star-fill"></i>
+                  </span>
+                  <span className="checkbox-label">
+                    <strong>Super Administrator</strong>
+                    <span className="checkbox-description">
+                      Grants unrestricted access to all system features and settings
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
 
-            <div className="d-flex gap-2">
-              <button type="submit" className="btn btn-primary px-4" disabled={loading}>
+            {/* Action Buttons */}
+            <div className="action-buttons">
+              <button type="button" className="btn-cancel" onClick={() => router.push('/admin/users')}>
+                <i className="bi bi-x-lg"></i>
+                Cancel
+              </button>
+              <button type="submit" className="btn-submit" disabled={loading}>
                 {loading ? (
                   <>
                     <span className="spinner-border spinner-border-sm me-2"></span>
-                    Creating...
+                    Creating User...
                   </>
                 ) : (
                   <>
-                    <i className="bi bi-check-circle me-2"></i>Create User
+                    <i className="bi bi-check-lg"></i>
+                    Create Administrator
                   </>
                 )}
-              </button>
-              <button type="button" className="btn btn-outline-secondary" onClick={() => router.push('/admin/users')}>
-                <i className="bi bi-x-circle me-2"></i>Cancel
               </button>
             </div>
           </form>
         </div>
       </div>
+
+      <style jsx>{`
+        .create-user-container {
+          max-width: 900px;
+          margin: 0 auto;
+        }
+
+        /* Page Header */
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 28px;
+          flex-wrap: wrap;
+          gap: 16px;
+        }
+
+        .header-content {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .header-icon {
+          width: 60px;
+          height: 60px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .header-icon i {
+          font-size: 28px;
+          color: white;
+        }
+
+        .header-text {
+          flex: 1;
+        }
+
+        .header-title {
+          font-size: 24px;
+          font-weight: 700;
+          color: #1f2937;
+          margin: 0 0 4px 0;
+        }
+
+        .header-subtitle {
+          color: #6c757d;
+          margin: 0;
+          font-size: 14px;
+        }
+
+        .back-button {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 20px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 12px;
+          color: #495057;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.3s ease;
+        }
+
+        .back-button:hover {
+          background: #e9ecef;
+          transform: translateX(-2px);
+        }
+
+        /* Form Card */
+        .form-card {
+          background: white;
+          border-radius: 28px;
+          padding: 32px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Alert Cards */
+        .alert-warning-card {
+          background: #fff3cd;
+          border-left: 4px solid #ffc107;
+          padding: 16px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .alert-warning-card i {
+          font-size: 24px;
+          color: #ffc107;
+        }
+
+        .alert-warning-card div {
+          flex: 1;
+        }
+
+        .alert-warning-card strong {
+          display: block;
+          margin-bottom: 4px;
+        }
+
+        .alert-warning-card p {
+          margin: 0;
+          font-size: 13px;
+          color: #856404;
+        }
+
+        .retry-btn {
+          padding: 6px 12px;
+          background: #ffc107;
+          border: none;
+          border-radius: 8px;
+          color: #856404;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .alert-error-card {
+          background: #f8d7da;
+          border-left: 4px solid #dc3545;
+          padding: 16px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .alert-error-card i {
+          font-size: 24px;
+          color: #dc3545;
+        }
+
+        .info-card {
+          background: #e7f1ff;
+          border-left: 4px solid #0d6efd;
+          padding: 16px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .info-card i {
+          font-size: 24px;
+          color: #0d6efd;
+        }
+
+        /* Form Grid */
+        .form-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 24px;
+          margin-bottom: 24px;
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .form-label {
+          font-size: 14px;
+          font-weight: 600;
+          color: #374151;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .form-label i {
+          color: #667eea;
+        }
+
+        .required {
+          color: #dc3545;
+          margin-left: 4px;
+        }
+
+        .input-wrapper {
+          position: relative;
+        }
+
+        .form-input, .form-select {
+          width: 100%;
+          padding: 12px 16px;
+          border: 2px solid #e9ecef;
+          border-radius: 12px;
+          font-size: 14px;
+          transition: all 0.3s ease;
+        }
+
+        .form-input:focus, .form-select:focus {
+          outline: none;
+          border-color: #667eea;
+          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-input.error, .form-select.error {
+          border-color: #dc3545;
+        }
+
+        .password-input-wrapper {
+          position: relative;
+        }
+
+        .password-input-wrapper input {
+          padding-right: 45px;
+        }
+
+        .password-toggle {
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: #6c757d;
+          cursor: pointer;
+        }
+
+        .password-strength {
+          margin-top: 8px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .strength-bar {
+          flex: 1;
+          height: 4px;
+          background: #e9ecef;
+          border-radius: 2px;
+          overflow: hidden;
+        }
+
+        .strength-fill {
+          height: 100%;
+          transition: width 0.3s ease;
+        }
+
+        .strength-text {
+          font-size: 11px;
+          color: #6c757d;
+        }
+
+        .error-message {
+          margin-top: 6px;
+          font-size: 12px;
+          color: #dc3545;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .toggle-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .toggle-switch {
+          position: relative;
+          display: inline-block;
+          width: 50px;
+          height: 26px;
+        }
+
+        .toggle-switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        .toggle-slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #e9ecef;
+          transition: 0.3s;
+          border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+          position: absolute;
+          content: "";
+          height: 20px;
+          width: 20px;
+          left: 3px;
+          bottom: 3px;
+          background-color: white;
+          transition: 0.3s;
+          border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+          background-color: #10b981;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+          transform: translateX(24px);
+        }
+
+        .toggle-label {
+          font-size: 14px;
+          font-weight: 500;
+          color: #374151;
+        }
+
+        /* Super Admin Card */
+        .super-admin-card {
+          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+          border-radius: 16px;
+          padding: 20px;
+          margin-bottom: 32px;
+        }
+
+        .checkbox-wrapper {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          cursor: pointer;
+        }
+
+        .checkbox-wrapper input {
+          position: absolute;
+          opacity: 0;
+          cursor: pointer;
+        }
+
+        .checkbox-custom {
+          width: 24px;
+          height: 24px;
+          background: white;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.3s ease;
+        }
+
+        .checkbox-wrapper input:checked + .checkbox-custom {
+          background: #f59e0b;
+          color: white;
+        }
+
+        .checkbox-label {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .checkbox-label strong {
+          color: #92400e;
+          font-size: 14px;
+        }
+
+        .checkbox-description {
+          font-size: 12px;
+          color: #b45309;
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+          display: flex;
+          justify-content: flex-end;
+          gap: 16px;
+          padding-top: 24px;
+          border-top: 1px solid #e9ecef;
+        }
+
+        .btn-cancel {
+          padding: 12px 28px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 14px;
+          color: #6c757d;
+          font-weight: 500;
+          font-size: 14px;
+          transition: all 0.3s ease;
+        }
+
+        .btn-cancel:hover {
+          background: #e9ecef;
+          transform: translateY(-1px);
+        }
+
+        .btn-submit {
+          padding: 12px 32px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border: none;
+          border-radius: 14px;
+          color: white;
+          font-weight: 600;
+          font-size: 14px;
+          transition: all 0.3s ease;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-submit:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+          .form-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .page-header {
+            flex-direction: column;
+          }
+
+          .header-content {
+            width: 100%;
+          }
+
+          .action-buttons {
+            flex-direction: column;
+          }
+
+          .btn-cancel, .btn-submit {
+            width: 100%;
+          }
+        }
+      `}</style>
     </AdminLayout>
   )
 }
