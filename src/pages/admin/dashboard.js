@@ -36,33 +36,36 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
+  const [greeting, setGreeting] = useState('')
+  const [showNotifications, setShowNotifications] = useState(false)
+  
+  // Real data from Supabase
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    totalFarmers: 0,
+    totalVendors: 0,
+    totalAdmins: 0,
+    verifiedUsers: 0,
+    pendingVerification: 0,
+    totalPosts: 0,
+    totalBarterListings: 0,
+    totalMessages: 0,
+    totalAds: 0,
+    newUsersToday: 0,
+    newPostsToday: 0,
+    activeBarterTrades: 0,
+    activeSessions: 0
+  })
+  
   const [onlineUsers, setOnlineUsers] = useState([])
   const [onlineCount, setOnlineCount] = useState(0)
-  const [greeting, setGreeting] = useState('')
-  const [debugInfo, setDebugInfo] = useState(null)
-  
-  // Real data from database
-  const [totalUsers, setTotalUsers] = useState(0)
-  const [totalFarmers, setTotalFarmers] = useState(0)
-  const [totalVendors, setTotalVendors] = useState(0)
-  const [totalAdmins, setTotalAdmins] = useState(0)
-  const [verifiedUsers, setVerifiedUsers] = useState(0)
-  const [pendingVerification, setPendingVerification] = useState(0)
-  const [totalPosts, setTotalPosts] = useState(0)
-  const [totalBarterListings, setTotalBarterListings] = useState(0)
-  const [totalMessages, setTotalMessages] = useState(0)
-  const [totalAds, setTotalAds] = useState(0)
-  const [newUsersToday, setNewUsersToday] = useState(0)
-  const [newPostsToday, setNewPostsToday] = useState(0)
-  
-  const [dashboardData, setDashboardData] = useState({
-    recentUsers: [],
-    recentPosts: [],
-    recentActivities: [],
-    userGrowthData: [0, 0, 0, 0],
-    roleDistribution: {},
-    weeklyActivity: [0, 0, 0, 0, 0, 0, 0]
-  })
+  const [recentUsers, setRecentUsers] = useState([])
+  const [recentPosts, setRecentPosts] = useState([])
+  const [userGrowthData, setUserGrowthData] = useState([])
+  const [roleDistribution, setRoleDistribution] = useState({})
+  const [weeklyActivity, setWeeklyActivity] = useState([])
+  const [recentActivities, setRecentActivities] = useState([])
+  const [pendingAlerts, setPendingAlerts] = useState(0)
 
   // Set greeting based on time
   useEffect(() => {
@@ -72,42 +75,31 @@ export default function AdminDashboard() {
     else setGreeting('Good Evening')
   }, [])
 
-  // Fetch online users
-  const fetchOnlineUsers = async () => {
-    try {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-      const { data, error, count } = await supabase
-        .from('online_users')
-        .select('*')
-        .gte('last_activity', fiveMinutesAgo)
-
-      if (!error) {
-        setOnlineUsers(data || [])
-        setOnlineCount(count || 0)
-      }
-    } catch (err) {
-      console.error('Error fetching online users:', err)
-    }
+  // Fetch all data from Supabase
+  const fetchAllData = async () => {
+    await Promise.all([
+      fetchStats(),
+      fetchOnlineUsers(),
+      fetchRecentUsers(),
+      fetchRecentPosts(),
+      fetchUserGrowth(),
+      fetchRoleDistribution(),
+      fetchWeeklyActivity(),
+      fetchRecentActivities(),
+      fetchPendingAlerts()
+    ])
+    setLoading(false)
   }
 
-  // Fetch all stats from database
-  const fetchAllStats = async () => {
+  const fetchStats = async () => {
     try {
-      // Get role IDs
-      const { data: roles, error: rolesError } = await supabase.from('roles').select('role_id, role_name')
-      
-      if (rolesError) {
-        console.error('Roles error:', rolesError)
-      }
-      
+      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
       const roleMap = {}
       roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
 
-      // Get today's date range
       const today = new Date()
       today.setHours(0, 0, 0, 0)
 
-      // Fetch all counts in parallel with error handling
       const [
         totalUsersRes,
         farmersRes,
@@ -120,12 +112,14 @@ export default function AdminDashboard() {
         messagesRes,
         adsRes,
         newUsersRes,
-        newPostsRes
+        newPostsRes,
+        activeBarterRes,
+        activeSessionsRes
       ] = await Promise.all([
         supabase.from('users').select('*', { count: 'exact', head: true }),
-        roleMap['FARMER'] ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER']) : Promise.resolve({ count: 0 }),
-        roleMap['VENDOR'] ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR']) : Promise.resolve({ count: 0 }),
-        roleMap['ADMIN'] ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['ADMIN']) : Promise.resolve({ count: 0 }),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER']),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR']),
+        supabase.from('admin_users').select('*', { count: 'exact', head: true }),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
         supabase.from('posts').select('*', { count: 'exact', head: true }),
@@ -133,109 +127,73 @@ export default function AdminDashboard() {
         supabase.from('messages').select('*', { count: 'exact', head: true }),
         supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
         supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
-        supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString())
+        supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
+        supabase.from('barter_listings').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+        supabase.from('user_sessions').select('*', { count: 'exact', head: true }).eq('session_status', 'ACTIVE')
       ])
 
-      setTotalUsers(totalUsersRes.count || 0)
-      setTotalFarmers(farmersRes.count || 0)
-      setTotalVendors(vendorsRes.count || 0)
-      setTotalAdmins(adminsRes.count || 0)
-      setVerifiedUsers(verifiedRes.count || 0)
-      setPendingVerification(pendingRes.count || 0)
-      setTotalPosts(postsRes.count || 0)
-      setTotalBarterListings(barterRes.count || 0)
-      setTotalMessages(messagesRes.count || 0)
-      setTotalAds(adsRes.count || 0)
-      setNewUsersToday(newUsersRes.count || 0)
-      setNewPostsToday(newPostsRes.count || 0)
-
-      console.log('Stats fetched:', {
-        totalUsers: totalUsersRes.count,
-        farmers: farmersRes.count,
-        vendors: vendorsRes.count
+      setStats({
+        totalUsers: totalUsersRes.count || 0,
+        totalFarmers: farmersRes.count || 0,
+        totalVendors: vendorsRes.count || 0,
+        totalAdmins: adminsRes.count || 0,
+        verifiedUsers: verifiedRes.count || 0,
+        pendingVerification: pendingRes.count || 0,
+        totalPosts: postsRes.count || 0,
+        totalBarterListings: barterRes.count || 0,
+        totalMessages: messagesRes.count || 0,
+        totalAds: adsRes.count || 0,
+        newUsersToday: newUsersRes.count || 0,
+        newPostsToday: newPostsRes.count || 0,
+        activeBarterTrades: activeBarterRes.count || 0,
+        activeSessions: activeSessionsRes.count || 0
       })
-
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
   }
 
-  // Fetch recent users - FIXED VERSION
-  const fetchRecentUsers = async () => {
+  const fetchOnlineUsers = async () => {
     try {
-      // First, get all users
-      const { data: users, error: usersError } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10)
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+      const { data, error, count } = await supabase
+        .from('online_users')
+        .select('user_id, user_name, user_role')
+        .gte('last_activity', fiveMinutesAgo)
 
-      if (usersError) {
-        console.error('Users fetch error:', usersError)
-        return
-      }
-
-      console.log('Users found:', users?.length || 0)
-
-      if (users && users.length > 0) {
-        // Get role names for each user
-        const { data: roles } = await supabase.from('roles').select('role_id, role_name')
-        const roleMap = {}
-        roles?.forEach(r => { roleMap[r.role_id] = r.role_name })
-
-        const usersWithRoles = users.map(user => ({
-          ...user,
-          roles: { role_name: roleMap[user.role_id] || 'PENDING' }
-        }))
-
-        setDashboardData(prev => ({ ...prev, recentUsers: usersWithRoles.slice(0, 6) }))
-      } else {
-        setDashboardData(prev => ({ ...prev, recentUsers: [] }))
+      if (!error) {
+        setOnlineUsers(data || [])
+        setOnlineCount(count || 0)
       }
     } catch (err) {
-      console.error('Error fetching users:', err)
-      setDashboardData(prev => ({ ...prev, recentUsers: [] }))
+      console.error('Error fetching online users:', err)
     }
   }
 
-  // Fetch recent posts
+  const fetchRecentUsers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('user_id, full_name, email, profile_image, is_verified, created_at, roles!left(role_name)')
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      if (!error && data) setRecentUsers(data)
+    } catch (err) { console.error('Error:', err) }
+  }
+
   const fetchRecentPosts = async () => {
     try {
       const { data, error } = await supabase
         .from('posts')
-        .select(`
-          post_id,
-          title,
-          content,
-          image_url,
-          created_at,
-          user_id
-        `)
+        .select('post_id, title, created_at, users!left(full_name)')
         .order('created_at', { ascending: false })
-        .limit(4)
+        .limit(5)
 
-      if (!error && data) {
-        // Get user names for posts
-        const userIds = [...new Set(data.map(p => p.user_id))]
-        const { data: users } = await supabase
-          .from('users')
-          .select('user_id, full_name')
-          .in('user_id', userIds)
-        
-        const userMap = {}
-        users?.forEach(u => { userMap[u.user_id] = u.full_name })
-
-        const postsWithUsers = data.map(post => ({
-          ...post,
-          users: { full_name: userMap[post.user_id] || 'Unknown' }
-        }))
-
-        setDashboardData(prev => ({ ...prev, recentPosts: postsWithUsers }))
-      }
+      if (!error && data) setRecentPosts(data)
     } catch (err) { console.error('Error:', err) }
   }
 
-  // Fetch user growth data from database
   const fetchUserGrowth = async () => {
     try {
       const thirtyDaysAgo = new Date()
@@ -245,7 +203,6 @@ export default function AdminDashboard() {
         .from('users')
         .select('created_at')
         .gte('created_at', thirtyDaysAgo.toISOString())
-        .order('created_at', { ascending: true })
 
       const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4']
       const weeklyCounts = [0, 0, 0, 0]
@@ -256,30 +213,24 @@ export default function AdminDashboard() {
         if (weekIndex >= 0 && weekIndex < 4) weeklyCounts[3 - weekIndex]++
       })
 
-      setDashboardData(prev => ({ ...prev, userGrowthData: weeklyCounts }))
+      setUserGrowthData(weeklyCounts)
     } catch (err) { console.error('Error:', err) }
   }
 
-  // Fetch role distribution from database
   const fetchRoleDistribution = async () => {
     try {
-      const { data: users } = await supabase.from('users').select('role_id')
-      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
-      
-      const roleMap = {}
-      roles?.forEach(r => { roleMap[r.role_id] = r.role_name })
-      
-      const distribution = {}
-      users?.forEach(user => {
-        const roleName = roleMap[user.role_id] || 'PENDING'
-        distribution[roleName] = (distribution[roleName] || 0) + 1
-      })
-      
-      setDashboardData(prev => ({ ...prev, roleDistribution: distribution }))
+      const { data } = await supabase.from('users').select('roles!left(role_name)')
+      if (data) {
+        const distribution = {}
+        data.forEach(user => {
+          const role = user.roles?.role_name || 'PENDING'
+          distribution[role] = (distribution[role] || 0) + 1
+        })
+        setRoleDistribution(distribution)
+      }
     } catch (err) { console.error('Error:', err) }
   }
 
-  // Fetch weekly activity from database
   const fetchWeeklyActivity = async () => {
     try {
       const sevenDaysAgo = new Date()
@@ -299,7 +250,30 @@ export default function AdminDashboard() {
         if (adjustedIndex >= 0 && adjustedIndex < 7) activityByDay[adjustedIndex]++
       })
 
-      setDashboardData(prev => ({ ...prev, weeklyActivity: activityByDay }))
+      setWeeklyActivity(activityByDay)
+    } catch (err) { console.error('Error:', err) }
+  }
+
+  const fetchRecentActivities = async () => {
+    try {
+      const { data } = await supabase
+        .from('admin_activity_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(5)
+      
+      setRecentActivities(data || [])
+    } catch (err) { console.error('Error:', err) }
+  }
+
+  const fetchPendingAlerts = async () => {
+    try {
+      const { count } = await supabase
+        .from('security_alerts')
+        .select('*', { count: 'exact', head: true })
+        .eq('resolved', false)
+      
+      setPendingAlerts(count || 0)
     } catch (err) { console.error('Error:', err) }
   }
 
@@ -309,39 +283,44 @@ export default function AdminDashboard() {
       if (!storedSession) { router.push('/admin/login'); return }
       setSession(JSON.parse(storedSession))
       
-      await Promise.all([
-        fetchAllStats(),
-        fetchRecentUsers(),
-        fetchRecentPosts(),
-        fetchUserGrowth(),
-        fetchRoleDistribution(),
-        fetchWeeklyActivity(),
+      await fetchAllData()
+      
+      // Real-time subscriptions
+      const usersChannel = supabase
+        .channel('users_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchStats())
+        .subscribe()
+
+      const postsChannel = supabase
+        .channel('posts_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => fetchStats())
+        .subscribe()
+
+      const onlineChannel = supabase
+        .channel('online_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'online_users' }, () => fetchOnlineUsers())
+        .subscribe()
+
+      const interval = setInterval(() => {
+        fetchStats()
         fetchOnlineUsers()
-      ])
-      setLoading(false)
+        setLastUpdate(new Date())
+      }, 30000)
+
+      return () => {
+        usersChannel.unsubscribe()
+        postsChannel.unsubscribe()
+        onlineChannel.unsubscribe()
+        clearInterval(interval)
+      }
     }
+    
     init()
-
-    const interval = setInterval(() => {
-      fetchAllStats()
-      fetchOnlineUsers()
-      setLastUpdate(new Date())
-    }, 30000)
-
-    return () => clearInterval(interval)
   }, [router])
 
   const refreshData = async () => {
     setRefreshing(true)
-    await Promise.all([
-      fetchAllStats(),
-      fetchRecentUsers(),
-      fetchRecentPosts(),
-      fetchUserGrowth(),
-      fetchRoleDistribution(),
-      fetchWeeklyActivity(),
-      fetchOnlineUsers()
-    ])
+    await fetchAllData()
     setLastUpdate(new Date())
     setRefreshing(false)
   }
@@ -351,7 +330,7 @@ export default function AdminDashboard() {
     labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
     datasets: [{
       label: 'New Users',
-      data: dashboardData.userGrowthData,
+      data: userGrowthData,
       borderColor: '#4f46e5',
       backgroundColor: 'rgba(79, 70, 229, 0.1)',
       fill: true,
@@ -367,8 +346,8 @@ export default function AdminDashboard() {
   const weeklyActivityChart = {
     labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     datasets: [{
-      label: 'Posts Created',
-      data: dashboardData.weeklyActivity,
+      label: 'Activities',
+      data: weeklyActivity,
       backgroundColor: 'rgba(79, 70, 229, 0.8)',
       borderRadius: 10,
       barPercentage: 0.65
@@ -376,9 +355,9 @@ export default function AdminDashboard() {
   }
 
   const roleDistributionChart = {
-    labels: Object.keys(dashboardData.roleDistribution),
+    labels: Object.keys(roleDistribution),
     datasets: [{
-      data: Object.values(dashboardData.roleDistribution),
+      data: Object.values(roleDistribution),
       backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
       borderWidth: 0,
       borderRadius: 10
@@ -409,244 +388,259 @@ export default function AdminDashboard() {
       <AdminLayout title="Dashboard">
         <div className="loading-container">
           <div className="loading-spinner"></div>
-          <p className="loading-text">Loading dashboard...</p>
+          <p className="loading-text">Loading dashboard data...</p>
         </div>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+          }
+          .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e9ecef;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
 
-  const { recentUsers, recentPosts } = dashboardData
-
   return (
     <AdminLayout title="Analytics Dashboard">
-      {/* Enhanced Header */}
-      <div className="dashboard-header">
-        <div className="header-left">
-          <div className="greeting-badge">
-            <span className="greeting-icon">👋</span>
-            <span className="greeting-text">{greeting},</span>
-            <span className="user-name">{session?.admin?.full_name?.split(' ')[0] || 'Admin'}</span>
+      <div className="dashboard-wrapper">
+        {/* Welcome Section */}
+        <div className="welcome-section">
+          <div className="welcome-text">
+            <div className="greeting">{greeting} 👋</div>
+            <h1 className="welcome-title">
+              Welcome back, <span className="user-name">{session?.admin?.full_name?.split(' ')[0] || 'Admin'}</span>
+            </h1>
+            <p className="welcome-subtitle">
+              Here's your platform performance overview for today
+            </p>
           </div>
-          <div className="date-time">
-            <i className="bi bi-calendar3"></i>
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            <span className="separator">|</span>
-            <i className="bi bi-clock"></i>
-            {new Date().toLocaleTimeString()}
+          <div className="header-actions">
+            <div className="live-badge">
+              <span className="live-dot"></span>
+              <span>LIVE DATA</span>
+            </div>
+            <div className="last-update">
+              <i className="bi bi-clock"></i>
+              Updated: {lastUpdate.toLocaleTimeString()}
+            </div>
+            <button className="refresh-btn" onClick={refreshData} disabled={refreshing}>
+              <i className={`bi bi-arrow-repeat ${refreshing ? 'spin' : ''}`}></i>
+            </button>
           </div>
         </div>
-        <div className="header-right">
-          <div className="live-badge">
-            <span className="live-dot"></span>
-            <span>LIVE</span>
-          </div>
-          <button className="sync-btn" onClick={refreshData} disabled={refreshing}>
-            <i className={`bi bi-arrow-repeat ${refreshing ? 'spin' : ''}`}></i>
-            {refreshing ? 'Syncing...' : 'Sync Now'}
-          </button>
-        </div>
-      </div>
 
-      {/* Hero Stats Cards - ALL DATA FROM DATABASE */}
-      <div className="hero-stats">
-        <div className="stat-card-hero stat-primary">
-          <div className="stat-icon-large">
-            <i className="bi bi-people-fill"></i>
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Total Users</span>
-            <h2 className="stat-number">{totalUsers.toLocaleString()}</h2>
-            <span className="stat-trend"><i className="bi bi-graph-up"></i> +{Math.round((newUsersToday / Math.max(totalUsers, 1)) * 100)}% today</span>
-          </div>
-        </div>
-        <div className="stat-card-hero stat-success">
-          <div className="stat-icon-large">
-            <i className="bi bi-tree-fill"></i>
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Farmers</span>
-            <h2 className="stat-number">{totalFarmers.toLocaleString()}</h2>
-            <span className="stat-trend"><i className="bi bi-person-check"></i> {Math.round((totalFarmers / Math.max(totalUsers, 1)) * 100)}% of users</span>
-          </div>
-        </div>
-        <div className="stat-card-hero stat-info">
-          <div className="stat-icon-large">
-            <i className="bi bi-shop"></i>
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Vendors</span>
-            <h2 className="stat-number">{totalVendors.toLocaleString()}</h2>
-            <span className="stat-trend"><i className="bi bi-person-check"></i> {Math.round((totalVendors / Math.max(totalUsers, 1)) * 100)}% of users</span>
-          </div>
-        </div>
-        <div className="stat-card-hero stat-warning">
-          <div className="stat-icon-large">
-            <i className="bi bi-wifi"></i>
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Online Now</span>
-            <h2 className="stat-number">{onlineCount}</h2>
-            <span className="stat-trend"><i className="bi bi-person-check"></i> Active users</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Secondary Stats Grid */}
-      <div className="secondary-stats">
-        <div className="stat-card-mini">
-          <i className="bi bi-shield-check stat-mini-icon success"></i>
-          <div>
-            <div className="stat-mini-value">{verifiedUsers.toLocaleString()}</div>
-            <div className="stat-mini-label">Verified Users</div>
-            <div className="stat-mini-change">{Math.round((verifiedUsers / Math.max(totalUsers, 1)) * 100)}% of total</div>
-          </div>
-        </div>
-        <div className="stat-card-mini">
-          <i className="bi bi-hourglass-split stat-mini-icon warning"></i>
-          <div>
-            <div className="stat-mini-value">{pendingVerification}</div>
-            <div className="stat-mini-label">Pending Approval</div>
-            <div className="stat-mini-change">Awaiting verification</div>
-          </div>
-        </div>
-        <div className="stat-card-mini">
-          <i className="bi bi-file-post stat-mini-icon primary"></i>
-          <div>
-            <div className="stat-mini-value">{totalPosts.toLocaleString()}</div>
-            <div className="stat-mini-label">Total Posts</div>
-            <div className="stat-mini-change text-success">+{newPostsToday} new today</div>
-          </div>
-        </div>
-        <div className="stat-card-mini">
-          <i className="bi bi-arrow-left-right stat-mini-icon info"></i>
-          <div>
-            <div className="stat-mini-value">{totalBarterListings}</div>
-            <div className="stat-mini-label">Barter Listings</div>
-            <div className="stat-mini-change">Active trades</div>
-          </div>
-        </div>
-        <div className="stat-card-mini">
-          <i className="bi bi-chat-dots stat-mini-icon info"></i>
-          <div>
-            <div className="stat-mini-value">{totalMessages.toLocaleString()}</div>
-            <div className="stat-mini-label">Messages</div>
-            <div className="stat-mini-change text-success">Total conversations</div>
-          </div>
-        </div>
-        <div className="stat-card-mini">
-          <i className="bi bi-megaphone stat-mini-icon primary"></i>
-          <div>
-            <div className="stat-mini-value">{totalAds}</div>
-            <div className="stat-mini-label">Active Ads</div>
-            <div className="stat-mini-change">Live campaigns</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Charts Row */}
-      <div className="charts-row">
-        <div className="chart-card">
-          <div className="chart-header">
-            <div>
-              <h5>📈 User Growth Trend</h5>
-              <p>Last 30 days user registration - {dashboardData.userGrowthData.reduce((a, b) => a + b, 0)} new users</p>
+        {/* Stats Cards Grid */}
+        <div className="stats-grid">
+          <div className="stat-card primary">
+            <div className="stat-card-icon">
+              <i className="bi bi-people-fill"></i>
+            </div>
+            <div className="stat-card-content">
+              <span className="stat-label">Total Users</span>
+              <h2 className="stat-value">{stats.totalUsers.toLocaleString()}</h2>
+              <span className="stat-change positive">
+                <i className="bi bi-arrow-up"></i> +{stats.newUsersToday} today
+              </span>
             </div>
           </div>
-          <div className="chart-body">
-            <Line data={userGrowthChart} options={chartOptions} />
-          </div>
-        </div>
-        <div className="chart-card">
-          <div className="chart-header">
-            <div>
-              <h5>📊 Platform Activity</h5>
-              <p>Weekly posts and interactions - {dashboardData.weeklyActivity.reduce((a, b) => a + b, 0)} total this week</p>
+          <div className="stat-card success">
+            <div className="stat-card-icon">
+              <i className="bi bi-tree-fill"></i>
+            </div>
+            <div className="stat-card-content">
+              <span className="stat-label">Farmers</span>
+              <h2 className="stat-value">{stats.totalFarmers.toLocaleString()}</h2>
+              <span className="stat-change positive">
+                <i className="bi bi-check-circle"></i> Active growers
+              </span>
             </div>
           </div>
-          <div className="chart-body">
-            <Bar data={weeklyActivityChart} options={chartOptions} />
+          <div className="stat-card info">
+            <div className="stat-card-icon">
+              <i className="bi bi-shop"></i>
+            </div>
+            <div className="stat-card-content">
+              <span className="stat-label">Vendors</span>
+              <h2 className="stat-value">{stats.totalVendors.toLocaleString()}</h2>
+              <span className="stat-change positive">
+                <i className="bi bi-store"></i> Suppliers
+              </span>
+            </div>
+          </div>
+          <div className="stat-card warning">
+            <div className="stat-card-icon">
+              <i className="bi bi-arrow-left-right"></i>
+            </div>
+            <div className="stat-card-content">
+              <span className="stat-label">Active Barter</span>
+              <h2 className="stat-value">{stats.activeBarterTrades}</h2>
+              <span className="stat-change">
+                <i className="bi bi-graph-up"></i> Active trades
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* User Distribution & Online Users */}
-      <div className="two-columns">
-        <div className="distribution-card">
-          <div className="card-header-custom">
-            <h5><i className="bi bi-pie-chart"></i> User Distribution</h5>
-            <p>Breakdown by role type - {totalUsers} total users</p>
+        {/* Secondary Stats Row */}
+        <div className="secondary-stats">
+          <div className="stat-card-mini">
+            <div className="stat-mini-icon verified">
+              <i className="bi bi-check2-circle"></i>
+            </div>
+            <div className="stat-mini-info">
+              <div className="stat-mini-value">{stats.verifiedUsers.toLocaleString()}</div>
+              <div className="stat-mini-label">Verified Users</div>
+              <div className="stat-mini-trend">{Math.round((stats.verifiedUsers / stats.totalUsers) * 100)}% of total</div>
+            </div>
           </div>
-          <div className="distribution-body">
+          <div className="stat-card-mini">
+            <div className="stat-mini-icon pending">
+              <i className="bi bi-hourglass-split"></i>
+            </div>
+            <div className="stat-mini-info">
+              <div className="stat-mini-value">{stats.pendingVerification}</div>
+              <div className="stat-mini-label">Pending Approval</div>
+              <div className="stat-mini-trend">Awaiting verification</div>
+            </div>
+          </div>
+          <div className="stat-card-mini">
+            <div className="stat-mini-icon posts">
+              <i className="bi bi-file-post"></i>
+            </div>
+            <div className="stat-mini-info">
+              <div className="stat-mini-value">{stats.totalPosts.toLocaleString()}</div>
+              <div className="stat-mini-label">Total Posts</div>
+              <div className="stat-mini-trend text-success">+{stats.newPostsToday} today</div>
+            </div>
+          </div>
+          <div className="stat-card-mini">
+            <div className="stat-mini-icon messages">
+              <i className="bi bi-chat-dots"></i>
+            </div>
+            <div className="stat-mini-info">
+              <div className="stat-mini-value">{stats.totalMessages.toLocaleString()}</div>
+              <div className="stat-mini-label">Messages</div>
+              <div className="stat-mini-trend">Total conversations</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Charts Section */}
+        <div className="charts-row">
+          <div className="chart-card">
+            <div className="chart-header">
+              <div>
+                <h5>📈 User Growth Trend</h5>
+                <p>New user registrations over the last 30 days</p>
+              </div>
+            </div>
+            <div className="chart-body">
+              <Line data={userGrowthChart} options={chartOptions} />
+            </div>
+          </div>
+          <div className="chart-card">
+            <div className="chart-header">
+              <div>
+                <h5>📊 Platform Activity</h5>
+                <p>Daily posts and engagement metrics</p>
+              </div>
+            </div>
+            <div className="chart-body">
+              <Bar data={weeklyActivityChart} options={chartOptions} />
+            </div>
+          </div>
+        </div>
+
+        {/* Two Column Layout */}
+        <div className="two-columns">
+          <div className="card-distribution">
+            <div className="card-header-custom">
+              <h5><i className="bi bi-pie-chart"></i> User Distribution</h5>
+              <p>Breakdown by user role</p>
+            </div>
             <div className="donut-container">
               <Doughnut data={roleDistributionChart} options={chartOptions} />
             </div>
             <div className="legend-stats">
-              {Object.entries(dashboardData.roleDistribution).map(([role, count]) => (
+              {Object.entries(roleDistribution).map(([role, count]) => (
                 <div key={role} className="legend-item">
-                  <span className={`legend-dot ${role.toLowerCase()}`} style={{ background: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'][Math.floor(Math.random() * 4)] }}></span>
+                  <span className="legend-dot" style={{ background: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'][Math.floor(Math.random() * 4)] }}></span>
                   <span className="legend-name">{role}</span>
                   <span className="legend-count">{count}</span>
                 </div>
               ))}
             </div>
           </div>
-        </div>
-        <div className="online-card">
-          <div className="card-header-custom">
-            <h5><i className="bi bi-wifi"></i> Online Users</h5>
-            <p>Active in last 5 minutes - {onlineCount} online now</p>
-          </div>
-          <div className="online-list">
-            {onlineUsers.length > 0 ? (
-              onlineUsers.map((user, idx) => (
-                <div key={idx} className="online-item">
-                  <div className="online-avatar">
-                    <span>{user.user_name?.charAt(0) || 'U'}</span>
-                    <span className="online-status-dot"></span>
+          <div className="card-online">
+            <div className="card-header-custom">
+              <h5><i className="bi bi-wifi"></i> Online Users</h5>
+              <p>{onlineCount} active users right now</p>
+            </div>
+            <div className="online-list">
+              {onlineUsers.length > 0 ? (
+                onlineUsers.slice(0, 5).map((user, idx) => (
+                  <div key={idx} className="online-item">
+                    <div className="online-avatar">
+                      <span>{user.user_name?.charAt(0) || 'U'}</span>
+                      <span className="online-status-dot"></span>
+                    </div>
+                    <div className="online-info">
+                      <div className="online-name">{user.user_name || 'User'}</div>
+                      <div className="online-role">{user.user_role || 'Member'}</div>
+                    </div>
+                    <i className="bi bi-check-circle-fill online-check"></i>
                   </div>
-                  <div className="online-info">
-                    <div className="online-name">{user.user_name || 'User'}</div>
-                    <div className="online-role">{user.user_role || 'Member'}</div>
-                  </div>
-                  <i className="bi bi-check-circle-fill online-check"></i>
+                ))
+              ) : (
+                <div className="empty-online">
+                  <i className="bi bi-person-slash"></i>
+                  <p>No users online</p>
                 </div>
-              ))
-            ) : (
-              <div className="empty-online">
-                <i className="bi bi-person-slash"></i>
-                <p>No users online</p>
-              </div>
-            )}
+              )}
+              {onlineUsers.length > 5 && (
+                <div className="more-online">
+                  +{onlineUsers.length - 5} more users online
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Recent Users Table - FIXED */}
-      <div className="recent-table">
-        <div className="table-header">
-          <div>
+        {/* Recent Users Table */}
+        <div className="recent-table">
+          <div className="table-header">
             <h5><i className="bi bi-people"></i> Recent Users</h5>
-            <p>Latest registered members - {recentUsers.length} users found</p>
+            <button className="view-all" onClick={() => router.push('/admin/users')}>
+              View All <i className="bi bi-arrow-right"></i>
+            </button>
           </div>
-          <button className="view-all-btn" onClick={() => router.push('/admin/users')}>
-            View All <i className="bi bi-arrow-right"></i>
-          </button>
-        </div>
-        <div className="table-responsive">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Contact</th>
-                <th>Role</th>
-                <th>Location</th>
-                <th>Status</th>
-                <th>Joined</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentUsers.length > 0 ? (
-                recentUsers.map((user) => (
+          <div className="table-responsive">
+            <table className="custom-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Joined</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentUsers.map((user) => (
                   <tr key={user.user_id}>
                     <td>
                       <div className="user-cell">
@@ -654,324 +648,417 @@ export default function AdminDashboard() {
                           {user.profile_image ? (
                             <img src={user.profile_image} alt={user.full_name} />
                           ) : (
-                            <span>{user.full_name?.charAt(0) || 'U'}</span>
+                            <span>{user.full_name?.charAt(0)}</span>
                           )}
                         </div>
                         <div>
-                          <div className="user-name">{user.full_name || 'Unknown'}</div>
-                          {user.district && <div className="user-location">{user.district}</div>}
+                          <div className="user-name-sm">{user.full_name}</div>
+                          <div className="user-email">{user.email}</div>
                         </div>
                       </div>
                     </td>
-                    <td>
-                      <div className="contact-cell">
-                        <div className="contact-email">{user.email || 'No email'}</div>
-                        {user.phone_number && <div className="contact-phone">{user.phone_number}</div>}
-                      </div>
-                    </td>
                     <td>{getRoleBadge(user.roles?.role_name)}</td>
-                    <td>{user.district || '—'}</td>
                     <td>
                       {user.is_verified ? (
-                        <span className="status-badge verified"><i className="bi bi-check-circle"></i> Verified</span>
+                        <span className="status-verified"><i className="bi bi-check-circle"></i> Verified</span>
                       ) : (
-                        <span className="status-badge pending"><i className="bi bi-clock"></i> Pending</span>
+                        <span className="status-pending"><i className="bi bi-clock"></i> Pending</span>
                       )}
                     </td>
-                    <td className="date-cell">{user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Unknown'}</td>
+                    <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="6" className="text-center py-4 text-muted">
-                    No users found in database. Please add some users.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Recent Posts Grid */}
-      <div className="recent-posts">
-        <div className="section-header">
-          <div>
-            <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
-            <p>Latest community discussions - {recentPosts.length} recent posts</p>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <button className="view-all-btn" onClick={() => router.push('/admin/posts')}>
-            View All <i className="bi bi-arrow-right"></i>
-          </button>
         </div>
-        <div className="posts-grid">
-          {recentPosts.length > 0 ? (
-            recentPosts.map((post) => (
-              <div key={post.post_id} className="post-card-modern">
-                {post.image_url && (
-                  <div className="post-image-modern">
-                    <img src={post.image_url} alt={post.title} />
-                  </div>
-                )}
-                <div className="post-content-modern">
-                  <h6>{post.title}</h6>
-                  <p>{post.content?.substring(0, 80)}...</p>
-                  <div className="post-meta">
-                    <div className="post-author">
-                      <i className="bi bi-person-circle"></i>
-                      <span>{post.users?.full_name?.split(' ')[0] || 'User'}</span>
-                    </div>
-                    <div className="post-date">
-                      <i className="bi bi-calendar3"></i>
-                      <span>{new Date(post.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </div>
+
+        {/* Recent Activity */}
+        <div className="recent-activity">
+          <div className="activity-header">
+            <h5><i className="bi bi-clock-history"></i> Recent Activity</h5>
+          </div>
+          <div className="activity-timeline">
+            {recentActivities.map((activity, idx) => (
+              <div key={idx} className="timeline-item">
+                <div className="timeline-icon">
+                  <i className="bi bi-activity"></i>
+                </div>
+                <div className="timeline-content">
+                  <p className="timeline-text">{activity.activity_description}</p>
+                  <span className="timeline-time">{new Date(activity.created_at).toLocaleString()}</span>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="col-12 text-center py-5 text-muted">
-              No posts found
-            </div>
-          )}
+            ))}
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="quick-actions">
+          <div className="actions-header">
+            <h5><i className="bi bi-lightning-charge"></i> Quick Actions</h5>
+          </div>
+          <div className="actions-grid">
+            <button className="action-item" onClick={() => router.push('/admin/users/create')}>
+              <i className="bi bi-person-plus"></i>
+              <span>Add User</span>
+            </button>
+            <button className="action-item" onClick={() => router.push('/admin/posts')}>
+              <i className="bi bi-file-post"></i>
+              <span>Moderate Content</span>
+            </button>
+            <button className="action-item" onClick={() => router.push('/admin/reports')}>
+              <i className="bi bi-flag"></i>
+              <span>View Reports</span>
+            </button>
+            <button className="action-item" onClick={() => router.push('/admin/security')}>
+              <i className="bi bi-shield-lock"></i>
+              <span>Security Check</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <style jsx global>{`
-        .dashboard-header {
+        .dashboard-wrapper {
+          max-width: 1400px;
+          margin: 0 auto;
+        }
+
+        /* Welcome Section */
+        .welcome-section {
           display: flex;
           justify-content: space-between;
-          align-items: flex-start;
+          align-items: center;
           margin-bottom: 32px;
           flex-wrap: wrap;
-          gap: 16px;
+          gap: 20px;
         }
-        
-        .greeting-badge {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 8px;
-        }
-        
-        .greeting-icon {
-          font-size: 28px;
-        }
-        
-        .greeting-text {
-          font-size: 24px;
-          font-weight: 500;
+
+        .greeting {
+          font-size: 14px;
           color: #6c757d;
+          margin-bottom: 4px;
         }
-        
-        .user-name {
-          font-size: 24px;
+
+        .welcome-title {
+          font-size: 28px;
           font-weight: 700;
+          margin: 0 0 8px 0;
+          color: #1f2937;
+        }
+
+        .user-name {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
-          background-clip: text;
         }
-        
-        .date-time {
+
+        .welcome-subtitle {
           color: #6c757d;
+          margin: 0;
           font-size: 14px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
         }
-        
-        .date-time i {
-          margin-right: 6px;
-        }
-        
-        .separator {
-          color: #dee2e6;
-        }
-        
-        .header-right {
+
+        .header-actions {
           display: flex;
           align-items: center;
           gap: 16px;
         }
-        
+
         .live-badge {
-          background: rgba(16, 185, 129, 0.1);
-          padding: 6px 14px;
-          border-radius: 30px;
           display: flex;
           align-items: center;
           gap: 8px;
+          background: rgba(16, 185, 129, 0.1);
+          padding: 6px 14px;
+          border-radius: 30px;
           font-size: 13px;
           font-weight: 600;
           color: #10b981;
         }
-        
+
         .live-dot {
           width: 8px;
           height: 8px;
-          background-color: #10b981;
+          background: #10b981;
           border-radius: 50%;
           animation: pulse 2s infinite;
         }
-        
-        .sync-btn {
+
+        .last-update {
+          font-size: 13px;
+          color: #6c757d;
+        }
+
+        .refresh-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
           background: #f8f9fa;
           border: 1px solid #e9ecef;
-          padding: 6px 18px;
-          border-radius: 30px;
-          font-size: 13px;
-          font-weight: 500;
-          color: #495057;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           transition: all 0.3s ease;
         }
-        
-        .sync-btn:hover {
+
+        .refresh-btn:hover {
           background: #e9ecef;
-          transform: translateY(-1px);
+          transform: rotate(15deg);
         }
-        
-        .hero-stats {
+
+        /* Stats Cards */
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+          margin-bottom: 24px;
+        }
+
+        .stat-card {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          transition: all 0.3s ease;
+          cursor: pointer;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card.primary .stat-card-icon { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
+        .stat-card.success .stat-card-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .stat-card.info .stat-card-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .stat-card.warning .stat-card-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+
+        .stat-card-icon {
+          width: 56px;
+          height: 56px;
+          border-radius: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .stat-card-icon i {
+          font-size: 28px;
+        }
+
+        .stat-card-content {
+          flex: 1;
+        }
+
+        .stat-label {
+          font-size: 13px;
+          color: #6c757d;
+          margin-bottom: 4px;
+          display: block;
+        }
+
+        .stat-value {
+          font-size: 28px;
+          font-weight: 700;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .stat-change {
+          font-size: 12px;
+        }
+
+        .stat-change.positive {
+          color: #10b981;
+        }
+
+        /* Secondary Stats */
+        .secondary-stats {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
           gap: 20px;
           margin-bottom: 28px;
         }
-        
-        .stat-card-hero {
-          background: white;
-          border-radius: 24px;
-          padding: 24px;
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-          transition: all 0.3s ease;
-          cursor: pointer;
-        }
-        
-        .stat-card-hero:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
-        }
-        
-        .stat-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-        .stat-success { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; }
-        .stat-info { background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%); color: white; }
-        .stat-warning { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; }
-        
-        .stat-icon-large {
-          width: 64px;
-          height: 64px;
-          background: rgba(255, 255, 255, 0.2);
-          border-radius: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        
-        .stat-icon-large i { font-size: 32px; }
-        
-        .stat-content { flex: 1; }
-        .stat-label { font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; }
-        .stat-number { font-size: 32px; font-weight: 700; margin: 4px 0; }
-        .stat-trend { font-size: 12px; opacity: 0.9; display: flex; align-items: center; gap: 4px; }
-        
-        .secondary-stats {
-          display: grid;
-          grid-template-columns: repeat(6, 1fr);
-          gap: 16px;
-          margin-bottom: 28px;
-        }
-        
+
         .stat-card-mini {
           background: white;
           border-radius: 20px;
           padding: 16px;
           display: flex;
           align-items: center;
-          gap: 12px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+          gap: 14px;
           transition: all 0.3s ease;
         }
-        
-        .stat-card-mini:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08); }
-        
+
+        .stat-card-mini:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        }
+
         .stat-mini-icon {
-          font-size: 24px;
           width: 48px;
           height: 48px;
+          border-radius: 14px;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 16px;
         }
-        
-        .stat-mini-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .stat-mini-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .stat-mini-icon.primary { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
-        .stat-mini-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        
-        .stat-mini-value { font-size: 20px; font-weight: 700; color: #1f2937; }
-        .stat-mini-label { font-size: 11px; color: #6c757d; }
-        .stat-mini-change { font-size: 10px; margin-top: 4px; }
-        .text-success { color: #10b981; }
-        
+
+        .stat-mini-icon.verified { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .stat-mini-icon.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .stat-mini-icon.posts { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .stat-mini-icon.messages { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+
+        .stat-mini-icon i {
+          font-size: 22px;
+        }
+
+        .stat-mini-info {
+          flex: 1;
+        }
+
+        .stat-mini-value {
+          font-size: 20px;
+          font-weight: 700;
+          color: #1f2937;
+        }
+
+        .stat-mini-label {
+          font-size: 12px;
+          color: #6c757d;
+        }
+
+        .stat-mini-trend {
+          font-size: 11px;
+          margin-top: 4px;
+        }
+
+        .text-success {
+          color: #10b981;
+        }
+
+        /* Charts */
         .charts-row {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 24px;
           margin-bottom: 28px;
         }
-        
+
         .chart-card {
           background: white;
           border-radius: 24px;
           padding: 20px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
           transition: all 0.3s ease;
         }
-        
-        .chart-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
-        
-        .chart-header { margin-bottom: 20px; }
-        .chart-header h5 { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #1f2937; }
-        .chart-header p { font-size: 12px; color: #6c757d; margin: 0; }
-        
-        .chart-body { height: 300px; }
-        
+
+        .chart-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+
+        .chart-header {
+          margin-bottom: 20px;
+        }
+
+        .chart-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .chart-header p {
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0;
+        }
+
+        .chart-body {
+          height: 280px;
+        }
+
+        /* Two Columns */
         .two-columns {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 24px;
           margin-bottom: 28px;
         }
-        
-        .distribution-card, .online-card {
+
+        .card-distribution, .card-online {
           background: white;
           border-radius: 24px;
           padding: 20px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
-        
-        .card-header-custom { margin-bottom: 20px; }
-        .card-header-custom h5 { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #1f2937; }
-        .card-header-custom h5 i { margin-right: 8px; color: #4f46e5; }
-        .card-header-custom p { font-size: 12px; color: #6c757d; margin: 0; }
-        
-        .donut-container { height: 200px; margin-bottom: 20px; }
-        
-        .legend-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; margin-top: 16px; }
-        .legend-item { display: flex; align-items: center; gap: 8px; }
-        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-        .legend-name { font-size: 13px; color: #4b5563; }
-        .legend-count { font-weight: 600; color: #1f2937; }
-        
+
+        .card-header-custom {
+          margin-bottom: 20px;
+        }
+
+        .card-header-custom h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .card-header-custom h5 i {
+          margin-right: 8px;
+          color: #4f46e5;
+        }
+
+        .card-header-custom p {
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0;
+        }
+
+        .donut-container {
+          height: 200px;
+          margin-bottom: 20px;
+        }
+
+        .legend-stats {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          gap: 16px;
+          margin-top: 16px;
+        }
+
+        .legend-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .legend-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+        }
+
+        .legend-name {
+          font-size: 13px;
+          color: #4b5563;
+        }
+
+        .legend-count {
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        /* Online Users */
         .online-list {
           max-height: 280px;
           overflow-y: auto;
         }
-        
+
         .online-item {
           display: flex;
           align-items: center;
@@ -980,9 +1067,11 @@ export default function AdminDashboard() {
           border-radius: 16px;
           transition: all 0.3s ease;
         }
-        
-        .online-item:hover { background: #f8f9fa; }
-        
+
+        .online-item:hover {
+          background: #f8f9fa;
+        }
+
         .online-avatar {
           position: relative;
           width: 44px;
@@ -995,7 +1084,7 @@ export default function AdminDashboard() {
           color: white;
           font-weight: 600;
         }
-        
+
         .online-status-dot {
           position: absolute;
           bottom: 2px;
@@ -1007,35 +1096,75 @@ export default function AdminDashboard() {
           border: 2px solid white;
           animation: pulse 2s infinite;
         }
-        
-        .online-info { flex: 1; }
-        .online-name { font-weight: 600; color: #1f2937; }
-        .online-role { font-size: 11px; color: #6c757d; }
-        .online-check { color: #10b981; font-size: 18px; }
-        
-        .empty-online { text-align: center; padding: 40px; color: #6c757d; }
-        .empty-online i { font-size: 48px; margin-bottom: 12px; display: block; }
-        
+
+        .online-info {
+          flex: 1;
+        }
+
+        .online-name {
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .online-role {
+          font-size: 11px;
+          color: #6c757d;
+        }
+
+        .online-check {
+          color: #10b981;
+          font-size: 18px;
+        }
+
+        .more-online {
+          text-align: center;
+          padding: 12px;
+          font-size: 12px;
+          color: #6c757d;
+          border-top: 1px solid #e9ecef;
+          margin-top: 8px;
+        }
+
+        .empty-online {
+          text-align: center;
+          padding: 40px;
+          color: #6c757d;
+        }
+
+        .empty-online i {
+          font-size: 48px;
+          margin-bottom: 12px;
+          display: block;
+        }
+
+        /* Recent Users Table */
         .recent-table {
           background: white;
           border-radius: 24px;
           padding: 20px;
           margin-bottom: 28px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
-        
-        .table-header, .section-header {
+
+        .table-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           margin-bottom: 20px;
         }
-        
-        .table-header h5, .section-header h5 { font-size: 16px; font-weight: 600; margin: 0; color: #1f2937; }
-        .table-header h5 i, .section-header h5 i { margin-right: 8px; color: #4f46e5; }
-        .table-header p, .section-header p { font-size: 12px; color: #6c757d; margin: 4px 0 0 0; }
-        
-        .view-all-btn {
+
+        .table-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0;
+          color: #1f2937;
+        }
+
+        .table-header h5 i {
+          margin-right: 8px;
+          color: #4f46e5;
+        }
+
+        .view-all {
           background: none;
           border: none;
           color: #4f46e5;
@@ -1046,14 +1175,16 @@ export default function AdminDashboard() {
           gap: 6px;
           transition: all 0.3s ease;
         }
-        
-        .view-all-btn:hover { gap: 10px; }
-        
+
+        .view-all:hover {
+          gap: 10px;
+        }
+
         .custom-table {
           width: 100%;
           border-collapse: collapse;
         }
-        
+
         .custom-table th {
           text-align: left;
           padding: 12px 16px;
@@ -1061,14 +1192,20 @@ export default function AdminDashboard() {
           font-weight: 600;
           font-size: 13px;
           color: #495057;
+          border-radius: 12px;
         }
-        
+
         .custom-table td {
           padding: 16px;
           border-bottom: 1px solid #e9ecef;
         }
-        
-        .user-cell { display: flex; align-items: center; gap: 12px; }
+
+        .user-cell {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
         .user-avatar-sm {
           width: 40px;
           height: 40px;
@@ -1079,137 +1216,223 @@ export default function AdminDashboard() {
           justify-content: center;
           color: white;
           font-weight: 600;
-          overflow: hidden;
         }
-        .user-avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
-        .user-name { font-weight: 600; color: #1f2937; margin-bottom: 4px; }
-        .user-location { font-size: 11px; color: #6c757d; }
-        
-        .contact-cell { display: flex; flex-direction: column; gap: 4px; }
-        .contact-email { font-size: 13px; color: #1f2937; }
-        .contact-phone { font-size: 11px; color: #6c757d; }
-        
-        .status-badge {
+
+        .user-avatar-sm img {
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+
+        .user-name-sm {
+          font-weight: 600;
+          color: #1f2937;
+          margin-bottom: 4px;
+        }
+
+        .user-email {
+          font-size: 11px;
+          color: #6c757d;
+        }
+
+        .status-verified, .status-pending {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 5px 12px;
-          border-radius: 30px;
+          padding: 4px 10px;
+          border-radius: 20px;
           font-size: 12px;
-          font-weight: 500;
         }
-        
-        .status-badge.verified { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        
+
+        .status-verified {
+          background: rgba(16, 185, 129, 0.1);
+          color: #10b981;
+        }
+
+        .status-pending {
+          background: rgba(245, 158, 11, 0.1);
+          color: #f59e0b;
+        }
+
+        .date-cell {
+          font-size: 13px;
+          color: #6c757d;
+        }
+
         .badge-admin, .badge-farmer, .badge-vendor, .badge-pending {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 5px 12px;
-          border-radius: 30px;
+          padding: 4px 10px;
+          border-radius: 20px;
           font-size: 12px;
           font-weight: 500;
         }
-        
+
         .badge-admin { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
         .badge-farmer { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .badge-vendor { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
         .badge-pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        
-        .date-cell { color: #6c757d; font-size: 13px; }
-        
-        .posts-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 20px;
-        }
-        
-        .post-card-modern {
+
+        /* Recent Activity */
+        .recent-activity {
           background: white;
-          border-radius: 16px;
-          overflow: hidden;
-          transition: all 0.3s ease;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+          border-radius: 24px;
+          padding: 20px;
+          margin-bottom: 28px;
         }
-        
-        .post-card-modern:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1); }
-        
-        .post-image-modern {
-          height: 140px;
-          overflow: hidden;
+
+        .activity-header {
+          margin-bottom: 20px;
         }
-        
-        .post-image-modern img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          transition: transform 0.3s ease;
+
+        .activity-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0;
+          color: #1f2937;
         }
-        
-        .post-card-modern:hover .post-image-modern img { transform: scale(1.05); }
-        
-        .post-content-modern { padding: 16px; }
-        .post-content-modern h6 { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #1f2937; }
-        .post-content-modern p { font-size: 12px; color: #6c757d; margin-bottom: 12px; line-height: 1.4; }
-        
-        .post-meta {
+
+        .activity-header h5 i {
+          margin-right: 8px;
+          color: #4f46e5;
+        }
+
+        .activity-timeline {
+          max-height: 250px;
+          overflow-y: auto;
+        }
+
+        .timeline-item {
           display: flex;
-          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 0;
+          border-bottom: 1px solid #e9ecef;
+        }
+
+        .timeline-icon {
+          width: 36px;
+          height: 36px;
+          background: #f8f9fa;
+          border-radius: 10px;
+          display: flex;
           align-items: center;
+          justify-content: center;
+          color: #4f46e5;
+        }
+
+        .timeline-content {
+          flex: 1;
+        }
+
+        .timeline-text {
+          margin: 0 0 4px 0;
+          font-size: 13px;
+          color: #1f2937;
+        }
+
+        .timeline-time {
           font-size: 11px;
           color: #6c757d;
         }
-        
-        .post-author, .post-date { display: flex; align-items: center; gap: 4px; }
-        
-        .loading-container {
+
+        /* Quick Actions */
+        .quick-actions {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+        }
+
+        .actions-header {
+          margin-bottom: 20px;
+        }
+
+        .actions-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0;
+          color: #1f2937;
+        }
+
+        .actions-header h5 i {
+          margin-right: 8px;
+          color: #4f46e5;
+        }
+
+        .actions-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 16px;
+        }
+
+        .action-item {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
-          min-height: 400px;
+          gap: 8px;
+          padding: 16px;
+          background: #f8f9fa;
+          border: none;
+          border-radius: 16px;
+          color: #495057;
+          transition: all 0.3s ease;
+          cursor: pointer;
         }
-        
-        .loading-spinner {
-          width: 48px;
-          height: 48px;
-          border: 3px solid #e9ecef;
-          border-top-color: #4f46e5;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
+
+        .action-item:hover {
+          background: #e9ecef;
+          transform: translateY(-2px);
         }
-        
-        .loading-text { color: #6c757d; font-size: 14px; }
-        
+
+        .action-item i {
+          font-size: 24px;
+          color: #4f46e5;
+        }
+
+        .action-item span {
+          font-size: 13px;
+          font-weight: 500;
+        }
+
+        /* Animations */
         @keyframes pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(1.1); }
         }
-        
+
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+
         @keyframes spin {
           to { transform: rotate(360deg); }
         }
-        
-        .spin { animation: spin 1s linear infinite; }
-        
-        @media (max-width: 1400px) {
-          .secondary-stats { grid-template-columns: repeat(3, 1fr); }
-        }
-        
+
+        /* Responsive */
         @media (max-width: 1200px) {
-          .hero-stats { grid-template-columns: repeat(2, 1fr); }
-          .charts-row, .two-columns { grid-template-columns: 1fr; }
-          .posts-grid { grid-template-columns: repeat(2, 1fr); }
-          .secondary-stats { grid-template-columns: repeat(2, 1fr); }
+          .stats-grid, .secondary-stats {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .charts-row, .two-columns {
+            grid-template-columns: 1fr;
+          }
+          .actions-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
-        
+
         @media (max-width: 768px) {
-          .hero-stats { grid-template-columns: 1fr; }
-          .secondary-stats { grid-template-columns: 1fr; }
-          .posts-grid { grid-template-columns: 1fr; }
-          .dashboard-header { flex-direction: column; }
+          .stats-grid, .secondary-stats {
+            grid-template-columns: 1fr;
+          }
+          .welcome-section {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .actions-grid {
+            grid-template-columns: 1fr;
+          }
         }
       `}</style>
     </AdminLayout>
