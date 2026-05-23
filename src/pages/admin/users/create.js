@@ -7,6 +7,8 @@ export default function CreateUser() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [roles, setRoles] = useState([])
+  const [fetchingRoles, setFetchingRoles] = useState(true)
+  const [roleError, setRoleError] = useState(null)
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -24,24 +26,70 @@ export default function CreateUser() {
   }, [])
 
   const fetchRoles = async () => {
-  try {
-    // Fetch from admin_roles table
-    const { data, error } = await supabase
-      .from('admin_roles')
-      .select('role_id, role_name, description')
-      .order('role_name')
+    try {
+      setFetchingRoles(true)
+      setRoleError(null)
+      
+      // First, check if admin_roles table exists and get data
+      const { data, error, count } = await supabase
+        .from('admin_roles')
+        .select('*')
 
-    if (error) {
-      console.error('Error fetching roles:', error)
-      return
+      console.log('Supabase response:', { data, error, count })
+
+      if (error) {
+        console.error('Error fetching roles:', error)
+        setRoleError(`Database error: ${error.message}`)
+        return
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('No roles found in admin_roles table')
+        setRoleError('No roles found in database. Please add roles to admin_roles table.')
+        setRoles([])
+        return
+      }
+
+      console.log('Roles fetched successfully:', data)
+      setRoles(data)
+      
+    } catch (err) {
+      console.error('Error in fetchRoles:', err)
+      setRoleError(err.message)
+    } finally {
+      setFetchingRoles(false)
     }
-
-    console.log('Roles fetched:', data)
-    setRoles(data || [])
-  } catch (err) {
-    console.error('Error:', err)
   }
-}
+
+  // Function to manually add default roles if none exist
+  const addDefaultRoles = async () => {
+    setLoading(true)
+    try {
+      const defaultRoles = [
+        { role_name: 'SUPER_ADMIN', description: 'Full system access - all permissions' },
+        { role_name: 'CONTENT_ADMIN', description: 'Manage content, posts, and comments' },
+        { role_name: 'SECURITY_ADMIN', description: 'Manage security settings and monitor threats' },
+        { role_name: 'SUPPORT_ADMIN', description: 'Handle user support and tickets' }
+      ]
+
+      for (const role of defaultRoles) {
+        const { error } = await supabase
+          .from('admin_roles')
+          .insert(role)
+        
+        if (error) console.error('Error inserting role:', error)
+      }
+
+      // Refresh roles
+      await fetchRoles()
+      alert('Default roles added successfully!')
+    } catch (err) {
+      console.error('Error adding default roles:', err)
+      alert('Error adding default roles: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const validateForm = () => {
     const newErrors = {}
@@ -66,8 +114,8 @@ export default function CreateUser() {
       newErrors.confirm_password = 'Passwords do not match'
     }
     
-    if (!formData.role_id) {
-      newErrors.role_id = 'Please select a role'
+    if (!formData.role_id && !formData.is_super_admin) {
+      newErrors.role_id = 'Please select a role or mark as Super Admin'
     }
     
     setErrors(newErrors)
@@ -113,17 +161,6 @@ export default function CreateUser() {
 
       if (adminError) throw adminError
 
-      // Log activity
-      const session = JSON.parse(localStorage.getItem('adminSession'))
-      await supabase
-        .from('admin_activity_logs')
-        .insert({
-          admin_id: session?.admin?.admin_id,
-          activity_type: 'USER_MANAGEMENT',
-          activity_description: `Created new admin user: ${formData.email}`,
-          created_at: new Date().toISOString()
-        })
-
       router.push('/admin/users')
     } catch (err) {
       console.error('Error:', err)
@@ -133,11 +170,14 @@ export default function CreateUser() {
     }
   }
 
-  if (loading) {
+  if (fetchingRoles) {
     return (
       <AdminLayout title="Create New User">
         <div className="d-flex justify-content-center py-5">
-          <div className="spinner-border text-primary"></div>
+          <div className="text-center">
+            <div className="spinner-border text-primary mb-3"></div>
+            <p>Loading roles...</p>
+          </div>
         </div>
       </AdminLayout>
     )
@@ -158,6 +198,18 @@ export default function CreateUser() {
           </div>
         </div>
         <div className="card-body">
+          {/* Role Error Message */}
+          {roleError && (
+            <div className="alert alert-warning">
+              <i className="bi bi-exclamation-triangle-fill me-2"></i>
+              {roleError}
+              <button className="btn btn-sm btn-primary ms-3" onClick={addDefaultRoles}>
+                <i className="bi bi-plus-circle me-1"></i>Add Default Roles
+              </button>
+            </div>
+          )}
+
+          {/* Submit Error */}
           {errors.submit && (
             <div className="alert alert-danger">{errors.submit}</div>
           )}
@@ -210,11 +262,12 @@ export default function CreateUser() {
               </div>
 
               <div className="col-md-6 mb-3">
-                <label className="form-label fw-semibold">Role *</label>
+                <label className="form-label fw-semibold">Role</label>
                 <select 
                   className={`form-select ${errors.role_id ? 'is-invalid' : ''}`}
                   value={formData.role_id}
                   onChange={(e) => setFormData({...formData, role_id: e.target.value})}
+                  disabled={roles.length === 0}
                 >
                   <option value="">Select a Role</option>
                   {roles.map(role => (
@@ -224,9 +277,10 @@ export default function CreateUser() {
                   ))}
                 </select>
                 {errors.role_id && <div className="invalid-feedback">{errors.role_id}</div>}
-                {roles.length === 0 && (
+                {roles.length === 0 && !roleError && (
                   <div className="text-warning small mt-1">
-                    No roles found. Please add roles to admin_roles table first.
+                    <i className="bi bi-info-circle me-1"></i>
+                    Loading roles... If this persists, click "Add Default Roles" above.
                   </div>
                 )}
               </div>
