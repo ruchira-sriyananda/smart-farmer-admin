@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
@@ -9,6 +9,7 @@ export default function CreateUser() {
   const [roles, setRoles] = useState([])
   const [fetchingRoles, setFetchingRoles] = useState(true)
   const [roleError, setRoleError] = useState(null)
+  const [retryCount, setRetryCount] = useState(0)
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -21,22 +22,19 @@ export default function CreateUser() {
   const [errors, setErrors] = useState({})
 
   // Fetch roles from admin_roles table
-  useEffect(() => {
-    fetchRoles()
-  }, [])
-
-  const fetchRoles = async () => {
+  const fetchRoles = useCallback(async () => {
     try {
       setFetchingRoles(true)
       setRoleError(null)
       
-      // Fetch from admin_roles table
-      const { data, error } = await supabase
+      console.log('Fetching roles from admin_roles...')
+      
+      // Direct query to admin_roles table
+      const { data, error, count } = await supabase
         .from('admin_roles')
-        .select('role_id, role_name, description')
-        .order('role_name')
+        .select('*')
 
-      console.log('Admin roles response:', { data, error })
+      console.log('Response:', { data, error, count })
 
       if (error) {
         console.error('Error fetching roles:', error)
@@ -46,12 +44,13 @@ export default function CreateUser() {
       }
 
       if (!data || data.length === 0) {
-        console.warn('No roles found in admin_roles table')
-        setRoleError('No roles found. Please add roles to admin_roles table.')
+        console.warn('No roles found - table might be empty')
+        setRoleError('No roles found in admin_roles table. Please add roles first.')
         setRoles([])
         return
       }
 
+      console.log('Roles fetched successfully:', data.length, 'roles found')
       setRoles(data)
       
     } catch (err) {
@@ -60,12 +59,22 @@ export default function CreateUser() {
     } finally {
       setFetchingRoles(false)
     }
+  }, [])
+
+  useEffect(() => {
+    fetchRoles()
+  }, [fetchRoles, retryCount])
+
+  const retryFetch = () => {
+    setRetryCount(prev => prev + 1)
+    setFetchingRoles(true)
   }
 
-  // Function to manually add default roles
+  // Function to manually add default roles via API
   const addDefaultRoles = async () => {
     setLoading(true)
     try {
+      // Try direct insert via Supabase
       const defaultRoles = [
         { role_name: 'SUPER_ADMIN', description: 'Full system access - all permissions' },
         { role_name: 'CONTENT_ADMIN', description: 'Manage content, posts, and comments' },
@@ -83,14 +92,18 @@ export default function CreateUser() {
           })
         
         if (error) {
-          console.error('Error inserting role:', error)
+          console.error('Error inserting role:', role.role_name, error)
         } else {
           inserted++
         }
       }
 
-      await fetchRoles()
-      alert(`${inserted} default roles added successfully!`)
+      if (inserted > 0) {
+        alert(`${inserted} default roles added successfully!`)
+        await fetchRoles()
+      } else {
+        alert('Failed to add roles. Please add them manually in Supabase SQL editor.')
+      }
     } catch (err) {
       console.error('Error adding default roles:', err)
       alert('Error adding default roles: ' + err.message)
@@ -120,10 +133,6 @@ export default function CreateUser() {
     
     if (formData.password !== formData.confirm_password) {
       newErrors.confirm_password = 'Passwords do not match'
-    }
-    
-    if (!formData.role_id && !formData.is_super_admin) {
-      newErrors.role_id = 'Please select a role or mark as Super Admin'
     }
     
     setErrors(newErrors)
@@ -166,13 +175,12 @@ export default function CreateUser() {
       }
 
       // Only add role_id if selected and not super admin
-      if (formData.role_id && formData.role_id !== '') {
+      if (formData.role_id && formData.role_id !== '' && !formData.is_super_admin) {
         adminData.role_id = formData.role_id
       }
 
       console.log('Inserting admin user:', adminData)
 
-      // Add to admin_users
       const { error: adminError } = await supabase
         .from('admin_users')
         .insert(adminData)
@@ -193,8 +201,11 @@ export default function CreateUser() {
       <AdminLayout title="Create New User">
         <div className="d-flex justify-content-center py-5">
           <div className="text-center">
-            <div className="spinner-border text-primary mb-3"></div>
-            <p>Loading roles...</p>
+            <div className="spinner-border text-primary mb-3" style={{ width: '3rem', height: '3rem' }}></div>
+            <p>Loading roles from database...</p>
+            <button className="btn btn-sm btn-outline-secondary mt-2" onClick={retryFetch}>
+              <i className="bi bi-arrow-repeat me-1"></i>Retry
+            </button>
           </div>
         </div>
       </AdminLayout>
@@ -219,17 +230,34 @@ export default function CreateUser() {
           {/* Role Error Message */}
           {roleError && (
             <div className="alert alert-warning">
-              <i className="bi bi-exclamation-triangle-fill me-2"></i>
-              {roleError}
-              <button className="btn btn-sm btn-primary ms-3" onClick={addDefaultRoles} disabled={loading}>
-                <i className="bi bi-plus-circle me-1"></i>Add Default Roles
-              </button>
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                  {roleError}
+                </div>
+                <div>
+                  <button className="btn btn-sm btn-outline-primary me-2" onClick={retryFetch}>
+                    <i className="bi bi-arrow-repeat me-1"></i>Retry
+                  </button>
+                  <button className="btn btn-sm btn-primary" onClick={addDefaultRoles} disabled={loading}>
+                    <i className="bi bi-plus-circle me-1"></i>Add Default Roles
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Submit Error */}
           {errors.submit && (
             <div className="alert alert-danger">{errors.submit}</div>
+          )}
+
+          {/* Success message if roles exist */}
+          {!roleError && roles.length > 0 && (
+            <div className="alert alert-success small">
+              <i className="bi bi-check-circle-fill me-2"></i>
+              Found {roles.length} roles in database. Select a role for this user.
+            </div>
           )}
 
           <form onSubmit={handleSubmit}>
@@ -295,12 +323,6 @@ export default function CreateUser() {
                   ))}
                 </select>
                 {errors.role_id && <div className="invalid-feedback">{errors.role_id}</div>}
-                {roles.length === 0 && !roleError && (
-                  <div className="text-muted small mt-1">
-                    <i className="bi bi-info-circle me-1"></i>
-                    No roles available. Click "Add Default Roles" above.
-                  </div>
-                )}
               </div>
 
               <div className="col-md-6 mb-3">
