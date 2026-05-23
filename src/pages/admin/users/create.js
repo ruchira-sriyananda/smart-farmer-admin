@@ -24,24 +24,24 @@ export default function CreateUser() {
   }, [])
 
   const fetchRoles = async () => {
-    try {
-      // Fetch from admin_roles table (not roles table)
-      const { data, error } = await supabase
-        .from('admin_roles')
-        .select('role_id, role_name, description')
-        .order('role_name')
+  try {
+    // Fetch from admin_roles table
+    const { data, error } = await supabase
+      .from('admin_roles')
+      .select('role_id, role_name, description')
+      .order('role_name')
 
-      if (error) {
-        console.error('Error fetching roles:', error)
-        return
-      }
-
-      console.log('Roles fetched from admin_roles:', data)
-      setRoles(data || [])
-    } catch (err) {
-      console.error('Error:', err)
+    if (error) {
+      console.error('Error fetching roles:', error)
+      return
     }
+
+    console.log('Roles fetched:', data)
+    setRoles(data || [])
+  } catch (err) {
+    console.error('Error:', err)
   }
+}
 
   const validateForm = () => {
     const newErrors = {}

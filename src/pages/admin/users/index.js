@@ -7,39 +7,81 @@ export default function UserManagement() {
   const router = useRouter()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRole, setSelectedRole] = useState('all')
   const [selectedStatus, setSelectedStatus] = useState('all')
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [selectedUser, setSelectedUser] = useState(null)
+  const [stats, setStats] = useState({
+    total: 0,
+    active: 0,
+    inactive: 0,
+    superAdmins: 0
+  })
 
   useEffect(() => {
     fetchUsers()
   }, [])
 
-  // Update the fetchUsers function to use admin_roles
-const fetchUsers = async () => {
-  try {
-    // Fetch users with role information from admin_roles
-    const { data, error } = await supabase
-      .from('admin_users')
-      .select(`
-        *,
-        admin_roles!admin_users_role_id_fkey (
-          role_id,
-          role_name,
-          description
-        )
-      `)
-      .order('created_at', { ascending: false })
+  const fetchUsers = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      
+      // First, fetch all admin_users
+      const { data: usersData, error: usersError } = await supabase
+        .from('admin_users')
+        .select('*')
+        .order('created_at', { ascending: false })
 
-    if (!error && data) {
-      setUsers(data)
+      if (usersError) throw usersError
+
+      if (usersData && usersData.length > 0) {
+        // Get role IDs from users
+        const roleIds = [...new Set(usersData.map(u => u.role_id).filter(id => id))]
+        
+        // Fetch roles separately if there are role IDs
+        let rolesMap = {}
+        if (roleIds.length > 0) {
+          const { data: rolesData, error: rolesError } = await supabase
+            .from('admin_roles')
+            .select('role_id, role_name, description')
+            .in('role_id', roleIds)
+
+          if (!rolesError && rolesData) {
+            rolesMap = rolesData.reduce((acc, role) => {
+              acc[role.role_id] = role
+              return acc
+            }, {})
+          }
+        }
+
+        // Combine users with their roles
+        const usersWithRoles = usersData.map(user => ({
+          ...user,
+          admin_roles: rolesMap[user.role_id] || null
+        }))
+
+        setUsers(usersWithRoles)
+        
+        // Calculate stats
+        setStats({
+          total: usersWithRoles.length,
+          active: usersWithRoles.filter(u => u.is_active).length,
+          inactive: usersWithRoles.filter(u => !u.is_active).length,
+          superAdmins: usersWithRoles.filter(u => u.is_super_admin).length
+        })
+      } else {
+        setUsers([])
+        setStats({ total: 0, active: 0, inactive: 0, superAdmins: 0 })
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-  } catch (err) {
-    console.error('Error fetching users:', err)
   }
-}
+
   const handleStatusToggle = async (userId, currentStatus) => {
     const action = currentStatus ? 'deactivate' : 'activate'
     if (confirm(`Are you sure you want to ${action} this user?`)) {
@@ -50,21 +92,24 @@ const fetchUsers = async () => {
 
       if (!error) {
         fetchUsers()
+      } else {
+        alert('Error updating user status: ' + error.message)
       }
     }
   }
 
-  const handleDeleteUser = async () => {
-    if (!selectedUser) return
+  const handleDeleteUser = async (userId, userName) => {
+    if (confirm(`Are you sure you want to delete user "${userName}"? This action cannot be undone.`)) {
+      const { error } = await supabase
+        .from('admin_users')
+        .delete()
+        .eq('admin_id', userId)
 
-    const { error } = await supabase
-      .from('admin_users')
-      .delete()
-      .eq('admin_id', selectedUser.admin_id)
-
-    if (!error) {
-      setShowDeleteModal(false)
-      fetchUsers()
+      if (!error) {
+        fetchUsers()
+      } else {
+        alert('Error deleting user: ' + error.message)
+      }
     }
   }
 
@@ -80,76 +125,94 @@ const fetchUsers = async () => {
 
   const getRoleBadge = (roleName) => {
     const badges = {
-      'SUPER_ADMIN': <span className="badge bg-danger">Super Admin</span>,
-      'CONTENT_ADMIN': <span className="badge bg-info">Content Admin</span>,
-      'SECURITY_ADMIN': <span className="badge bg-warning">Security Admin</span>,
-      'SUPPORT_ADMIN': <span className="badge bg-success">Support Admin</span>
+      'SUPER_ADMIN': <span className="badge bg-danger px-3 py-1 rounded-pill"><i className="bi bi-star-fill me-1"></i>Super Admin</span>,
+      'CONTENT_ADMIN': <span className="badge bg-info px-3 py-1 rounded-pill"><i className="bi bi-file-post me-1"></i>Content Admin</span>,
+      'SECURITY_ADMIN': <span className="badge bg-warning px-3 py-1 rounded-pill"><i className="bi bi-shield-lock me-1"></i>Security Admin</span>,
+      'SUPPORT_ADMIN': <span className="badge bg-success px-3 py-1 rounded-pill"><i className="bi bi-headset me-1"></i>Support Admin</span>
     }
-    return badges[roleName] || <span className="badge bg-secondary">{roleName}</span>
+    return badges[roleName] || <span className="badge bg-secondary px-3 py-1 rounded-pill">{roleName || 'No Role'}</span>
   }
 
   if (loading) {
     return (
       <AdminLayout title="User Management">
-        <div className="d-flex justify-content-center py-5">
-          <div className="spinner-border text-primary"></div>
+        <div className="d-flex justify-content-center align-items-center min-vh-50">
+          <div className="text-center">
+            <div className="spinner-border text-primary mb-3" style={{ width: '3rem', height: '3rem' }}></div>
+            <p className="text-muted">Loading users...</p>
+          </div>
         </div>
       </AdminLayout>
     )
   }
 
+  if (error) {
+    return (
+      <AdminLayout title="User Management">
+        <div className="alert alert-danger m-4">
+          <i className="bi bi-exclamation-triangle-fill me-2"></i>
+          Error loading users: {error}
+          <button className="btn btn-sm btn-outline-danger ms-3" onClick={fetchUsers}>Retry</button>
+        </div>
+      </AdminLayout>
+    )
+  }
+
+  // Get unique roles for filter
+  const uniqueRoles = [...new Set(users.map(u => u.admin_roles?.role_name).filter(Boolean))]
+
   return (
     <AdminLayout title="User Management">
       {/* Stats Cards */}
-      <div className="row g-3 mb-4">
+      <div className="row g-4 mb-4">
         <div className="col-md-3">
-          <div className="card border-0 bg-primary bg-opacity-10">
+          <div className="card border-0 shadow-sm bg-primary bg-opacity-10">
             <div className="card-body">
               <div className="d-flex justify-content-between align-items-center">
                 <div>
-                  <h6 className="text-muted mb-1">Total Users</h6>
-                  <h3 className="mb-0 fw-bold">{users.length}</h3>
+                  <h6 className="text-muted mb-1">Total Admins</h6>
+                  <h3 className="mb-0 fw-bold">{stats.total}</h3>
                 </div>
-                <i className="bi bi-people fs-1 text-primary"></i>
+                <i className="bi bi-people-fill fs-1 text-primary"></i>
               </div>
             </div>
           </div>
         </div>
         <div className="col-md-3">
-          <div className="card border-0 bg-success bg-opacity-10">
+          <div className="card border-0 shadow-sm bg-success bg-opacity-10">
             <div className="card-body">
               <div className="d-flex justify-content-between align-items-center">
                 <div>
-                  <h6 className="text-muted mb-1">Active Users</h6>
-                  <h3 className="mb-0 fw-bold">{users.filter(u => u.is_active).length}</h3>
+                  <h6 className="text-muted mb-1">Active Admins</h6>
+                  <h3 className="mb-0 fw-bold text-success">{stats.active}</h3>
                 </div>
-                <i className="bi bi-check-circle fs-1 text-success"></i>
+                <i className="bi bi-check-circle-fill fs-1 text-success"></i>
               </div>
             </div>
           </div>
         </div>
         <div className="col-md-3">
-          <div className="card border-0 bg-warning bg-opacity-10">
+          <div className="card border-0 shadow-sm bg-secondary bg-opacity-10">
             <div className="card-body">
               <div className="d-flex justify-content-between align-items-center">
                 <div>
-                  <h6 className="text-muted mb-1">Inactive Users</h6>
-                  <h3 className="mb-0 fw-bold">{users.filter(u => !u.is_active).length}</h3>
+                  <h6 className="text-muted mb-1">Inactive Admins</h6>
+                  <h3 className="mb-0 fw-bold text-secondary">{stats.inactive}</h3>
                 </div>
-                <i className="bi bi-ban fs-1 text-warning"></i>
+                <i className="bi bi-person-x-fill fs-1 text-secondary"></i>
               </div>
             </div>
           </div>
         </div>
         <div className="col-md-3">
-          <div className="card border-0 bg-info bg-opacity-10">
+          <div className="card border-0 shadow-sm bg-warning bg-opacity-10">
             <div className="card-body">
               <div className="d-flex justify-content-between align-items-center">
                 <div>
                   <h6 className="text-muted mb-1">Super Admins</h6>
-                  <h3 className="mb-0 fw-bold">{users.filter(u => u.is_super_admin).length}</h3>
+                  <h3 className="mb-0 fw-bold text-warning">{stats.superAdmins}</h3>
                 </div>
-                <i className="bi bi-star fs-1 text-info"></i>
+                <i className="bi bi-star-fill fs-1 text-warning"></i>
               </div>
             </div>
           </div>
@@ -175,10 +238,9 @@ const fetchUsers = async () => {
             <div className="col-md-3">
               <select className="form-select" value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)}>
                 <option value="all">All Roles</option>
-                <option value="SUPER_ADMIN">Super Admin</option>
-                <option value="CONTENT_ADMIN">Content Admin</option>
-                <option value="SECURITY_ADMIN">Security Admin</option>
-                <option value="SUPPORT_ADMIN">Support Admin</option>
+                {uniqueRoles.map(role => (
+                  <option key={role} value={role}>{role}</option>
+                ))}
               </select>
             </div>
             <div className="col-md-3">
@@ -214,70 +276,80 @@ const fetchUsers = async () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map(user => (
-                  <tr key={user.admin_id}>
-                    <td>
-                      <div className="d-flex align-items-center">
-                        <div className="bg-primary bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center me-2" style={{ width: '36px', height: '36px' }}>
-                          <span className="text-primary fw-bold">{user.full_name?.charAt(0)}</span>
+                {filteredUsers.length > 0 ? (
+                  filteredUsers.map((user) => (
+                    <tr key={user.admin_id}>
+                      <td>
+                        <div className="d-flex align-items-center gap-2">
+                          <div className="bg-primary bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center" style={{ width: '40px', height: '40px' }}>
+                            <span className="text-primary fw-bold">{user.full_name?.charAt(0) || 'A'}</span>
+                          </div>
+                          <div>
+                            <div className="fw-semibold">{user.full_name}</div>
+                            {user.is_super_admin && <small className="text-warning">Super Admin</small>}
+                          </div>
                         </div>
-                        <div>
-                          <div className="fw-medium">{user.full_name}</div>
-                          {user.is_super_admin && <small className="text-warning">Super Admin</small>}
+                      </td>
+                      <td>
+                        <div>{user.email}</div>
+                        {user.phone_number && <small className="text-muted">{user.phone_number}</small>}
+                      </td>
+                      <td>{getRoleBadge(user.admin_roles?.role_name)}</td>
+                      <td>
+                        <span className={`badge ${user.is_active ? 'bg-success' : 'bg-secondary'} rounded-pill`}>
+                          {user.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td>{user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}</td>
+                      <td>{new Date(user.created_at).toLocaleDateString()}</td>
+                      <td>
+                        <div className="btn-group">
+                          <button 
+                            className="btn btn-sm btn-outline-primary" 
+                            onClick={() => router.push(`/admin/users/${user.admin_id}`)}
+                            title="View Details"
+                          >
+                            <i className="bi bi-eye"></i>
+                          </button>
+                          <button 
+                            className="btn btn-sm btn-outline-secondary" 
+                            onClick={() => router.push(`/admin/users/${user.admin_id}/edit`)}
+                            title="Edit User"
+                          >
+                            <i className="bi bi-pencil"></i>
+                          </button>
+                          <button 
+                            className={`btn btn-sm ${user.is_active ? 'btn-outline-warning' : 'btn-outline-success'}`}
+                            onClick={() => handleStatusToggle(user.admin_id, user.is_active)}
+                            title={user.is_active ? 'Deactivate' : 'Activate'}
+                          >
+                            <i className={`bi ${user.is_active ? 'bi-ban' : 'bi-check-circle'}`}></i>
+                          </button>
+                          <button 
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={() => handleDeleteUser(user.admin_id, user.full_name)}
+                            title="Delete User"
+                          >
+                            <i className="bi bi-trash"></i>
+                          </button>
                         </div>
-                      </div>
-                    </td>
-                    <td>{user.email}</td>
-                    <td>{getRoleBadge(user.admin_roles?.role_name)}</td>
-                    <td>
-                      <span className={`badge ${user.is_active ? 'bg-success' : 'bg-secondary'}`}>
-                        {user.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td>{user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}</td>
-                    <td>{new Date(user.created_at).toLocaleDateString()}</td>
-                    <td>
-                      <div className="btn-group">
-                        <button className="btn btn-sm btn-outline-primary" onClick={() => router.push(`/admin/users/${user.admin_id}`)}>
-                          <i className="bi bi-eye"></i>
-                        </button>
-                        <button className="btn btn-sm btn-outline-secondary" onClick={() => router.push(`/admin/users/${user.admin_id}/edit`)}>
-                          <i className="bi bi-pencil"></i>
-                        </button>
-                        <button className="btn btn-sm btn-outline-danger" onClick={() => handleStatusToggle(user.admin_id, user.is_active)}>
-                          <i className={`bi ${user.is_active ? 'bi-ban' : 'bi-check-circle'}`}></i>
-                        </button>
-                      </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="7" className="text-center py-4 text-muted">
+                      {searchTerm || selectedRole !== 'all' || selectedStatus !== 'all' ? 
+                        'No matching users found' : 
+                        'No users found. Click "Add User" to create one.'}
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && (
-        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
-          <div className="modal-dialog modal-dialog-centered">
-            <div className="modal-content">
-              <div className="modal-header bg-danger text-white">
-                <h5 className="modal-title">Confirm Delete</h5>
-                <button type="button" className="btn-close btn-close-white" onClick={() => setShowDeleteModal(false)}></button>
-              </div>
-              <div className="modal-body">
-                <p>Are you sure you want to delete user <strong>{selectedUser?.full_name}</strong>?</p>
-                <p className="text-danger small mb-0">This action cannot be undone!</p>
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
-                <button className="btn btn-danger" onClick={handleDeleteUser}>Delete User</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </AdminLayout>
   )
 }
