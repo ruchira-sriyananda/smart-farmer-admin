@@ -39,6 +39,7 @@ export default function AdminDashboard() {
   const [onlineUsers, setOnlineUsers] = useState([])
   const [onlineCount, setOnlineCount] = useState(0)
   const [greeting, setGreeting] = useState('')
+  const [debugInfo, setDebugInfo] = useState(null)
   
   // Real data from database
   const [totalUsers, setTotalUsers] = useState(0)
@@ -58,9 +59,9 @@ export default function AdminDashboard() {
     recentUsers: [],
     recentPosts: [],
     recentActivities: [],
-    userGrowthData: [],
+    userGrowthData: [0, 0, 0, 0],
     roleDistribution: {},
-    weeklyActivity: []
+    weeklyActivity: [0, 0, 0, 0, 0, 0, 0]
   })
 
   // Set greeting based on time
@@ -89,104 +90,113 @@ export default function AdminDashboard() {
     }
   }
 
-const fetchAllStats = async () => {
-  try {
-    // Get role IDs - handle if roles table is empty or different
-    const { data: roles, error: rolesError } = await supabase
-      .from('roles')
-      .select('role_id, role_name')
-    
-    if (rolesError) {
-      console.error('Roles fetch error:', rolesError)
-    }
-    
-    const roleMap = {}
-    roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
-
-    // Get total users - this is the most important
-    const { count: totalCount, error: totalError } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-    
-    if (totalError) {
-      console.error('Total users count error:', totalError)
-    }
-    
-    console.log('Total users from DB:', totalCount) // Debug log
-    
-    // Get farmers - use direct count if role exists
-    let farmersCount = 0
-    if (roleMap['FARMER']) {
-      const { count } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .eq('role_id', roleMap['FARMER'])
-      farmersCount = count || 0
-    } else {
-      // If no role assigned, count all users as farmers (fallback)
-      farmersCount = totalCount || 0
-    }
-    
-    // Get vendors
-    let vendorsCount = 0
-    if (roleMap['VENDOR']) {
-      const { count } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .eq('role_id', roleMap['VENDOR'])
-      vendorsCount = count || 0
-    }
-    
-    setTotalUsers(totalCount || 0)
-    setTotalFarmers(farmersCount)
-    setTotalVendors(vendorsCount)
-    
-    console.log('Stats updated - Users:', totalCount, 'Farmers:', farmersCount, 'Vendors:', vendorsCount)
-    
-  } catch (err) {
-    console.error('Error fetching stats:', err)
-  }
-}
-
-  // Fix for fetchRecentUsers - Handle NULL roles properly
-const fetchRecentUsers = async () => {
-  try {
-    // First, get users without join to ensure we get data
-    const { data: users, error: usersError } = await supabase
-      .from('users')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(6)
-
-    if (usersError) {
-      console.error('Users fetch error:', usersError)
-      return
-    }
-
-    if (users && users.length > 0) {
-      // Get roles separately if needed
-      const { data: roles } = await supabase
-        .from('roles')
-        .select('*')
+  // Fetch all stats from database
+  const fetchAllStats = async () => {
+    try {
+      // Get role IDs
+      const { data: roles, error: rolesError } = await supabase.from('roles').select('role_id, role_name')
+      
+      if (rolesError) {
+        console.error('Roles error:', rolesError)
+      }
       
       const roleMap = {}
-      roles?.forEach(r => { roleMap[r.role_id] = r.role_name })
-      
-      // Add role names to users
-      const usersWithRoles = users.map(user => ({
-        ...user,
-        roles: user.role_id ? { role_name: roleMap[user.role_id] || 'UNKNOWN' } : null
-      }))
-      
-      setDashboardData(prev => ({ ...prev, recentUsers: usersWithRoles }))
-    } else {
-      console.log('No users found in database')
+      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+
+      // Get today's date range
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      // Fetch all counts in parallel with error handling
+      const [
+        totalUsersRes,
+        farmersRes,
+        vendorsRes,
+        adminsRes,
+        verifiedRes,
+        pendingRes,
+        postsRes,
+        barterRes,
+        messagesRes,
+        adsRes,
+        newUsersRes,
+        newPostsRes
+      ] = await Promise.all([
+        supabase.from('users').select('*', { count: 'exact', head: true }),
+        roleMap['FARMER'] ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER']) : Promise.resolve({ count: 0 }),
+        roleMap['VENDOR'] ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR']) : Promise.resolve({ count: 0 }),
+        roleMap['ADMIN'] ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['ADMIN']) : Promise.resolve({ count: 0 }),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
+        supabase.from('posts').select('*', { count: 'exact', head: true }),
+        supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
+        supabase.from('messages').select('*', { count: 'exact', head: true }),
+        supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+        supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
+        supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString())
+      ])
+
+      setTotalUsers(totalUsersRes.count || 0)
+      setTotalFarmers(farmersRes.count || 0)
+      setTotalVendors(vendorsRes.count || 0)
+      setTotalAdmins(adminsRes.count || 0)
+      setVerifiedUsers(verifiedRes.count || 0)
+      setPendingVerification(pendingRes.count || 0)
+      setTotalPosts(postsRes.count || 0)
+      setTotalBarterListings(barterRes.count || 0)
+      setTotalMessages(messagesRes.count || 0)
+      setTotalAds(adsRes.count || 0)
+      setNewUsersToday(newUsersRes.count || 0)
+      setNewPostsToday(newPostsRes.count || 0)
+
+      console.log('Stats fetched:', {
+        totalUsers: totalUsersRes.count,
+        farmers: farmersRes.count,
+        vendors: vendorsRes.count
+      })
+
+    } catch (err) {
+      console.error('Error fetching stats:', err)
+    }
+  }
+
+  // Fetch recent users - FIXED VERSION
+  const fetchRecentUsers = async () => {
+    try {
+      // First, get all users
+      const { data: users, error: usersError } = await supabase
+        .from('users')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (usersError) {
+        console.error('Users fetch error:', usersError)
+        return
+      }
+
+      console.log('Users found:', users?.length || 0)
+
+      if (users && users.length > 0) {
+        // Get role names for each user
+        const { data: roles } = await supabase.from('roles').select('role_id, role_name')
+        const roleMap = {}
+        roles?.forEach(r => { roleMap[r.role_id] = r.role_name })
+
+        const usersWithRoles = users.map(user => ({
+          ...user,
+          roles: { role_name: roleMap[user.role_id] || 'PENDING' }
+        }))
+
+        setDashboardData(prev => ({ ...prev, recentUsers: usersWithRoles.slice(0, 6) }))
+      } else {
+        setDashboardData(prev => ({ ...prev, recentUsers: [] }))
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err)
       setDashboardData(prev => ({ ...prev, recentUsers: [] }))
     }
-  } catch (err) { 
-    console.error('Error in fetchRecentUsers:', err) 
   }
-}
 
   // Fetch recent posts
   const fetchRecentPosts = async () => {
@@ -199,12 +209,29 @@ const fetchRecentUsers = async () => {
           content,
           image_url,
           created_at,
-          users!left (full_name, profile_image)
+          user_id
         `)
         .order('created_at', { ascending: false })
         .limit(4)
 
-      if (!error && data) setDashboardData(prev => ({ ...prev, recentPosts: data }))
+      if (!error && data) {
+        // Get user names for posts
+        const userIds = [...new Set(data.map(p => p.user_id))]
+        const { data: users } = await supabase
+          .from('users')
+          .select('user_id, full_name')
+          .in('user_id', userIds)
+        
+        const userMap = {}
+        users?.forEach(u => { userMap[u.user_id] = u.full_name })
+
+        const postsWithUsers = data.map(post => ({
+          ...post,
+          users: { full_name: userMap[post.user_id] || 'Unknown' }
+        }))
+
+        setDashboardData(prev => ({ ...prev, recentPosts: postsWithUsers }))
+      }
     } catch (err) { console.error('Error:', err) }
   }
 
@@ -236,15 +263,19 @@ const fetchRecentUsers = async () => {
   // Fetch role distribution from database
   const fetchRoleDistribution = async () => {
     try {
-      const { data } = await supabase.from('users').select('roles!left (role_name)')
-      if (data) {
-        const distribution = {}
-        data.forEach(user => {
-          const role = user.roles?.role_name || 'PENDING'
-          distribution[role] = (distribution[role] || 0) + 1
-        })
-        setDashboardData(prev => ({ ...prev, roleDistribution: distribution }))
-      }
+      const { data: users } = await supabase.from('users').select('role_id')
+      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
+      
+      const roleMap = {}
+      roles?.forEach(r => { roleMap[r.role_id] = r.role_name })
+      
+      const distribution = {}
+      users?.forEach(user => {
+        const roleName = roleMap[user.role_id] || 'PENDING'
+        distribution[roleName] = (distribution[roleName] || 0) + 1
+      })
+      
+      setDashboardData(prev => ({ ...prev, roleDistribution: distribution }))
     } catch (err) { console.error('Error:', err) }
   }
 
@@ -291,7 +322,6 @@ const fetchRecentUsers = async () => {
     }
     init()
 
-    // Auto-refresh every 30 seconds
     const interval = setInterval(() => {
       fetchAllStats()
       fetchOnlineUsers()
@@ -346,9 +376,9 @@ const fetchRecentUsers = async () => {
   }
 
   const roleDistributionChart = {
-    labels: Object.keys(dashboardData.roleDistribution).filter(r => r !== 'UNKNOWN'),
+    labels: Object.keys(dashboardData.roleDistribution),
     datasets: [{
-      data: Object.values(dashboardData.roleDistribution).filter(v => v > 0),
+      data: Object.values(dashboardData.roleDistribution),
       backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
       borderWidth: 0,
       borderRadius: 10
@@ -461,7 +491,7 @@ const fetchRecentUsers = async () => {
         </div>
       </div>
 
-      {/* Secondary Stats Grid - ALL DATA FROM DATABASE */}
+      {/* Secondary Stats Grid */}
       <div className="secondary-stats">
         <div className="stat-card-mini">
           <i className="bi bi-shield-check stat-mini-icon success"></i>
@@ -553,7 +583,7 @@ const fetchRecentUsers = async () => {
             <div className="legend-stats">
               {Object.entries(dashboardData.roleDistribution).map(([role, count]) => (
                 <div key={role} className="legend-item">
-                  <span className={`legend-dot ${role.toLowerCase()}`}></span>
+                  <span className={`legend-dot ${role.toLowerCase()}`} style={{ background: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'][Math.floor(Math.random() * 4)] }}></span>
                   <span className="legend-name">{role}</span>
                   <span className="legend-count">{count}</span>
                 </div>
@@ -591,12 +621,12 @@ const fetchRecentUsers = async () => {
         </div>
       </div>
 
-      {/* Recent Users Table */}
+      {/* Recent Users Table - FIXED */}
       <div className="recent-table">
         <div className="table-header">
           <div>
             <h5><i className="bi bi-people"></i> Recent Users</h5>
-            <p>Latest registered members - {recentUsers.length} new users</p>
+            <p>Latest registered members - {recentUsers.length} users found</p>
           </div>
           <button className="view-all-btn" onClick={() => router.push('/admin/users')}>
             View All <i className="bi bi-arrow-right"></i>
@@ -615,41 +645,49 @@ const fetchRecentUsers = async () => {
               </tr>
             </thead>
             <tbody>
-              {recentUsers.map((user) => (
-                <tr key={user.user_id}>
-                  <td>
-                    <div className="user-cell">
-                      <div className="user-avatar-sm">
-                        {user.profile_image ? (
-                          <img src={user.profile_image} alt={user.full_name} />
-                        ) : (
-                          <span>{user.full_name?.charAt(0)}</span>
-                        )}
+              {recentUsers.length > 0 ? (
+                recentUsers.map((user) => (
+                  <tr key={user.user_id}>
+                    <tr>
+                      <div className="user-cell">
+                        <div className="user-avatar-sm">
+                          {user.profile_image ? (
+                            <img src={user.profile_image} alt={user.full_name} />
+                          ) : (
+                            <span>{user.full_name?.charAt(0) || 'U'}</span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="user-name">{user.full_name || 'Unknown'}</div>
+                          {user.district && <div className="user-location">{user.district}</div>}
+                        </div>
                       </div>
-                      <div>
-                        <div className="user-name">{user.full_name}</div>
-                        {user.district && <div className="user-location">{user.district}</div>}
+                    </td>
+                    <td>
+                      <div className="contact-cell">
+                        <div className="contact-email">{user.email || 'No email'}</div>
+                        {user.phone_number && <div className="contact-phone">{user.phone_number}</div>}
                       </div>
-                    </div>
+                    </td>
+                    <td>{getRoleBadge(user.roles?.role_name)}</td>
+                    <td>{user.district || '—'}</td>
+                    <td>
+                      {user.is_verified ? (
+                        <span className="status-badge verified"><i className="bi bi-check-circle"></i> Verified</span>
+                      ) : (
+                        <span className="status-badge pending"><i className="bi bi-clock"></i> Pending</span>
+                      )}
+                    </td>
+                    <td className="date-cell">{user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Unknown'}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" className="text-center py-4 text-muted">
+                    No users found in database. Please add some users.
                   </td>
-                  <td>
-                    <div className="contact-cell">
-                      <div className="contact-email">{user.email}</div>
-                      {user.phone_number && <div className="contact-phone">{user.phone_number}</div>}
-                    </div>
-                  </td>
-                  <td>{getRoleBadge(user.roles?.role_name)}</td>
-                  <td>{user.district || '—'}</td>
-                  <td>
-                    {user.is_verified ? (
-                      <span className="status-badge verified"><i className="bi bi-check-circle"></i> Verified</span>
-                    ) : (
-                      <span className="status-badge pending"><i className="bi bi-clock"></i> Pending</span>
-                    )}
-                  </td>
-                  <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
-                 </tr>
-              ))}
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -667,29 +705,35 @@ const fetchRecentUsers = async () => {
           </button>
         </div>
         <div className="posts-grid">
-          {recentPosts.map((post) => (
-            <div key={post.post_id} className="post-card-modern">
-              {post.image_url && (
-                <div className="post-image-modern">
-                  <img src={post.image_url} alt={post.title} />
-                </div>
-              )}
-              <div className="post-content-modern">
-                <h6>{post.title}</h6>
-                <p>{post.content?.substring(0, 80)}...</p>
-                <div className="post-meta">
-                  <div className="post-author">
-                    <i className="bi bi-person-circle"></i>
-                    <span>{post.users?.full_name?.split(' ')[0] || 'User'}</span>
+          {recentPosts.length > 0 ? (
+            recentPosts.map((post) => (
+              <div key={post.post_id} className="post-card-modern">
+                {post.image_url && (
+                  <div className="post-image-modern">
+                    <img src={post.image_url} alt={post.title} />
                   </div>
-                  <div className="post-date">
-                    <i className="bi bi-calendar3"></i>
-                    <span>{new Date(post.created_at).toLocaleDateString()}</span>
+                )}
+                <div className="post-content-modern">
+                  <h6>{post.title}</h6>
+                  <p>{post.content?.substring(0, 80)}...</p>
+                  <div className="post-meta">
+                    <div className="post-author">
+                      <i className="bi bi-person-circle"></i>
+                      <span>{post.users?.full_name?.split(' ')[0] || 'User'}</span>
+                    </div>
+                    <div className="post-date">
+                      <i className="bi bi-calendar3"></i>
+                      <span>{new Date(post.created_at).toLocaleDateString()}</span>
+                    </div>
                   </div>
                 </div>
               </div>
+            ))
+          ) : (
+            <div className="col-12 text-center py-5 text-muted">
+              No posts found
             </div>
-          ))}
+          )}
         </div>
       </div>
 
