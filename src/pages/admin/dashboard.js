@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
@@ -37,35 +37,36 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
   const [greeting, setGreeting] = useState('')
-  const [showNotifications, setShowNotifications] = useState(false)
-  
-  // Real data from Supabase
+
+  // Mobile App Data States
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalFarmers: 0,
     totalVendors: 0,
-    totalAdmins: 0,
     verifiedUsers: 0,
     pendingVerification: 0,
     totalPosts: 0,
     totalBarterListings: 0,
     totalMessages: 0,
     totalAds: 0,
+    totalComments: 0,
+    totalBarterRequests: 0,
     newUsersToday: 0,
     newPostsToday: 0,
-    activeBarterTrades: 0,
-    activeSessions: 0
+    activeBarterTrades: 0
   })
-  
+
   const [onlineUsers, setOnlineUsers] = useState([])
   const [onlineCount, setOnlineCount] = useState(0)
   const [recentUsers, setRecentUsers] = useState([])
   const [recentPosts, setRecentPosts] = useState([])
+  const [recentBarterListings, setRecentBarterListings] = useState([])
+  const [recentMessages, setRecentMessages] = useState([])
   const [userGrowthData, setUserGrowthData] = useState([])
   const [roleDistribution, setRoleDistribution] = useState({})
   const [weeklyActivity, setWeeklyActivity] = useState([])
   const [recentActivities, setRecentActivities] = useState([])
-  const [pendingAlerts, setPendingAlerts] = useState(0)
+  const [topContributors, setTopContributors] = useState([])
 
   // Set greeting based on time
   useEffect(() => {
@@ -82,11 +83,13 @@ export default function AdminDashboard() {
       fetchOnlineUsers(),
       fetchRecentUsers(),
       fetchRecentPosts(),
+      fetchRecentBarterListings(),
+      fetchRecentMessages(),
       fetchUserGrowth(),
       fetchRoleDistribution(),
       fetchWeeklyActivity(),
       fetchRecentActivities(),
-      fetchPendingAlerts()
+      fetchTopContributors()
     ])
     setLoading(false)
   }
@@ -104,49 +107,49 @@ export default function AdminDashboard() {
         totalUsersRes,
         farmersRes,
         vendorsRes,
-        adminsRes,
         verifiedRes,
         pendingRes,
         postsRes,
         barterRes,
         messagesRes,
         adsRes,
+        commentsRes,
+        barterRequestsRes,
         newUsersRes,
         newPostsRes,
-        activeBarterRes,
-        activeSessionsRes
+        activeBarterRes
       ] = await Promise.all([
         supabase.from('users').select('*', { count: 'exact', head: true }),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER']),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR']),
-        supabase.from('admin_users').select('*', { count: 'exact', head: true }),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
         supabase.from('posts').select('*', { count: 'exact', head: true }),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
         supabase.from('messages').select('*', { count: 'exact', head: true }),
         supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+        supabase.from('comments').select('*', { count: 'exact', head: true }),
+        supabase.from('barter_requests').select('*', { count: 'exact', head: true }),
         supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
         supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
-        supabase.from('barter_listings').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
-        supabase.from('user_sessions').select('*', { count: 'exact', head: true }).eq('session_status', 'ACTIVE')
+        supabase.from('barter_listings').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE')
       ])
 
       setStats({
         totalUsers: totalUsersRes.count || 0,
         totalFarmers: farmersRes.count || 0,
         totalVendors: vendorsRes.count || 0,
-        totalAdmins: adminsRes.count || 0,
         verifiedUsers: verifiedRes.count || 0,
         pendingVerification: pendingRes.count || 0,
         totalPosts: postsRes.count || 0,
         totalBarterListings: barterRes.count || 0,
         totalMessages: messagesRes.count || 0,
         totalAds: adsRes.count || 0,
+        totalComments: commentsRes.count || 0,
+        totalBarterRequests: barterRequestsRes.count || 0,
         newUsersToday: newUsersRes.count || 0,
         newPostsToday: newPostsRes.count || 0,
-        activeBarterTrades: activeBarterRes.count || 0,
-        activeSessions: activeSessionsRes.count || 0
+        activeBarterTrades: activeBarterRes.count || 0
       })
     } catch (err) {
       console.error('Error fetching stats:', err)
@@ -157,13 +160,29 @@ export default function AdminDashboard() {
     try {
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
       const { data, error, count } = await supabase
-        .from('online_users')
-        .select('user_id, user_name, user_role')
-        .gte('last_activity', fiveMinutesAgo)
+        .from('user_sessions')
+        .select('user_id, session_status, login_time')
+        .eq('session_status', 'ACTIVE')
+        .gte('login_time', fiveMinutesAgo)
 
-      if (!error) {
-        setOnlineUsers(data || [])
-        setOnlineCount(count || 0)
+      if (!error && data && data.length > 0) {
+        // Get user details for online users
+        const userIds = data.map(s => s.user_id)
+        const { data: usersData } = await supabase
+          .from('users')
+          .select('user_id, full_name, profile_image')
+          .in('user_id', userIds)
+        
+        const onlineUsersWithDetails = data.map(session => ({
+          ...session,
+          user: usersData?.find(u => u.user_id === session.user_id)
+        })).filter(item => item.user)
+        
+        setOnlineUsers(onlineUsersWithDetails)
+        setOnlineCount(onlineUsersWithDetails.length)
+      } else {
+        setOnlineUsers([])
+        setOnlineCount(0)
       }
     } catch (err) {
       console.error('Error fetching online users:', err)
@@ -186,11 +205,53 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('posts')
-        .select('post_id, title, created_at, users!left(full_name)')
+        .select('post_id, title, content, image_url, created_at, users!left(full_name, profile_image), post_categories!left(category_name)')
         .order('created_at', { ascending: false })
         .limit(5)
 
       if (!error && data) setRecentPosts(data)
+    } catch (err) { console.error('Error:', err) }
+  }
+
+  const fetchRecentBarterListings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('barter_listings')
+        .select('listing_id, title, description, quantity, unit, status, created_at, users!left(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      if (!error && data) setRecentBarterListings(data)
+    } catch (err) { console.error('Error:', err) }
+  }
+
+  const fetchRecentMessages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('message_id, message_text, sent_at, is_read, sender_id, receiver_id')
+        .order('sent_at', { ascending: false })
+        .limit(5)
+
+      if (!error && data) {
+        // Get user details for messages
+        const userIds = [...new Set(data.flatMap(m => [m.sender_id, m.receiver_id]))]
+        const { data: usersData } = await supabase
+          .from('users')
+          .select('user_id, full_name')
+          .in('user_id', userIds)
+        
+        const userMap = {}
+        usersData?.forEach(u => { userMap[u.user_id] = u.full_name })
+        
+        const messagesWithUsers = data.map(msg => ({
+          ...msg,
+          sender_name: userMap[msg.sender_id] || 'Unknown',
+          receiver_name: userMap[msg.receiver_id] || 'Unknown'
+        }))
+        
+        setRecentMessages(messagesWithUsers)
+      }
     } catch (err) { console.error('Error:', err) }
   }
 
@@ -257,7 +318,7 @@ export default function AdminDashboard() {
   const fetchRecentActivities = async () => {
     try {
       const { data } = await supabase
-        .from('admin_activity_logs')
+        .from('audit_logs')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(5)
@@ -266,14 +327,31 @@ export default function AdminDashboard() {
     } catch (err) { console.error('Error:', err) }
   }
 
-  const fetchPendingAlerts = async () => {
+  const fetchTopContributors = async () => {
     try {
-      const { count } = await supabase
-        .from('security_alerts')
-        .select('*', { count: 'exact', head: true })
-        .eq('resolved', false)
+      const { data } = await supabase
+        .from('posts')
+        .select('user_id, users!inner(full_name)')
       
-      setPendingAlerts(count || 0)
+      if (data) {
+        const userCounts = {}
+        data.forEach(post => {
+          if (post.user_id) {
+            userCounts[post.user_id] = (userCounts[post.user_id] || 0) + 1
+          }
+        })
+        
+        const sorted = Object.entries(userCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([id, count]) => ({ 
+            user_id: id, 
+            post_count: count,
+            full_name: data.find(p => p.user_id === id)?.users?.full_name || 'Unknown'
+          }))
+        
+        setTopContributors(sorted)
+      }
     } catch (err) { console.error('Error:', err) }
   }
 
@@ -293,12 +371,18 @@ export default function AdminDashboard() {
 
       const postsChannel = supabase
         .channel('posts_changes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => fetchStats())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => {
+          fetchStats()
+          fetchRecentPosts()
+        })
         .subscribe()
 
-      const onlineChannel = supabase
-        .channel('online_changes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'online_users' }, () => fetchOnlineUsers())
+      const barterChannel = supabase
+        .channel('barter_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'barter_listings' }, () => {
+          fetchStats()
+          fetchRecentBarterListings()
+        })
         .subscribe()
 
       const interval = setInterval(() => {
@@ -310,7 +394,7 @@ export default function AdminDashboard() {
       return () => {
         usersChannel.unsubscribe()
         postsChannel.unsubscribe()
-        onlineChannel.unsubscribe()
+        barterChannel.unsubscribe()
         clearInterval(interval)
       }
     }
@@ -346,7 +430,7 @@ export default function AdminDashboard() {
   const weeklyActivityChart = {
     labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     datasets: [{
-      label: 'Activities',
+      label: 'Posts Created',
       data: weeklyActivity,
       backgroundColor: 'rgba(79, 70, 229, 0.8)',
       borderRadius: 10,
@@ -416,7 +500,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <AdminLayout title="Analytics Dashboard">
+    <AdminLayout title="Farmers Platform Dashboard">
       <div className="dashboard-wrapper">
         {/* Welcome Section */}
         <div className="welcome-section">
@@ -426,7 +510,7 @@ export default function AdminDashboard() {
               Welcome back, <span className="user-name">{session?.admin?.full_name?.split(' ')[0] || 'Admin'}</span>
             </h1>
             <p className="welcome-subtitle">
-              Here's your platform performance overview for today
+              Here's your mobile app platform performance overview
             </p>
           </div>
           <div className="header-actions">
@@ -444,7 +528,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Stats Cards Grid */}
+        {/* Main Stats Cards */}
         <div className="stats-grid">
           <div className="stat-card primary">
             <div className="stat-card-icon">
@@ -489,7 +573,7 @@ export default function AdminDashboard() {
             <div className="stat-card-content">
               <span className="stat-label">Active Barter</span>
               <h2 className="stat-value">{stats.activeBarterTrades}</h2>
-              <span className="stat-change">
+              <span className="stat-change positive">
                 <i className="bi bi-graph-up"></i> Active trades
               </span>
             </div>
@@ -529,13 +613,33 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div className="stat-card-mini">
+            <div className="stat-mini-icon comments">
+              <i className="bi bi-chat"></i>
+            </div>
+            <div className="stat-mini-info">
+              <div className="stat-mini-value">{stats.totalComments.toLocaleString()}</div>
+              <div className="stat-mini-label">Comments</div>
+              <div className="stat-mini-trend">Community engagement</div>
+            </div>
+          </div>
+          <div className="stat-card-mini">
             <div className="stat-mini-icon messages">
               <i className="bi bi-chat-dots"></i>
             </div>
             <div className="stat-mini-info">
               <div className="stat-mini-value">{stats.totalMessages.toLocaleString()}</div>
               <div className="stat-mini-label">Messages</div>
-              <div className="stat-mini-trend">Total conversations</div>
+              <div className="stat-mini-trend">Private chats</div>
+            </div>
+          </div>
+          <div className="stat-card-mini">
+            <div className="stat-mini-icon barter">
+              <i className="bi bi-box-seam"></i>
+            </div>
+            <div className="stat-mini-info">
+              <div className="stat-mini-value">{stats.totalBarterListings}</div>
+              <div className="stat-mini-label">Barter Listings</div>
+              <div className="stat-mini-trend">{stats.totalBarterRequests} requests</div>
             </div>
           </div>
         </div>
@@ -544,10 +648,8 @@ export default function AdminDashboard() {
         <div className="charts-row">
           <div className="chart-card">
             <div className="chart-header">
-              <div>
-                <h5>📈 User Growth Trend</h5>
-                <p>New user registrations over the last 30 days</p>
-              </div>
+              <h5>📈 User Growth Trend</h5>
+              <p>New user registrations over the last 30 days</p>
             </div>
             <div className="chart-body">
               <Line data={userGrowthChart} options={chartOptions} />
@@ -555,10 +657,8 @@ export default function AdminDashboard() {
           </div>
           <div className="chart-card">
             <div className="chart-header">
-              <div>
-                <h5>📊 Platform Activity</h5>
-                <p>Daily posts and engagement metrics</p>
-              </div>
+              <h5>📊 Platform Activity</h5>
+              <p>Daily posts and community engagement</p>
             </div>
             <div className="chart-body">
               <Bar data={weeklyActivityChart} options={chartOptions} />
@@ -566,7 +666,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Two Column Layout */}
+        {/* User Distribution & Top Contributors */}
         <div className="two-columns">
           <div className="card-distribution">
             <div className="card-header-custom">
@@ -586,38 +686,62 @@ export default function AdminDashboard() {
               ))}
             </div>
           </div>
-          <div className="card-online">
+          <div className="card-contributors">
             <div className="card-header-custom">
-              <h5><i className="bi bi-wifi"></i> Online Users</h5>
-              <p>{onlineCount} active users right now</p>
+              <h5><i className="bi bi-trophy"></i> Top Contributors</h5>
+              <p>Most active users by post count</p>
             </div>
-            <div className="online-list">
-              {onlineUsers.length > 0 ? (
-                onlineUsers.slice(0, 5).map((user, idx) => (
-                  <div key={idx} className="online-item">
-                    <div className="online-avatar">
-                      <span>{user.user_name?.charAt(0) || 'U'}</span>
-                      <span className="online-status-dot"></span>
-                    </div>
-                    <div className="online-info">
-                      <div className="online-name">{user.user_name || 'User'}</div>
-                      <div className="online-role">{user.user_role || 'Member'}</div>
-                    </div>
-                    <i className="bi bi-check-circle-fill online-check"></i>
+            <div className="contributors-list">
+              {topContributors.map((contributor, idx) => (
+                <div key={idx} className="contributor-item">
+                  <div className="contributor-rank">#{idx + 1}</div>
+                  <div className="contributor-info">
+                    <div className="contributor-name">{contributor.full_name}</div>
+                    <div className="contributor-stats">{contributor.post_count} posts</div>
                   </div>
-                ))
-              ) : (
-                <div className="empty-online">
-                  <i className="bi bi-person-slash"></i>
-                  <p>No users online</p>
+                  <i className="bi bi-award-fill"></i>
                 </div>
-              )}
-              {onlineUsers.length > 5 && (
-                <div className="more-online">
-                  +{onlineUsers.length - 5} more users online
+              ))}
+              {topContributors.length === 0 && (
+                <div className="empty-contributors">
+                  <i className="bi bi-people"></i>
+                  <p>No contributors yet</p>
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Online Users Section */}
+        <div className="online-section">
+          <div className="online-header">
+            <h5><i className="bi bi-wifi"></i> Currently Online</h5>
+            <p>{onlineCount} active users right now</p>
+          </div>
+          <div className="online-list">
+            {onlineUsers.length > 0 ? (
+              onlineUsers.slice(0, 8).map((user, idx) => (
+                <div key={idx} className="online-item">
+                  <div className="online-avatar">
+                    {user.user?.profile_image ? (
+                      <img src={user.user.profile_image} alt={user.user.full_name} />
+                    ) : (
+                      <span>{user.user?.full_name?.charAt(0) || 'U'}</span>
+                    )}
+                    <span className="online-status-dot"></span>
+                  </div>
+                  <div className="online-info">
+                    <div className="online-name">{user.user?.full_name || 'User'}</div>
+                    <div className="online-time">Active {new Date(user.login_time).toLocaleTimeString()}</div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="empty-online">
+                <i className="bi bi-person-slash"></i>
+                <p>No users online</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -625,7 +749,7 @@ export default function AdminDashboard() {
         <div className="recent-table">
           <div className="table-header">
             <h5><i className="bi bi-people"></i> Recent Users</h5>
-            <button className="view-all" onClick={() => router.push('/admin/users')}>
+            <button className="view-all" onClick={() => router.push('/admin/mobile-users')}>
               View All <i className="bi bi-arrow-right"></i>
             </button>
           </div>
@@ -642,19 +766,17 @@ export default function AdminDashboard() {
               <tbody>
                 {recentUsers.map((user) => (
                   <tr key={user.user_id}>
-                    <td>
-                      <div className="user-cell">
-                        <div className="user-avatar-sm">
-                          {user.profile_image ? (
-                            <img src={user.profile_image} alt={user.full_name} />
-                          ) : (
-                            <span>{user.full_name?.charAt(0)}</span>
-                          )}
-                        </div>
-                        <div>
-                          <div className="user-name-sm">{user.full_name}</div>
-                          <div className="user-email">{user.email}</div>
-                        </div>
+                    <td className="user-cell">
+                      <div className="user-avatar-sm">
+                        {user.profile_image ? (
+                          <img src={user.profile_image} alt={user.full_name} />
+                        ) : (
+                          <span>{user.full_name?.charAt(0)}</span>
+                        )}
+                      </div>
+                      <div>
+                        <div className="user-name-sm">{user.full_name}</div>
+                        <div className="user-email">{user.email}</div>
                       </div>
                     </td>
                     <td>{getRoleBadge(user.roles?.role_name)}</td>
@@ -673,20 +795,86 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Recent Activity */}
-        <div className="recent-activity">
-          <div className="activity-header">
-            <h5><i className="bi bi-clock-history"></i> Recent Activity</h5>
-          </div>
-          <div className="activity-timeline">
-            {recentActivities.map((activity, idx) => (
-              <div key={idx} className="timeline-item">
-                <div className="timeline-icon">
-                  <i className="bi bi-activity"></i>
+        {/* Recent Posts & Barter Listings */}
+        <div className="two-columns">
+          <div className="recent-posts">
+            <div className="section-header">
+              <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
+              <button className="view-all" onClick={() => router.push('/admin/mobile-posts')}>
+                View All <i className="bi bi-arrow-right"></i>
+              </button>
+            </div>
+            <div className="posts-list">
+              {recentPosts.map((post) => (
+                <div key={post.post_id} className="post-item">
+                  {post.image_url && (
+                    <div className="post-image">
+                      <img src={post.image_url} alt={post.title} />
+                    </div>
+                  )}
+                  <div className="post-content">
+                    <h6>{post.title}</h6>
+                    <p>{post.content?.substring(0, 80)}...</p>
+                    <div className="post-meta">
+                      <span><i className="bi bi-person-circle"></i> {post.users?.full_name || 'Anonymous'}</span>
+                      <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="timeline-content">
-                  <p className="timeline-text">{activity.activity_description}</p>
-                  <span className="timeline-time">{new Date(activity.created_at).toLocaleString()}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="recent-barter">
+            <div className="section-header">
+              <h5><i className="bi bi-arrow-left-right"></i> Recent Barter Listings</h5>
+              <button className="view-all" onClick={() => router.push('/admin/mobile-barter')}>
+                View All <i className="bi bi-arrow-right"></i>
+              </button>
+            </div>
+            <div className="barter-list">
+              {recentBarterListings.map((listing) => (
+                <div key={listing.listing_id} className="barter-item">
+                  <div className="barter-info">
+                    <h6>{listing.title}</h6>
+                    <p>{listing.description?.substring(0, 60)}...</p>
+                    <div className="barter-meta">
+                      <span><i className="bi bi-box"></i> {listing.quantity} {listing.unit}</span>
+                      <span><i className="bi bi-person"></i> {listing.users?.full_name || 'Anonymous'}</span>
+                    </div>
+                  </div>
+                  <div className={`barter-status ${listing.status === 'ACTIVE' ? 'active' : 'inactive'}`}>
+                    {listing.status}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Messages */}
+        <div className="recent-messages">
+          <div className="section-header">
+            <h5><i className="bi bi-chat-dots"></i> Recent Messages</h5>
+            <button className="view-all" onClick={() => router.push('/admin/mobile-messages')}>
+              View All <i className="bi bi-arrow-right"></i>
+            </button>
+          </div>
+          <div className="messages-list">
+            {recentMessages.map((msg) => (
+              <div key={msg.message_id} className="message-item">
+                <div className="message-avatar">
+                  <i className="bi bi-person-circle"></i>
+                </div>
+                <div className="message-content">
+                  <div className="message-header">
+                    <span className="message-sender">{msg.sender_name}</span>
+                    <span className="message-arrow">→</span>
+                    <span className="message-receiver">{msg.receiver_name}</span>
+                    <span className="message-time">{new Date(msg.sent_at).toLocaleString()}</span>
+                  </div>
+                  <p className="message-text">{msg.message_text}</p>
+                  {!msg.is_read && <span className="message-unread">Unread</span>}
                 </div>
               </div>
             ))}
@@ -695,25 +883,23 @@ export default function AdminDashboard() {
 
         {/* Quick Actions */}
         <div className="quick-actions">
-          <div className="actions-header">
-            <h5><i className="bi bi-lightning-charge"></i> Quick Actions</h5>
-          </div>
+          <h5><i className="bi bi-lightning-charge"></i> Quick Actions</h5>
           <div className="actions-grid">
-            <button className="action-item" onClick={() => router.push('/admin/users/create')}>
-              <i className="bi bi-person-plus"></i>
-              <span>Add User</span>
+            <button className="action-item" onClick={() => router.push('/admin/mobile-users')}>
+              <i className="bi bi-people"></i>
+              <span>Manage Users</span>
             </button>
-            <button className="action-item" onClick={() => router.push('/admin/posts')}>
+            <button className="action-item" onClick={() => router.push('/admin/mobile-posts')}>
               <i className="bi bi-file-post"></i>
-              <span>Moderate Content</span>
+              <span>Moderate Posts</span>
             </button>
-            <button className="action-item" onClick={() => router.push('/admin/reports')}>
-              <i className="bi bi-flag"></i>
-              <span>View Reports</span>
+            <button className="action-item" onClick={() => router.push('/admin/mobile-barter')}>
+              <i className="bi bi-arrow-left-right"></i>
+              <span>Barter Oversight</span>
             </button>
-            <button className="action-item" onClick={() => router.push('/admin/security')}>
-              <i className="bi bi-shield-lock"></i>
-              <span>Security Check</span>
+            <button className="action-item" onClick={() => router.push('/admin/mobile-messages')}>
+              <i className="bi bi-chat-dots"></i>
+              <span>Message Monitor</span>
             </button>
           </div>
         </div>
@@ -808,7 +994,7 @@ export default function AdminDashboard() {
           transform: rotate(15deg);
         }
 
-        /* Stats Cards */
+        /* Main Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -879,18 +1065,18 @@ export default function AdminDashboard() {
         /* Secondary Stats */
         .secondary-stats {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 20px;
+          grid-template-columns: repeat(6, 1fr);
+          gap: 16px;
           margin-bottom: 28px;
         }
 
         .stat-card-mini {
           background: white;
-          border-radius: 20px;
-          padding: 16px;
+          border-radius: 18px;
+          padding: 14px;
           display: flex;
           align-items: center;
-          gap: 14px;
+          gap: 12px;
           transition: all 0.3s ease;
         }
 
@@ -900,9 +1086,9 @@ export default function AdminDashboard() {
         }
 
         .stat-mini-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 14px;
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -911,10 +1097,12 @@ export default function AdminDashboard() {
         .stat-mini-icon.verified { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .stat-mini-icon.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .stat-mini-icon.posts { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
-        .stat-mini-icon.messages { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .stat-mini-icon.comments { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .stat-mini-icon.messages { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
+        .stat-mini-icon.barter { background: rgba(236, 72, 153, 0.1); color: #ec4899; }
 
         .stat-mini-icon i {
-          font-size: 22px;
+          font-size: 20px;
         }
 
         .stat-mini-info {
@@ -922,19 +1110,19 @@ export default function AdminDashboard() {
         }
 
         .stat-mini-value {
-          font-size: 20px;
+          font-size: 18px;
           font-weight: 700;
           color: #1f2937;
         }
 
         .stat-mini-label {
-          font-size: 12px;
+          font-size: 11px;
           color: #6c757d;
         }
 
         .stat-mini-trend {
-          font-size: 11px;
-          margin-top: 4px;
+          font-size: 10px;
+          margin-top: 2px;
         }
 
         .text-success {
@@ -990,7 +1178,7 @@ export default function AdminDashboard() {
           margin-bottom: 28px;
         }
 
-        .card-distribution, .card-online {
+        .card-distribution, .card-contributors {
           background: white;
           border-radius: 24px;
           padding: 20px;
@@ -1053,10 +1241,88 @@ export default function AdminDashboard() {
           color: #1f2937;
         }
 
-        /* Online Users */
+        /* Contributors */
+        .contributors-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .contributor-item {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          padding: 12px;
+          background: #f8f9fa;
+          border-radius: 14px;
+          transition: all 0.3s ease;
+        }
+
+        .contributor-item:hover {
+          background: #e9ecef;
+        }
+
+        .contributor-rank {
+          width: 40px;
+          font-weight: 700;
+          color: #4f46e5;
+          font-size: 18px;
+        }
+
+        .contributor-info {
+          flex: 1;
+        }
+
+        .contributor-name {
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .contributor-stats {
+          font-size: 11px;
+          color: #6c757d;
+        }
+
+        .contributor-item i {
+          color: #f59e0b;
+          font-size: 20px;
+        }
+
+        .empty-contributors {
+          text-align: center;
+          padding: 40px;
+          color: #9ca3af;
+        }
+
+        /* Online Section */
+        .online-section {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          margin-bottom: 28px;
+        }
+
+        .online-header {
+          margin-bottom: 20px;
+        }
+
+        .online-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .online-header p {
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0;
+        }
+
         .online-list {
-          max-height: 280px;
-          overflow-y: auto;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 16px;
         }
 
         .online-item {
@@ -1064,12 +1330,13 @@ export default function AdminDashboard() {
           align-items: center;
           gap: 12px;
           padding: 12px;
-          border-radius: 16px;
+          background: #f8f9fa;
+          border-radius: 14px;
           transition: all 0.3s ease;
         }
 
         .online-item:hover {
-          background: #f8f9fa;
+          background: #e9ecef;
         }
 
         .online-avatar {
@@ -1083,14 +1350,21 @@ export default function AdminDashboard() {
           justify-content: center;
           color: white;
           font-weight: 600;
+          overflow: hidden;
+        }
+
+        .online-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
         }
 
         .online-status-dot {
           position: absolute;
           bottom: 2px;
           right: 2px;
-          width: 12px;
-          height: 12px;
+          width: 10px;
+          height: 10px;
           background: #10b981;
           border-radius: 50%;
           border: 2px solid white;
@@ -1104,40 +1378,21 @@ export default function AdminDashboard() {
         .online-name {
           font-weight: 600;
           color: #1f2937;
+          font-size: 14px;
         }
 
-        .online-role {
-          font-size: 11px;
+        .online-time {
+          font-size: 10px;
           color: #6c757d;
-        }
-
-        .online-check {
-          color: #10b981;
-          font-size: 18px;
-        }
-
-        .more-online {
-          text-align: center;
-          padding: 12px;
-          font-size: 12px;
-          color: #6c757d;
-          border-top: 1px solid #e9ecef;
-          margin-top: 8px;
         }
 
         .empty-online {
           text-align: center;
           padding: 40px;
-          color: #6c757d;
+          color: #9ca3af;
         }
 
-        .empty-online i {
-          font-size: 48px;
-          margin-bottom: 12px;
-          display: block;
-        }
-
-        /* Recent Users Table */
+        /* Recent Tables */
         .recent-table {
           background: white;
           border-radius: 24px;
@@ -1145,21 +1400,21 @@ export default function AdminDashboard() {
           margin-bottom: 28px;
         }
 
-        .table-header {
+        .table-header, .section-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           margin-bottom: 20px;
         }
 
-        .table-header h5 {
+        .table-header h5, .section-header h5 {
           font-size: 16px;
           font-weight: 600;
           margin: 0;
           color: #1f2937;
         }
 
-        .table-header h5 i {
+        .table-header h5 i, .section-header h5 i {
           margin-right: 8px;
           color: #4f46e5;
         }
@@ -1216,12 +1471,12 @@ export default function AdminDashboard() {
           justify-content: center;
           color: white;
           font-weight: 600;
+          overflow: hidden;
         }
 
         .user-avatar-sm img {
           width: 100%;
           height: 100%;
-          border-radius: 50%;
           object-fit: cover;
         }
 
@@ -1275,66 +1530,212 @@ export default function AdminDashboard() {
         .badge-vendor { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
         .badge-pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
 
-        /* Recent Activity */
-        .recent-activity {
+        /* Recent Posts & Barter */
+        .recent-posts, .recent-barter {
           background: white;
           border-radius: 24px;
           padding: 20px;
           margin-bottom: 28px;
         }
 
-        .activity-header {
-          margin-bottom: 20px;
-        }
-
-        .activity-header h5 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0;
-          color: #1f2937;
-        }
-
-        .activity-header h5 i {
-          margin-right: 8px;
-          color: #4f46e5;
-        }
-
-        .activity-timeline {
-          max-height: 250px;
-          overflow-y: auto;
-        }
-
-        .timeline-item {
+        .posts-list, .barter-list {
           display: flex;
-          gap: 12px;
-          padding: 12px 0;
-          border-bottom: 1px solid #e9ecef;
+          flex-direction: column;
+          gap: 16px;
         }
 
-        .timeline-icon {
-          width: 36px;
-          height: 36px;
+        .post-item {
+          display: flex;
+          gap: 16px;
+          padding: 12px;
           background: #f8f9fa;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #4f46e5;
+          border-radius: 16px;
+          transition: all 0.3s ease;
         }
 
-        .timeline-content {
+        .post-item:hover {
+          background: #e9ecef;
+        }
+
+        .post-image {
+          width: 80px;
+          height: 80px;
+          border-radius: 12px;
+          overflow: hidden;
+          flex-shrink: 0;
+        }
+
+        .post-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .post-content {
           flex: 1;
         }
 
-        .timeline-text {
+        .post-content h6 {
           margin: 0 0 4px 0;
+          font-size: 14px;
+          font-weight: 600;
+        }
+
+        .post-content p {
+          margin: 0 0 8px 0;
+          font-size: 12px;
+          color: #6c757d;
+        }
+
+        .post-meta {
+          display: flex;
+          gap: 16px;
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
+        .post-meta i {
+          margin-right: 4px;
+        }
+
+        .barter-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px;
+          background: #f8f9fa;
+          border-radius: 16px;
+          transition: all 0.3s ease;
+        }
+
+        .barter-item:hover {
+          background: #e9ecef;
+        }
+
+        .barter-info h6 {
+          margin: 0 0 4px 0;
+          font-size: 14px;
+          font-weight: 600;
+        }
+
+        .barter-info p {
+          margin: 0 0 8px 0;
+          font-size: 12px;
+          color: #6c757d;
+        }
+
+        .barter-meta {
+          display: flex;
+          gap: 16px;
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
+        .barter-status {
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+
+        .barter-status.active {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .barter-status.inactive {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+
+        /* Recent Messages */
+        .recent-messages {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          margin-bottom: 28px;
+        }
+
+        .messages-list {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .message-item {
+          display: flex;
+          gap: 14px;
+          padding: 12px;
+          background: #f8f9fa;
+          border-radius: 16px;
+          transition: all 0.3s ease;
+        }
+
+        .message-item:hover {
+          background: #e9ecef;
+        }
+
+        .message-avatar {
+          width: 44px;
+          height: 44px;
+          background: #e9ecef;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .message-avatar i {
+          font-size: 24px;
+          color: #6c757d;
+        }
+
+        .message-content {
+          flex: 1;
+        }
+
+        .message-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 6px;
+        }
+
+        .message-sender {
+          font-weight: 600;
           font-size: 13px;
           color: #1f2937;
         }
 
-        .timeline-time {
-          font-size: 11px;
+        .message-arrow {
+          color: #9ca3af;
+        }
+
+        .message-receiver {
+          font-size: 13px;
           color: #6c757d;
+        }
+
+        .message-time {
+          font-size: 10px;
+          color: #9ca3af;
+          margin-left: auto;
+        }
+
+        .message-text {
+          margin: 0 0 6px 0;
+          font-size: 12px;
+          color: #4b5563;
+        }
+
+        .message-unread {
+          display: inline-block;
+          padding: 2px 8px;
+          background: #ef4444;
+          color: white;
+          border-radius: 10px;
+          font-size: 9px;
         }
 
         /* Quick Actions */
@@ -1344,18 +1745,13 @@ export default function AdminDashboard() {
           padding: 20px;
         }
 
-        .actions-header {
-          margin-bottom: 20px;
-        }
-
-        .actions-header h5 {
+        .quick-actions h5 {
+          margin: 0 0 20px 0;
           font-size: 16px;
           font-weight: 600;
-          margin: 0;
-          color: #1f2937;
         }
 
-        .actions-header h5 i {
+        .quick-actions h5 i {
           margin-right: 8px;
           color: #4f46e5;
         }
@@ -1391,7 +1787,7 @@ export default function AdminDashboard() {
         }
 
         .action-item span {
-          font-size: 13px;
+          font-size: 12px;
           font-weight: 500;
         }
 
@@ -1411,11 +1807,17 @@ export default function AdminDashboard() {
 
         /* Responsive */
         @media (max-width: 1200px) {
-          .stats-grid, .secondary-stats {
+          .stats-grid {
             grid-template-columns: repeat(2, 1fr);
+          }
+          .secondary-stats {
+            grid-template-columns: repeat(3, 1fr);
           }
           .charts-row, .two-columns {
             grid-template-columns: 1fr;
+          }
+          .online-list {
+            grid-template-columns: repeat(2, 1fr);
           }
           .actions-grid {
             grid-template-columns: repeat(2, 1fr);
@@ -1430,8 +1832,23 @@ export default function AdminDashboard() {
             flex-direction: column;
             align-items: flex-start;
           }
+          .online-list {
+            grid-template-columns: 1fr;
+          }
           .actions-grid {
             grid-template-columns: 1fr;
+          }
+          .post-item {
+            flex-direction: column;
+          }
+          .post-image {
+            width: 100%;
+            height: 120px;
+          }
+          .barter-item {
+            flex-direction: column;
+            gap: 12px;
+            text-align: center;
           }
         }
       `}</style>
