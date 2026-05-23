@@ -32,16 +32,29 @@ export default function CreateUser() {
       
       console.log('Fetching roles from admin_roles...')
       
-      // Simple direct query
+      // Try direct query
       const { data, error } = await supabase
         .from('admin_roles')
         .select('role_id, role_name, description')
 
-      console.log('Fetched data:', data)
-      console.log('Error:', error)
+      console.log('Query result:', { data, error })
 
       if (error) {
         console.error('Supabase error:', error)
+        
+        // If RLS error, try using the API endpoint as fallback
+        if (error.message.includes('row-level security') || error.code === '42501') {
+          console.log('RLS policy blocking, trying API fallback...')
+          const response = await fetch('/api/get-roles')
+          const apiData = await response.json()
+          
+          if (apiData.success && apiData.roles) {
+            setRoles(apiData.roles)
+            setRoleError(null)
+            return
+          }
+        }
+        
         setRoleError(`Database error: ${error.message}`)
         setRoles([])
         return
@@ -53,15 +66,8 @@ export default function CreateUser() {
         return
       }
 
-      // Map the data to ensure correct structure
-      const mappedRoles = data.map(role => ({
-        role_id: role.role_id,
-        role_name: role.role_name,
-        description: role.description
-      }))
-
-      console.log('Mapped roles:', mappedRoles)
-      setRoles(mappedRoles)
+      console.log('Roles fetched successfully:', data)
+      setRoles(data)
       
     } catch (err) {
       console.error('Error in fetchRoles:', err)
@@ -133,7 +139,6 @@ export default function CreateUser() {
         updated_at: new Date().toISOString()
       }
 
-      // Add role_id if selected
       if (formData.role_id && formData.role_id !== '') {
         adminData.role_id = formData.role_id
       }
@@ -160,7 +165,7 @@ export default function CreateUser() {
       <AdminLayout title="Create New User">
         <div className="d-flex justify-content-center py-5">
           <div className="text-center">
-            <div className="spinner-border text-primary mb-3"></div>
+            <div className="spinner-border text-primary mb-3" style={{ width: '3rem', height: '3rem' }}></div>
             <p>Loading roles from database...</p>
           </div>
         </div>
@@ -183,15 +188,18 @@ export default function CreateUser() {
           </div>
         </div>
         <div className="card-body">
-          {/* Debug Info - Shows what's in the database */}
-          <div className="alert alert-info small mb-3">
-            <strong>Debug Info:</strong> Found {roles.length} roles in admin_roles table
+          {/* Debug Info */}
+          <div className="alert alert-secondary small mb-3">
+            <strong>Database Status:</strong> Found {roles.length} roles in admin_roles table
             {roles.length > 0 && (
-              <ul className="mb-0 mt-2">
-                {roles.map(role => (
-                  <li key={role.role_id}>{role.role_name} (ID: {role.role_id})</li>
-                ))}
-              </ul>
+              <div className="mt-2">
+                <strong>Available Roles:</strong>
+                <ul className="mb-0 mt-1">
+                  {roles.map(role => (
+                    <li key={role.role_id}>{role.role_name} - {role.description}</li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
 
@@ -200,6 +208,9 @@ export default function CreateUser() {
             <div className="alert alert-warning">
               <i className="bi bi-exclamation-triangle-fill me-2"></i>
               {roleError}
+              <button className="btn btn-sm btn-primary ms-3" onClick={fetchRoles}>
+                <i className="bi bi-arrow-repeat me-1"></i>Retry
+              </button>
             </div>
           )}
 
@@ -261,6 +272,7 @@ export default function CreateUser() {
                   className={`form-select ${errors.role_id ? 'is-invalid' : ''}`}
                   value={formData.role_id}
                   onChange={(e) => setFormData({...formData, role_id: e.target.value})}
+                  disabled={roles.length === 0}
                 >
                   <option value="">Select a Role</option>
                   {roles.map(role => (
