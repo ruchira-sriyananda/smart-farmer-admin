@@ -648,7 +648,7 @@ export default function AdminDashboard() {
               {recentUsers.length > 0 ? (
                 recentUsers.map((user) => (
                   <tr key={user.user_id}>
-                    <tr>
+                    <td>
                       <div className="user-cell">
                         <div className="user-avatar-sm">
                           {user.profile_image ? (
