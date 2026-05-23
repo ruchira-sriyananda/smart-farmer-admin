@@ -18,15 +18,16 @@ export default function CreateUser() {
   })
   const [errors, setErrors] = useState({})
 
-  // Fetch roles on component mount
+  // Fetch roles from admin_roles table
   useEffect(() => {
     fetchRoles()
   }, [])
 
   const fetchRoles = async () => {
     try {
+      // Fetch from admin_roles table (not roles table)
       const { data, error } = await supabase
-        .from('roles')
+        .from('admin_roles')
         .select('role_id, role_name, description')
         .order('role_name')
 
@@ -35,7 +36,7 @@ export default function CreateUser() {
         return
       }
 
-      console.log('Roles fetched:', data) // Debug log
+      console.log('Roles fetched from admin_roles:', data)
       setRoles(data || [])
     } catch (err) {
       console.error('Error:', err)
@@ -89,8 +90,7 @@ export default function CreateUser() {
         password: formData.password,
         options: {
           data: { 
-            full_name: formData.full_name,
-            role: formData.role_id
+            full_name: formData.full_name
           }
         }
       })
@@ -126,13 +126,14 @@ export default function CreateUser() {
 
       router.push('/admin/users')
     } catch (err) {
+      console.error('Error:', err)
       setErrors({ submit: err.message })
     } finally {
       setLoading(false)
     }
   }
 
-  if (loading && roles.length === 0) {
+  if (loading) {
     return (
       <AdminLayout title="Create New User">
         <div className="d-flex justify-content-center py-5">
@@ -225,7 +226,7 @@ export default function CreateUser() {
                 {errors.role_id && <div className="invalid-feedback">{errors.role_id}</div>}
                 {roles.length === 0 && (
                   <div className="text-warning small mt-1">
-                    No roles found. Please add roles to the database first.
+                    No roles found. Please add roles to admin_roles table first.
                   </div>
                 )}
               </div>

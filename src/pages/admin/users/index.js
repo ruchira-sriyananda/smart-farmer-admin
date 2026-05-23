@@ -17,29 +17,29 @@ export default function UserManagement() {
     fetchUsers()
   }, [])
 
-  const fetchUsers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('admin_users')
-        .select(`
-          *,
-          admin_roles (
-            role_name,
-            description
-          )
-        `)
-        .order('created_at', { ascending: false })
+  // Update the fetchUsers function to use admin_roles
+const fetchUsers = async () => {
+  try {
+    // Fetch users with role information from admin_roles
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select(`
+        *,
+        admin_roles!admin_users_role_id_fkey (
+          role_id,
+          role_name,
+          description
+        )
+      `)
+      .order('created_at', { ascending: false })
 
-      if (!error && data) {
-        setUsers(data)
-      }
-    } catch (err) {
-      console.error('Error fetching users:', err)
-    } finally {
-      setLoading(false)
+    if (!error && data) {
+      setUsers(data)
     }
+  } catch (err) {
+    console.error('Error fetching users:', err)
   }
-
+}
   const handleStatusToggle = async (userId, currentStatus) => {
     const action = currentStatus ? 'deactivate' : 'activate'
     if (confirm(`Are you sure you want to ${action} this user?`)) {
