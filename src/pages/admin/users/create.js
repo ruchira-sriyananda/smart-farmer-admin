@@ -12,7 +12,6 @@ export default function CreateUser() {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [passwordStrength, setPasswordStrength] = useState(0)
-  const [rateLimitError, setRateLimitError] = useState(false)
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -153,34 +152,45 @@ export default function CreateUser() {
     return Object.keys(newErrors).length === 0
   }
 
-  // Function to create user with retry on rate limit
-  const createUserWithRetry = async (email, password, userData, retryCount = 0) => {
+  // Function to create user with better error handling
+  const createUser = async () => {
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: email,
-        password: password,
+      // First, check if user already exists in auth
+      const { data: existingUsers } = await supabase
+        .from('admin_users')
+        .select('email')
+        .eq('email', formData.email)
+        .maybeSingle()
+
+      if (existingUsers) {
+        throw new Error('A user with this email already exists')
+      }
+
+      // Create auth user with email confirmation disabled
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
         options: {
-          data: { full_name: userData.full_name },
-          emailRedirectTo: undefined,
+          data: { 
+            full_name: formData.full_name
+          },
+          emailRedirectTo: undefined, // No redirect needed
         }
       })
 
-      if (error) {
-        // Check if it's a rate limit error
-        if (error.message.includes('rate limit') || error.status === 429) {
-          if (retryCount < 3) {
-            // Wait longer before retry (exponential backoff)
-            const waitTime = Math.pow(2, retryCount) * 1000
-            setRateLimitError(true)
-            await new Promise(resolve => setTimeout(resolve, waitTime))
-            return createUserWithRetry(email, password, userData, retryCount + 1)
-          }
-          throw new Error('Email rate limit exceeded. Please wait a few minutes before trying again.')
+      if (authError) {
+        // Handle rate limit specifically
+        if (authError.message.includes('rate limit') || authError.status === 429) {
+          throw new Error('Too many signup attempts. Please wait 1 minute before trying again.')
         }
-        throw error
+        throw authError
       }
 
-      return data
+      if (!authData.user) {
+        throw new Error('Failed to create user account')
+      }
+
+      return authData
     } catch (err) {
       throw err
     }
@@ -190,20 +200,19 @@ export default function CreateUser() {
     e.preventDefault()
     
     if (!validateForm()) {
-      const firstError = document.querySelector('.is-invalid')
+      const firstError = document.querySelector('.error')
       if (firstError) firstError.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
     
     setLoading(true)
-    setRateLimitError(false)
+    setErrors({})
 
     try {
-      // Create auth user with retry logic
-      const authData = await createUserWithRetry(formData.email, formData.password, {
-        full_name: formData.full_name
-      })
+      // Create the user
+      const authData = await createUser()
 
+      // Prepare admin user data
       const adminData = {
         admin_id: authData.user.id,
         full_name: formData.full_name,
@@ -219,17 +228,24 @@ export default function CreateUser() {
         adminData.role_id = formData.role_id
       }
 
+      // Add to admin_users
       const { error: adminError } = await supabase
         .from('admin_users')
         .insert(adminData)
 
       if (adminError) throw adminError
 
+      // Success - redirect to users list
       router.push('/admin/users')
+      
     } catch (err) {
       console.error('Error:', err)
-      if (err.message.includes('rate limit')) {
-        setErrors({ submit: 'Email rate limit exceeded. Please wait a few minutes before creating another user.' })
+      
+      // User-friendly error messages
+      if (err.message.includes('rate limit') || err.message.includes('Too many signup')) {
+        setErrors({ submit: 'Email rate limit exceeded. Please wait 1-2 minutes before creating another user.' })
+      } else if (err.message.includes('already exists')) {
+        setErrors({ submit: 'A user with this email already exists.' })
       } else {
         setErrors({ submit: err.message })
       }
@@ -299,17 +315,6 @@ export default function CreateUser() {
   return (
     <AdminLayout title="Create New Administrator">
       <div className="create-user-container">
-        {/* Rate Limit Warning */}
-        {rateLimitError && (
-          <div className="alert-rate-limit">
-            <i className="bi bi-hourglass-split"></i>
-            <div>
-              <strong>Rate Limit Active</strong>
-              <p>Please wait a moment before creating another user. The system is automatically retrying...</p>
-            </div>
-          </div>
-        )}
-
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -327,6 +332,15 @@ export default function CreateUser() {
         </div>
 
         <div className="form-card">
+          {/* Rate Limit Info Banner */}
+          <div className="info-banner">
+            <i className="bi bi-info-circle-fill"></i>
+            <div>
+              <strong>Note about user creation:</strong>
+              <p>If you encounter rate limit errors, please wait 1-2 minutes between creating new users.</p>
+            </div>
+          </div>
+
           {roleError && (
             <div className="alert-warning-card">
               <i className="bi bi-exclamation-triangle-fill"></i>
@@ -351,8 +365,8 @@ export default function CreateUser() {
           )}
 
           {!roleError && roles.length > 0 && (
-            <div className="info-card">
-              <i className="bi bi-shield-check"></i>
+            <div className="success-card">
+              <i className="bi bi-check-circle-fill"></i>
               <div>
                 <strong>{roles.length} Roles Available</strong>
                 <p>Select a role to assign permissions to this administrator</p>
@@ -362,7 +376,6 @@ export default function CreateUser() {
 
           <form onSubmit={handleSubmit}>
             <div className="form-grid">
-              {/* Full Name Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-person"></i>
@@ -388,7 +401,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Email Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-envelope"></i>
@@ -414,7 +426,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Password Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-lock"></i>
@@ -457,7 +468,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Confirm Password Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-shield-lock"></i>
@@ -492,7 +502,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Role Selection */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-badge"></i>
@@ -515,53 +524,45 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Active Status */}
               <div className="form-group">
-                <label className="form-label">
-                  <i className="bi bi-check-circle"></i>
-                  Account Status
-                </label>
-                <div className="toggle-wrapper">
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      name="is_active"
-                      checked={formData.is_active}
-                      onChange={handleChange}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
-                  <span className="toggle-label">
-                    {formData.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Super Admin Option */}
-            <div className="super-admin-card">
-              <div className="super-admin-checkbox">
-                <label className="checkbox-wrapper">
+                <div className="form-check form-switch mt-4 pt-2">
                   <input
                     type="checkbox"
+                    className="form-check-input"
+                    id="isActive"
+                    name="is_active"
+                    checked={formData.is_active}
+                    onChange={handleChange}
+                  />
+                  <label className="form-check-label" htmlFor="isActive">
+                    Active Account
+                  </label>
+                </div>
+              </div>
+
+              <div className="form-group full-width">
+                <div className="form-check">
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    id="isSuperAdmin"
                     name="is_super_admin"
                     checked={formData.is_super_admin}
                     onChange={handleChange}
                   />
-                  <span className="checkbox-custom">
-                    <i className="bi bi-star-fill"></i>
-                  </span>
-                  <span className="checkbox-label">
-                    <strong>Super Administrator</strong>
-                    <span className="checkbox-description">
-                      Grants unrestricted access to all system features and settings
-                    </span>
-                  </span>
-                </label>
+                  <label className="form-check-label" htmlFor="isSuperAdmin">
+                    <i className="bi bi-star-fill text-warning me-1"></i>
+                    Super Admin (Full system access)
+                  </label>
+                  <div className="text-muted small mt-1">
+                    Super admins have unrestricted access to all features and settings.
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Action Buttons */}
+            <hr className="my-4" />
+
             <div className="action-buttons">
               <button type="button" className="btn-cancel" onClick={() => router.push('/admin/users')}>
                 <i className="bi bi-x-lg"></i>
@@ -591,24 +592,6 @@ export default function CreateUser() {
           margin: 0 auto;
         }
 
-        /* Rate Limit Alert */
-        .alert-rate-limit {
-          background: #fff3cd;
-          border-left: 4px solid #ffc107;
-          padding: 16px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 24px;
-        }
-
-        .alert-rate-limit i {
-          font-size: 24px;
-          color: #ffc107;
-        }
-
-        /* Page Header */
         .page-header {
           display: flex;
           justify-content: space-between;
@@ -637,10 +620,6 @@ export default function CreateUser() {
         .header-icon i {
           font-size: 28px;
           color: white;
-        }
-
-        .header-text {
-          flex: 1;
         }
 
         .header-title {
@@ -675,7 +654,6 @@ export default function CreateUser() {
           transform: translateX(-2px);
         }
 
-        /* Form Card */
         .form-card {
           background: white;
           border-radius: 28px;
@@ -683,7 +661,35 @@ export default function CreateUser() {
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
         }
 
-        /* Alert Cards */
+        .info-banner {
+          background: #e7f1ff;
+          border-left: 4px solid #0d6efd;
+          padding: 14px 16px;
+          border-radius: 12px;
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .info-banner i {
+          font-size: 20px;
+          color: #0d6efd;
+          margin-top: 2px;
+        }
+
+        .info-banner strong {
+          display: block;
+          font-size: 13px;
+          margin-bottom: 2px;
+        }
+
+        .info-banner p {
+          margin: 0;
+          font-size: 12px;
+          color: #4b5563;
+        }
+
         .alert-warning-card {
           background: #fff3cd;
           border-left: 4px solid #ffc107;
@@ -741,9 +747,9 @@ export default function CreateUser() {
           color: #dc3545;
         }
 
-        .info-card {
-          background: #e7f1ff;
-          border-left: 4px solid #0d6efd;
+        .success-card {
+          background: #d1fae5;
+          border-left: 4px solid #10b981;
           padding: 16px;
           border-radius: 12px;
           display: flex;
@@ -752,17 +758,20 @@ export default function CreateUser() {
           margin-bottom: 24px;
         }
 
-        .info-card i {
+        .success-card i {
           font-size: 24px;
-          color: #0d6efd;
+          color: #10b981;
         }
 
-        /* Form Grid */
         .form-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 24px;
           margin-bottom: 24px;
+        }
+
+        .full-width {
+          grid-column: span 2;
         }
 
         .form-group {
@@ -856,6 +865,12 @@ export default function CreateUser() {
           color: #6c757d;
         }
 
+        .bg-secondary { background: #6c757d; }
+        .bg-danger { background: #dc3545; }
+        .bg-warning { background: #ffc107; }
+        .bg-info { background: #0dcaf0; }
+        .bg-success { background: #28a745; }
+
         .error-message {
           margin-top: 6px;
           font-size: 12px;
@@ -865,124 +880,23 @@ export default function CreateUser() {
           gap: 4px;
         }
 
-        .toggle-wrapper {
+        .form-check {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
         }
 
-        .toggle-switch {
-          position: relative;
-          display: inline-block;
-          width: 50px;
-          height: 26px;
+        .form-check-input {
+          width: 18px;
+          height: 18px;
+          margin: 0;
         }
 
-        .toggle-switch input {
-          opacity: 0;
-          width: 0;
-          height: 0;
-        }
-
-        .toggle-slider {
-          position: absolute;
-          cursor: pointer;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background-color: #e9ecef;
-          transition: 0.3s;
-          border-radius: 26px;
-        }
-
-        .toggle-slider:before {
-          position: absolute;
-          content: "";
-          height: 20px;
-          width: 20px;
-          left: 3px;
-          bottom: 3px;
-          background-color: white;
-          transition: 0.3s;
-          border-radius: 50%;
-        }
-
-        .toggle-switch input:checked + .toggle-slider {
-          background-color: #10b981;
-        }
-
-        .toggle-switch input:checked + .toggle-slider:before {
-          transform: translateX(24px);
-        }
-
-        .toggle-label {
-          font-size: 14px;
-          font-weight: 500;
-          color: #374151;
-        }
-
-        /* Super Admin Card */
-        .super-admin-card {
-          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-          border-radius: 16px;
-          padding: 20px;
-          margin-bottom: 32px;
-        }
-
-        .checkbox-wrapper {
-          display: flex;
-          align-items: flex-start;
-          gap: 12px;
-          cursor: pointer;
-        }
-
-        .checkbox-wrapper input {
-          position: absolute;
-          opacity: 0;
-          cursor: pointer;
-        }
-
-        .checkbox-custom {
-          width: 24px;
-          height: 24px;
-          background: white;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.3s ease;
-        }
-
-        .checkbox-wrapper input:checked + .checkbox-custom {
-          background: #f59e0b;
-          color: white;
-        }
-
-        .checkbox-label {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .checkbox-label strong {
-          color: #92400e;
-          font-size: 14px;
-        }
-
-        .checkbox-description {
-          font-size: 12px;
-          color: #b45309;
-        }
-
-        /* Action Buttons */
         .action-buttons {
           display: flex;
           justify-content: flex-end;
           gap: 16px;
-          padding-top: 24px;
-          border-top: 1px solid #e9ecef;
+          margin-top: 24px;
         }
 
         .btn-cancel {
@@ -1026,13 +940,13 @@ export default function CreateUser() {
           .form-grid {
             grid-template-columns: 1fr;
           }
+          
+          .full-width {
+            grid-column: span 1;
+          }
 
           .page-header {
             flex-direction: column;
-          }
-
-          .header-content {
-            width: 100%;
           }
 
           .action-buttons {
