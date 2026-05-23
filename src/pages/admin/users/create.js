@@ -12,6 +12,7 @@ export default function CreateUser() {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [passwordStrength, setPasswordStrength] = useState(0)
+  const [rateLimitError, setRateLimitError] = useState(false)
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -152,26 +153,56 @@ export default function CreateUser() {
     return Object.keys(newErrors).length === 0
   }
 
+  // Function to create user with retry on rate limit
+  const createUserWithRetry = async (email, password, userData, retryCount = 0) => {
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: { full_name: userData.full_name },
+          emailRedirectTo: undefined,
+        }
+      })
+
+      if (error) {
+        // Check if it's a rate limit error
+        if (error.message.includes('rate limit') || error.status === 429) {
+          if (retryCount < 3) {
+            // Wait longer before retry (exponential backoff)
+            const waitTime = Math.pow(2, retryCount) * 1000
+            setRateLimitError(true)
+            await new Promise(resolve => setTimeout(resolve, waitTime))
+            return createUserWithRetry(email, password, userData, retryCount + 1)
+          }
+          throw new Error('Email rate limit exceeded. Please wait a few minutes before trying again.')
+        }
+        throw error
+      }
+
+      return data
+    } catch (err) {
+      throw err
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     
     if (!validateForm()) {
-      // Scroll to first error
       const firstError = document.querySelector('.is-invalid')
       if (firstError) firstError.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
     
     setLoading(true)
+    setRateLimitError(false)
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: { data: { full_name: formData.full_name } }
+      // Create auth user with retry logic
+      const authData = await createUserWithRetry(formData.email, formData.password, {
+        full_name: formData.full_name
       })
-
-      if (authError) throw authError
 
       const adminData = {
         admin_id: authData.user.id,
@@ -196,7 +227,12 @@ export default function CreateUser() {
 
       router.push('/admin/users')
     } catch (err) {
-      setErrors({ submit: err.message })
+      console.error('Error:', err)
+      if (err.message.includes('rate limit')) {
+        setErrors({ submit: 'Email rate limit exceeded. Please wait a few minutes before creating another user.' })
+      } else {
+        setErrors({ submit: err.message })
+      }
     } finally {
       setLoading(false)
     }
@@ -263,7 +299,17 @@ export default function CreateUser() {
   return (
     <AdminLayout title="Create New Administrator">
       <div className="create-user-container">
-        {/* Header Section */}
+        {/* Rate Limit Warning */}
+        {rateLimitError && (
+          <div className="alert-rate-limit">
+            <i className="bi bi-hourglass-split"></i>
+            <div>
+              <strong>Rate Limit Active</strong>
+              <p>Please wait a moment before creating another user. The system is automatically retrying...</p>
+            </div>
+          </div>
+        )}
+
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -280,9 +326,7 @@ export default function CreateUser() {
           </button>
         </div>
 
-        {/* Main Form Card */}
         <div className="form-card">
-          {/* Success Message */}
           {roleError && (
             <div className="alert-warning-card">
               <i className="bi bi-exclamation-triangle-fill"></i>
@@ -296,7 +340,6 @@ export default function CreateUser() {
             </div>
           )}
 
-          {/* Submit Error */}
           {errors.submit && (
             <div className="alert-error-card">
               <i className="bi bi-x-circle-fill"></i>
@@ -307,7 +350,6 @@ export default function CreateUser() {
             </div>
           )}
 
-          {/* Roles Info */}
           {!roleError && roles.length > 0 && (
             <div className="info-card">
               <i className="bi bi-shield-check"></i>
@@ -547,6 +589,23 @@ export default function CreateUser() {
         .create-user-container {
           max-width: 900px;
           margin: 0 auto;
+        }
+
+        /* Rate Limit Alert */
+        .alert-rate-limit {
+          background: #fff3cd;
+          border-left: 4px solid #ffc107;
+          padding: 16px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .alert-rate-limit i {
+          font-size: 24px;
+          color: #ffc107;
         }
 
         /* Page Header */
@@ -963,7 +1022,6 @@ export default function CreateUser() {
           cursor: not-allowed;
         }
 
-        /* Responsive */
         @media (max-width: 768px) {
           .form-grid {
             grid-template-columns: 1fr;
