@@ -18,6 +18,7 @@ export default function CreateUser() {
   })
   const [errors, setErrors] = useState({})
 
+  // Fetch roles on component mount
   useEffect(() => {
     fetchRoles()
   }, [])
@@ -25,14 +26,19 @@ export default function CreateUser() {
   const fetchRoles = async () => {
     try {
       const { data, error } = await supabase
-        .from('admin_roles')
+        .from('roles')
         .select('role_id, role_name, description')
+        .order('role_name')
 
-      if (!error && data) {
-        setRoles(data)
+      if (error) {
+        console.error('Error fetching roles:', error)
+        return
       }
+
+      console.log('Roles fetched:', data) // Debug log
+      setRoles(data || [])
     } catch (err) {
-      console.error('Error fetching roles:', err)
+      console.error('Error:', err)
     }
   }
 
@@ -57,6 +63,10 @@ export default function CreateUser() {
     
     if (formData.password !== formData.confirm_password) {
       newErrors.confirm_password = 'Passwords do not match'
+    }
+    
+    if (!formData.role_id) {
+      newErrors.role_id = 'Please select a role'
     }
     
     setErrors(newErrors)
@@ -91,6 +101,7 @@ export default function CreateUser() {
       const { error: adminError } = await supabase
         .from('admin_users')
         .insert({
+          admin_id: authData.user.id,
           full_name: formData.full_name,
           email: formData.email,
           password_hash: 'managed_by_auth',
@@ -109,8 +120,7 @@ export default function CreateUser() {
         .insert({
           admin_id: session?.admin?.admin_id,
           activity_type: 'USER_MANAGEMENT',
-          activity_description: `Created new user: ${formData.email}`,
-          ip_address: await getClientIP(),
+          activity_description: `Created new admin user: ${formData.email}`,
           created_at: new Date().toISOString()
         })
 
@@ -122,18 +132,18 @@ export default function CreateUser() {
     }
   }
 
-  const getClientIP = async () => {
-    try {
-      const response = await fetch('https://api.ipify.org?format=json')
-      const data = await response.json()
-      return data.ip
-    } catch {
-      return 'unknown'
-    }
+  if (loading && roles.length === 0) {
+    return (
+      <AdminLayout title="Create New User">
+        <div className="d-flex justify-content-center py-5">
+          <div className="spinner-border text-primary"></div>
+        </div>
+      </AdminLayout>
+    )
   }
 
   return (
-    <AdminLayout title="Create New User">
+    <AdminLayout title="Create New Admin User">
       <div className="card border-0 shadow-sm">
         <div className="card-header bg-white border-0 pt-4">
           <div className="d-flex justify-content-between align-items-center">
@@ -199,19 +209,25 @@ export default function CreateUser() {
               </div>
 
               <div className="col-md-6 mb-3">
-                <label className="form-label fw-semibold">Role</label>
+                <label className="form-label fw-semibold">Role *</label>
                 <select 
-                  className="form-select"
+                  className={`form-select ${errors.role_id ? 'is-invalid' : ''}`}
                   value={formData.role_id}
                   onChange={(e) => setFormData({...formData, role_id: e.target.value})}
                 >
-                  <option value="">Select Role</option>
+                  <option value="">Select a Role</option>
                   {roles.map(role => (
-                    <option key={role.role_id} value={role.role_name}>
+                    <option key={role.role_id} value={role.role_id}>
                       {role.role_name} - {role.description}
                     </option>
                   ))}
                 </select>
+                {errors.role_id && <div className="invalid-feedback">{errors.role_id}</div>}
+                {roles.length === 0 && (
+                  <div className="text-warning small mt-1">
+                    No roles found. Please add roles to the database first.
+                  </div>
+                )}
               </div>
 
               <div className="col-md-6 mb-3">
