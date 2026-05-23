@@ -37,6 +37,8 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
   const [greeting, setGreeting] = useState('')
+  const [userRole, setUserRole] = useState('')
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
 
   // Data States
   const [stats, setStats] = useState({
@@ -47,9 +49,7 @@ export default function AdminDashboard() {
     pendingVerification: 0,
     totalPosts: 0,
     totalBarterListings: 0,
-    totalMessages: 0,
     totalAds: 0,
-    totalComments: 0,
     newUsersToday: 0,
     newPostsToday: 0,
     activeBarterTrades: 0
@@ -65,6 +65,50 @@ export default function AdminDashboard() {
   const [weeklyActivity, setWeeklyActivity] = useState([0, 0, 0, 0, 0, 0, 0])
   const [topContributors, setTopContributors] = useState([])
 
+  // Role-based permissions
+  const permissions = {
+    SUPER_ADMIN: {
+      canViewAllUsers: true,
+      canViewAllPosts: true,
+      canViewAllBarter: true,
+      canViewAnalytics: true,
+      canManageAds: true,
+      canViewOnlineUsers: true,
+      canViewStats: true,
+      canModerateContent: true
+    },
+    CONTENT_ADMIN: {
+      canViewAllUsers: false,
+      canViewAllPosts: true,
+      canViewAllBarter: false,
+      canViewAnalytics: true,
+      canManageAds: false,
+      canViewOnlineUsers: true,
+      canViewStats: true,
+      canModerateContent: true
+    },
+    SECURITY_ADMIN: {
+      canViewAllUsers: true,
+      canViewAllPosts: false,
+      canViewAllBarter: false,
+      canViewAnalytics: false,
+      canManageAds: false,
+      canViewOnlineUsers: true,
+      canViewStats: true,
+      canModerateContent: false
+    },
+    SUPPORT_ADMIN: {
+      canViewAllUsers: true,
+      canViewAllPosts: false,
+      canViewAllBarter: false,
+      canViewAnalytics: false,
+      canManageAds: false,
+      canViewOnlineUsers: true,
+      canViewStats: true,
+      canModerateContent: false
+    }
+  }
+
   // Set greeting based on time
   useEffect(() => {
     const hour = new Date().getHours()
@@ -73,39 +117,62 @@ export default function AdminDashboard() {
     else setGreeting('Good Evening')
   }, [])
 
-  // Fetch all data
-  const fetchAllData = async () => {
-    try {
-      await Promise.all([
-        fetchStats(),
-        fetchOnlineUsers(),
-        fetchRecentUsers(),
-        fetchRecentPosts(),
-        fetchRecentBarterListings(),
-        fetchUserGrowth(),
-        fetchRoleDistribution(),
-        fetchWeeklyActivity(),
-        fetchTopContributors()
-      ])
-    } catch (err) {
-      console.error('Error fetching data:', err)
-    } finally {
-      setLoading(false)
+  // Get user role from session
+  useEffect(() => {
+    const storedSession = localStorage.getItem('adminSession')
+    if (storedSession) {
+      const parsed = JSON.parse(storedSession)
+      setUserRole(parsed.role || 'SUPPORT_ADMIN')
+      setIsSuperAdmin(parsed.admin?.is_super_admin || false)
     }
+  }, [])
+
+  // Get current user's permissions
+  const getPermissions = () => {
+    if (isSuperAdmin) return permissions.SUPER_ADMIN
+    return permissions[userRole] || permissions.SUPPORT_ADMIN
+  }
+
+  // Fetch all data based on role
+  const fetchAllData = async () => {
+    const perms = getPermissions()
+    
+    const promises = []
+    
+    // Always fetch stats
+    promises.push(fetchStats())
+    promises.push(fetchOnlineUsers())
+    promises.push(fetchUserGrowth())
+    promises.push(fetchRoleDistribution())
+    promises.push(fetchWeeklyActivity())
+    
+    // Role-based data fetching
+    if (perms.canViewAllUsers) {
+      promises.push(fetchRecentUsers())
+    }
+    
+    if (perms.canViewAllPosts) {
+      promises.push(fetchRecentPosts())
+      promises.push(fetchTopContributors())
+    }
+    
+    if (perms.canViewAllBarter) {
+      promises.push(fetchRecentBarterListings())
+    }
+    
+    await Promise.all(promises)
+    setLoading(false)
   }
 
   const fetchStats = async () => {
     try {
-      // Get role IDs first
       const { data: roles } = await supabase.from('roles').select('role_id, role_name')
       const roleMap = {}
       roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
 
-      // Today's date for new users/posts
       const today = new Date()
       today.setHours(0, 0, 0, 0)
 
-      // Fetch all counts in parallel
       const [
         { count: totalUsers },
         { count: farmersCount },
@@ -114,9 +181,7 @@ export default function AdminDashboard() {
         { count: pendingCount },
         { count: postsCount },
         { count: barterCount },
-        { count: messagesCount },
         { count: adsCount },
-        { count: commentsCount },
         { count: newUsersCount },
         { count: newPostsCount },
         { count: activeBarterCount }
@@ -128,9 +193,7 @@ export default function AdminDashboard() {
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
         supabase.from('posts').select('*', { count: 'exact', head: true }),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
-        supabase.from('messages').select('*', { count: 'exact', head: true }),
         supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
-        supabase.from('comments').select('*', { count: 'exact', head: true }),
         supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
         supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE')
@@ -144,9 +207,7 @@ export default function AdminDashboard() {
         pendingVerification: pendingCount || 0,
         totalPosts: postsCount || 0,
         totalBarterListings: barterCount || 0,
-        totalMessages: messagesCount || 0,
         totalAds: adsCount || 0,
-        totalComments: commentsCount || 0,
         newUsersToday: newUsersCount || 0,
         newPostsToday: newPostsCount || 0,
         activeBarterTrades: activeBarterCount || 0
@@ -197,7 +258,6 @@ export default function AdminDashboard() {
         .limit(5)
 
       if (!error && data) {
-        // Get role names
         const { data: rolesData } = await supabase.from('roles').select('role_id, role_name')
         const roleMap = {}
         rolesData?.forEach(r => { roleMap[r.role_id] = r.role_name })
@@ -246,7 +306,7 @@ export default function AdminDashboard() {
         .from('barter_listings')
         .select('listing_id, title, description, quantity, unit, status, created_at, user_id')
         .order('created_at', { ascending: false })
-        .limit(5)
+        .limit(4)
 
       if (!error && data) {
         const userIds = [...new Set(data.map(l => l.user_id))]
@@ -379,7 +439,6 @@ export default function AdminDashboard() {
     }
     init()
 
-    // Refresh every 30 seconds
     const interval = setInterval(() => {
       fetchStats()
       fetchOnlineUsers()
@@ -387,7 +446,7 @@ export default function AdminDashboard() {
     }, 30000)
 
     return () => clearInterval(interval)
-  }, [router])
+  }, [router, userRole])
 
   const refreshData = async () => {
     setRefreshing(true)
@@ -457,6 +516,8 @@ export default function AdminDashboard() {
     return badges[roleName] || <span className="badge-pending"><i className="bi bi-clock me-1"></i>{roleName || 'Pending'}</span>
   }
 
+  const perms = getPermissions()
+
   if (loading) {
     return (
       <AdminLayout title="Dashboard">
@@ -492,16 +553,22 @@ export default function AdminDashboard() {
   return (
     <AdminLayout title="Farmers Platform Dashboard">
       <div className="dashboard-wrapper">
-        {/* Welcome Section */}
+        {/* Welcome Section with Role Badge */}
         <div className="welcome-section">
           <div className="welcome-text">
             <div className="greeting">{greeting} 👋</div>
             <h1 className="welcome-title">
               Welcome back, <span className="user-name">{session?.admin?.full_name?.split(' ')[0] || 'Admin'}</span>
             </h1>
-            <p className="welcome-subtitle">Here's your mobile app platform performance overview</p>
+            <p className="welcome-subtitle">
+              {isSuperAdmin ? 'Super Administrator' : userRole} - Here's your platform overview
+            </p>
           </div>
           <div className="header-actions">
+            <div className="role-badge-header">
+              <i className="bi bi-shield-check"></i>
+              <span>{userRole}</span>
+            </div>
             <div className="live-badge">
               <span className="live-dot"></span>
               <span>LIVE DATA</span>
@@ -515,7 +582,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Main Stats Cards */}
+        {/* Main Stats Cards - All roles can see */}
         <div className="stats-grid">
           <div className="stat-card primary">
             <div className="stat-card-icon"><i className="bi bi-people-fill"></i></div>
@@ -578,19 +645,11 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div className="stat-card-mini">
-            <div className="stat-mini-icon comments"><i className="bi bi-chat"></i></div>
+            <div className="stat-mini-icon ads"><i className="bi bi-megaphone"></i></div>
             <div className="stat-mini-info">
-              <div className="stat-mini-value">{stats.totalComments.toLocaleString()}</div>
-              <div className="stat-mini-label">Comments</div>
-              <div className="stat-mini-trend">Community engagement</div>
-            </div>
-          </div>
-          <div className="stat-card-mini">
-            <div className="stat-mini-icon messages"><i className="bi bi-chat-dots"></i></div>
-            <div className="stat-mini-info">
-              <div className="stat-mini-value">{stats.totalMessages.toLocaleString()}</div>
-              <div className="stat-mini-label">Messages</div>
-              <div className="stat-mini-trend">Private chats</div>
+              <div className="stat-mini-value">{stats.totalAds}</div>
+              <div className="stat-mini-label">Active Ads</div>
+              <div className="stat-mini-trend">Live campaigns</div>
             </div>
           </div>
           <div className="stat-card-mini">
@@ -603,7 +662,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Charts */}
+        {/* Charts - All roles can see analytics */}
         <div className="charts-row">
           <div className="chart-card">
             <div className="chart-header">
@@ -621,7 +680,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* User Distribution & Top Contributors */}
+        {/* User Distribution & Top Contributors - Conditional based on role */}
         <div className="two-columns">
           <div className="card-distribution">
             <div className="card-header-custom">
@@ -645,30 +704,34 @@ export default function AdminDashboard() {
               ))}
             </div>
           </div>
-          <div className="card-contributors">
-            <div className="card-header-custom">
-              <h5><i className="bi bi-trophy"></i> Top Contributors</h5>
-              <p>Most active users by post count</p>
-            </div>
-            <div className="contributors-list">
-              {topContributors.map((contributor, idx) => (
-                <div key={idx} className="contributor-item">
-                  <div className="contributor-rank">#{idx + 1}</div>
-                  <div className="contributor-info">
-                    <div className="contributor-name">{contributor.full_name}</div>
-                    <div className="contributor-stats">{contributor.post_count} posts</div>
+          
+          {/* Top Contributors - Only for Content Admin and Super Admin */}
+          {(perms.canViewAllPosts || perms.canModerateContent) && (
+            <div className="card-contributors">
+              <div className="card-header-custom">
+                <h5><i className="bi bi-trophy"></i> Top Contributors</h5>
+                <p>Most active users by post count</p>
+              </div>
+              <div className="contributors-list">
+                {topContributors.map((contributor, idx) => (
+                  <div key={idx} className="contributor-item">
+                    <div className="contributor-rank">#{idx + 1}</div>
+                    <div className="contributor-info">
+                      <div className="contributor-name">{contributor.full_name}</div>
+                      <div className="contributor-stats">{contributor.post_count} posts</div>
+                    </div>
+                    <i className="bi bi-award-fill"></i>
                   </div>
-                  <i className="bi bi-award-fill"></i>
-                </div>
-              ))}
-              {topContributors.length === 0 && (
-                <div className="empty-contributors"><i className="bi bi-people"></i><p>No contributors yet</p></div>
-              )}
+                ))}
+                {topContributors.length === 0 && (
+                  <div className="empty-contributors"><i className="bi bi-people"></i><p>No contributors yet</p></div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Online Users */}
+        {/* Online Users - All roles can see */}
         <div className="online-section">
           <div className="online-header">
             <h5><i className="bi bi-wifi"></i> Currently Online</h5>
@@ -698,87 +761,115 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Recent Users Table */}
-        <div className="recent-table">
-          <div className="table-header">
-            <h5><i className="bi bi-people"></i> Recent Users</h5>
-            <button className="view-all" onClick={() => router.push('/admin/mobile-users')}>View All <i className="bi bi-arrow-right"></i></button>
+        {/* Recent Users Table - Only for roles with user management access */}
+        {perms.canViewAllUsers && (
+          <div className="recent-table">
+            <div className="table-header">
+              <h5><i className="bi bi-people"></i> Recent Users</h5>
+              <button className="view-all" onClick={() => router.push('/admin/mobile-users')}>View All <i className="bi bi-arrow-right"></i></button>
+            </div>
+            <div className="table-responsive">
+              <table className="custom-table">
+                <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Joined</th></tr></thead>
+                <tbody>
+                  {recentUsers.map((user) => (
+                    <tr key={user.user_id}>
+                      <td className="user-cell">
+                        <div className="user-avatar-sm">{user.profile_image ? <img src={user.profile_image} alt={user.full_name} /> : <span>{user.full_name?.charAt(0)}</span>}</div>
+                        <div><div className="user-name-sm">{user.full_name}</div><div className="user-email">{user.email}</div></div>
+                       </td>
+                       <td>{getRoleBadge(user.role_name)}</td>
+                       <td>{user.is_verified ? <span className="status-verified"><i className="bi bi-check-circle"></i> Verified</span> : <span className="status-pending"><i className="bi bi-clock"></i> Pending</span>}</td>
+                      <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div className="table-responsive">
-            <table className="custom-table">
-              <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Joined</th></tr></thead>
-              <tbody>
-                {recentUsers.map((user) => (
-                  <tr key={user.user_id}>
-                    <td className="user-cell">
-                      <div className="user-avatar-sm">{user.profile_image ? <img src={user.profile_image} alt={user.full_name} /> : <span>{user.full_name?.charAt(0)}</span>}</div>
-                      <div><div className="user-name-sm">{user.full_name}</div><div className="user-email">{user.email}</div></div>
-                    </td>
-                    <td>{getRoleBadge(user.role_name)}</td>
-                    <td>{user.is_verified ? <span className="status-verified"><i className="bi bi-check-circle"></i> Verified</span> : <span className="status-pending"><i className="bi bi-clock"></i> Pending</span>}</td>
-                    <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        )}
 
-        {/* Recent Posts (3 cards) */}
-        <div className="recent-posts-section">
-          <div className="section-header">
-            <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
-            <button className="view-all" onClick={() => router.push('/admin/mobile-posts')}>View All <i className="bi bi-arrow-right"></i></button>
-          </div>
-          <div className="posts-grid">
-            {recentPosts.map((post) => (
-              <div key={post.post_id} className="post-card">
-                {post.image_url && <div className="post-card-image"><img src={post.image_url} alt={post.title} /></div>}
-                <div className="post-card-content">
-                  <h6>{post.title}</h6>
-                  <p>{post.content?.substring(0, 80)}...</p>
-                  <div className="post-card-meta">
-                    <span><i className="bi bi-person-circle"></i> {post.author_name}</span>
-                    <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>
+        {/* Recent Posts - Only for roles with content management access */}
+        {(perms.canViewAllPosts || perms.canModerateContent) && (
+          <div className="recent-posts-section">
+            <div className="section-header">
+              <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
+              <button className="view-all" onClick={() => router.push('/admin/mobile-posts')}>View All <i className="bi bi-arrow-right"></i></button>
+            </div>
+            <div className="posts-grid">
+              {recentPosts.map((post) => (
+                <div key={post.post_id} className="post-card">
+                  {post.image_url && <div className="post-card-image"><img src={post.image_url} alt={post.title} /></div>}
+                  <div className="post-card-content">
+                    <h6>{post.title}</h6>
+                    <p>{post.content?.substring(0, 80)}...</p>
+                    <div className="post-card-meta">
+                      <span><i className="bi bi-person-circle"></i> {post.author_name}</span>
+                      <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-            {recentPosts.length === 0 && <div className="no-data-card"><i className="bi bi-inbox"></i><p>No posts available</p></div>}
+              ))}
+              {recentPosts.length === 0 && <div className="no-data-card"><i className="bi bi-inbox"></i><p>No posts available</p></div>}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Recent Barter Listings */}
-        <div className="recent-barter-section">
-          <div className="section-header">
-            <h5><i className="bi bi-arrow-left-right"></i> Recent Barter Listings</h5>
-            <button className="view-all" onClick={() => router.push('/admin/mobile-barter')}>View All <i className="bi bi-arrow-right"></i></button>
-          </div>
-          <div className="barter-grid">
-            {recentBarterListings.map((listing) => (
-              <div key={listing.listing_id} className="barter-card">
-                <div className="barter-card-header">
-                  <h6>{listing.title}</h6>
-                  <span className={`barter-status ${listing.status === 'ACTIVE' ? 'active' : 'inactive'}`}>{listing.status}</span>
+        {/* Recent Barter Listings - Only for roles with barter management access */}
+        {perms.canViewAllBarter && (
+          <div className="recent-barter-section">
+            <div className="section-header">
+              <h5><i className="bi bi-arrow-left-right"></i> Recent Barter Listings</h5>
+              <button className="view-all" onClick={() => router.push('/admin/mobile-barter')}>View All <i className="bi bi-arrow-right"></i></button>
+            </div>
+            <div className="barter-grid">
+              {recentBarterListings.map((listing) => (
+                <div key={listing.listing_id} className="barter-card">
+                  <div className="barter-card-header">
+                    <h6>{listing.title}</h6>
+                    <span className={`barter-status ${listing.status === 'ACTIVE' ? 'active' : 'inactive'}`}>{listing.status}</span>
+                  </div>
+                  <p>{listing.description?.substring(0, 80)}...</p>
+                  <div className="barter-card-meta">
+                    <span><i className="bi bi-box"></i> {listing.quantity} {listing.unit}</span>
+                    <span><i className="bi bi-person"></i> {listing.owner_name}</span>
+                  </div>
                 </div>
-                <p>{listing.description?.substring(0, 80)}...</p>
-                <div className="barter-card-meta">
-                  <span><i className="bi bi-box"></i> {listing.quantity} {listing.unit}</span>
-                  <span><i className="bi bi-person"></i> {listing.owner_name}</span>
-                </div>
-              </div>
-            ))}
-            {recentBarterListings.length === 0 && <div className="no-data-card"><i className="bi bi-inbox"></i><p>No barter listings available</p></div>}
+              ))}
+              {recentBarterListings.length === 0 && <div className="no-data-card"><i className="bi bi-inbox"></i><p>No barter listings available</p></div>}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Quick Actions */}
+        {/* Quick Actions - Role-based actions */}
         <div className="quick-actions">
           <h5><i className="bi bi-lightning-charge"></i> Quick Actions</h5>
           <div className="actions-grid">
-            <button className="action-item" onClick={() => router.push('/admin/mobile-users')}><i className="bi bi-people"></i><span>Manage Users</span></button>
-            <button className="action-item" onClick={() => router.push('/admin/mobile-posts')}><i className="bi bi-file-post"></i><span>Moderate Posts</span></button>
-            <button className="action-item" onClick={() => router.push('/admin/mobile-barter')}><i className="bi bi-arrow-left-right"></i><span>Barter Oversight</span></button>
+            {perms.canViewAllUsers && (
+              <button className="action-item" onClick={() => router.push('/admin/mobile-users')}>
+                <i className="bi bi-people"></i><span>Manage Users</span>
+              </button>
+            )}
+            {(perms.canViewAllPosts || perms.canModerateContent) && (
+              <button className="action-item" onClick={() => router.push('/admin/mobile-posts')}>
+                <i className="bi bi-file-post"></i><span>Moderate Posts</span>
+              </button>
+            )}
+            {perms.canViewAllBarter && (
+              <button className="action-item" onClick={() => router.push('/admin/mobile-barter')}>
+                <i className="bi bi-arrow-left-right"></i><span>Barter Oversight</span>
+              </button>
+            )}
+            {perms.canManageAds && (
+              <button className="action-item" onClick={() => router.push('/admin/mobile-ads')}>
+                <i className="bi bi-megaphone"></i><span>Manage Ads</span>
+              </button>
+            )}
+            {perms.canViewAnalytics && (
+              <button className="action-item" onClick={() => router.push('/admin/analytics')}>
+                <i className="bi bi-graph-up"></i><span>Analytics</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -791,6 +882,7 @@ export default function AdminDashboard() {
         .user-name { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         .welcome-subtitle { color: #6c757d; margin: 0; font-size: 14px; }
         .header-actions { display: flex; align-items: center; gap: 16px; }
+        .role-badge-header { display: flex; align-items: center; gap: 6px; background: #e9ecef; padding: 6px 14px; border-radius: 30px; font-size: 13px; font-weight: 600; color: #495057; }
         .live-badge { display: flex; align-items: center; gap: 8px; background: rgba(16,185,129,0.1); padding: 6px 14px; border-radius: 30px; font-size: 13px; font-weight: 600; color: #10b981; }
         .live-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
         .last-update { font-size: 13px; color: #6c757d; }
@@ -810,16 +902,15 @@ export default function AdminDashboard() {
         .stat-value { font-size: 28px; font-weight: 700; margin: 0 0 4px 0; color: #1f2937; }
         .stat-change { font-size: 12px; }
         .stat-change.positive { color: #10b981; }
-        .secondary-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 28px; }
+        .secondary-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 28px; }
         .stat-card-mini { background: white; border-radius: 18px; padding: 14px; display: flex; align-items: center; gap: 12px; transition: all 0.3s ease; }
         .stat-card-mini:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
         .stat-mini-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
         .stat-mini-icon.verified { background: rgba(16,185,129,0.1); color: #10b981; }
         .stat-mini-icon.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .stat-mini-icon.posts { background: rgba(79,70,229,0.1); color: #4f46e5; }
-        .stat-mini-icon.comments { background: rgba(59,130,246,0.1); color: #3b82f6; }
-        .stat-mini-icon.messages { background: rgba(139,92,246,0.1); color: #8b5cf6; }
-        .stat-mini-icon.barter { background: rgba(236,72,153,0.1); color: #ec4899; }
+        .stat-mini-icon.ads { background: rgba(236,72,153,0.1); color: #ec4899; }
+        .stat-mini-icon.barter { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .stat-mini-icon i { font-size: 20px; }
         .stat-mini-info { flex: 1; }
         .stat-mini-value { font-size: 18px; font-weight: 700; color: #1f2937; }
@@ -879,7 +970,7 @@ export default function AdminDashboard() {
         .custom-table th { text-align: left; padding: 12px 16px; background: #f8f9fa; font-weight: 600; font-size: 13px; color: #495057; border-radius: 12px; }
         .custom-table td { padding: 16px; border-bottom: 1px solid #e9ecef; }
         .user-cell { display: flex; align-items: center; gap: 12px; }
-        .user-avatar-sm { width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; overflow: hidden; }
+        .user-avatar-sm { width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content; center; color: white; font-weight: 600; overflow: hidden; }
         .user-avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
         .user-name-sm { font-weight: 600; color: #1f2937; margin-bottom: 4px; }
         .user-email { font-size: 11px; color: #6c757d; }
@@ -904,7 +995,7 @@ export default function AdminDashboard() {
         .post-card-meta { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; }
         .post-card-meta i { margin-right: 4px; }
         .recent-barter-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
-        .barter-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .barter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
         .barter-card { background: #f8f9fa; border-radius: 16px; padding: 16px; transition: all 0.3s ease; }
         .barter-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
         .barter-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -920,7 +1011,7 @@ export default function AdminDashboard() {
         .quick-actions { background: white; border-radius: 24px; padding: 20px; }
         .quick-actions h5 { margin: 0 0 20px 0; font-size: 16px; font-weight: 600; }
         .quick-actions h5 i { margin-right: 8px; color: #4f46e5; }
-        .actions-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .actions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
         .action-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; background: #f8f9fa; border: none; border-radius: 16px; color: #495057; transition: all 0.3s ease; cursor: pointer; }
         .action-item:hover { background: #e9ecef; transform: translateY(-2px); }
         .action-item i { font-size: 24px; color: #4f46e5; }
@@ -934,12 +1025,14 @@ export default function AdminDashboard() {
           .charts-row, .two-columns { grid-template-columns: 1fr; }
           .online-list { grid-template-columns: repeat(2,1fr); }
           .posts-grid { grid-template-columns: repeat(2,1fr); }
-          .barter-grid { grid-template-columns: 1fr; }
+          .barter-grid { grid-template-columns: repeat(2,1fr); }
+          .actions-grid { grid-template-columns: repeat(2,1fr); }
         }
         @media (max-width: 768px) {
           .stats-grid, .secondary-stats { grid-template-columns: 1fr; }
           .welcome-section { flex-direction: column; align-items: flex-start; }
-          .online-list, .posts-grid { grid-template-columns: 1fr; }
+          .online-list, .posts-grid, .barter-grid { grid-template-columns: 1fr; }
+          .actions-grid { grid-template-columns: 1fr; }
         }
       `}</style>
     </AdminLayout>
