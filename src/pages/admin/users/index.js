@@ -22,65 +22,65 @@ export default function UserManagement() {
     fetchUsers()
   }, [])
 
-  const fetchUsers = async () => {
-    try {
-      setLoading(true)
-      setError(null)
+ // Update the fetchUsers function
+const fetchUsers = async () => {
+  try {
+    setLoading(true)
+    setError(null)
+    
+    // Fetch all admin_users
+    const { data: usersData, error: usersError } = await supabase
+      .from('admin_users')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (usersError) throw usersError
+
+    if (usersData && usersData.length > 0) {
+      // Get unique role IDs
+      const roleIds = [...new Set(usersData.map(u => u.role_id).filter(id => id))]
       
-      // First, fetch all admin_users
-      const { data: usersData, error: usersError } = await supabase
-        .from('admin_users')
-        .select('*')
-        .order('created_at', { ascending: false })
+      // Fetch roles for those IDs
+      let rolesMap = {}
+      if (roleIds.length > 0) {
+        const { data: rolesData, error: rolesError } = await supabase
+          .from('admin_roles')
+          .select('role_id, role_name, description')
+          .in('role_id', roleIds)
 
-      if (usersError) throw usersError
-
-      if (usersData && usersData.length > 0) {
-        // Get role IDs from users
-        const roleIds = [...new Set(usersData.map(u => u.role_id).filter(id => id))]
-        
-        // Fetch roles separately if there are role IDs
-        let rolesMap = {}
-        if (roleIds.length > 0) {
-          const { data: rolesData, error: rolesError } = await supabase
-            .from('admin_roles')
-            .select('role_id, role_name, description')
-            .in('role_id', roleIds)
-
-          if (!rolesError && rolesData) {
-            rolesMap = rolesData.reduce((acc, role) => {
-              acc[role.role_id] = role
-              return acc
-            }, {})
-          }
+        if (!rolesError && rolesData) {
+          rolesMap = rolesData.reduce((acc, role) => {
+            acc[role.role_id] = role
+            return acc
+          }, {})
         }
-
-        // Combine users with their roles
-        const usersWithRoles = usersData.map(user => ({
-          ...user,
-          admin_roles: rolesMap[user.role_id] || null
-        }))
-
-        setUsers(usersWithRoles)
-        
-        // Calculate stats
-        setStats({
-          total: usersWithRoles.length,
-          active: usersWithRoles.filter(u => u.is_active).length,
-          inactive: usersWithRoles.filter(u => !u.is_active).length,
-          superAdmins: usersWithRoles.filter(u => u.is_super_admin).length
-        })
-      } else {
-        setUsers([])
-        setStats({ total: 0, active: 0, inactive: 0, superAdmins: 0 })
       }
-    } catch (err) {
-      console.error('Error fetching users:', err)
-      setError(err.message)
-    } finally {
-      setLoading(false)
+
+      // Combine users with their roles
+      const usersWithRoles = usersData.map(user => ({
+        ...user,
+        admin_roles: rolesMap[user.role_id] || null
+      }))
+
+      setUsers(usersWithRoles)
+      
+      // Calculate stats
+      setStats({
+        total: usersWithRoles.length,
+        active: usersWithRoles.filter(u => u.is_active).length,
+        inactive: usersWithRoles.filter(u => !u.is_active).length,
+        superAdmins: usersWithRoles.filter(u => u.is_super_admin).length
+      })
+    } else {
+      setUsers([])
     }
+  } catch (err) {
+    console.error('Error fetching users:', err)
+    setError(err.message)
+  } finally {
+    setLoading(false)
   }
+}
 
   const handleStatusToggle = async (userId, currentStatus) => {
     const action = currentStatus ? 'deactivate' : 'activate'
