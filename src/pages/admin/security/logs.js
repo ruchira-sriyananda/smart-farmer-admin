@@ -20,6 +20,7 @@ export default function ActivityLogs() {
   })
   const [selectedLog, setSelectedLog] = useState(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [adminUsersMap, setAdminUsersMap] = useState({})
 
   useEffect(() => {
     fetchLogs()
@@ -42,17 +43,22 @@ export default function ActivityLogs() {
   const fetchLogDetails = async (logId) => {
     const { data, error } = await supabase
       .from('admin_activity_logs')
-      .select(`
-        *,
-        admin_users (
-          full_name,
-          email
-        )
-      `)
+      .select('*')
       .eq('log_id', logId)
       .single()
 
     if (!error && data) {
+      // Fetch admin user separately
+      if (data.admin_id) {
+        const { data: adminUser } = await supabase
+          .from('admin_users')
+          .select('full_name, email')
+          .eq('admin_id', data.admin_id)
+          .single()
+        
+        data.admin_user = adminUser
+      }
+      
       setLogs(prev => [data, ...prev.slice(0, 99)])
       calculateStats([data, ...logs])
     }
@@ -83,29 +89,49 @@ export default function ActivityLogs() {
         return
       }
 
-      const { data, error } = await supabase
+      // Fetch logs without join first
+      const { data: logsData, error: logsError } = await supabase
         .from('admin_activity_logs')
-        .select(`
-          *,
-          admin_users (
-            full_name,
-            email
-          )
-        `)
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(100)
 
-      if (error) {
-        console.error('Fetch error:', error)
-        setError(`Error fetching logs: ${error.message}`)
+      if (logsError) {
+        console.error('Fetch error:', logsError)
+        setError(`Error fetching logs: ${logsError.message}`)
         return
       }
 
-      console.log('Fetched logs:', data?.length || 0)
+      if (logsData && logsData.length > 0) {
+        // Get unique admin IDs
+        const adminIds = [...new Set(logsData.map(log => log.admin_id).filter(id => id))]
+        
+        // Fetch admin users separately
+        let adminUsersMap = {}
+        if (adminIds.length > 0) {
+          const { data: adminUsers, error: adminError } = await supabase
+            .from('admin_users')
+            .select('admin_id, full_name, email')
+            .in('admin_id', adminIds)
 
-      if (data && data.length > 0) {
-        setLogs(data)
-        calculateStats(data)
+          if (!adminError && adminUsers) {
+            adminUsersMap = adminUsers.reduce((acc, user) => {
+              acc[user.admin_id] = user
+              return acc
+            }, {})
+          }
+        }
+        
+        setAdminUsersMap(adminUsersMap)
+        
+        // Combine logs with admin users
+        const logsWithUsers = logsData.map(log => ({
+          ...log,
+          admin_users: adminUsersMap[log.admin_id] || null
+        }))
+        
+        setLogs(logsWithUsers)
+        calculateStats(logsWithUsers)
       } else {
         setLogs([])
         setError('No activity logs found')
@@ -257,7 +283,7 @@ export default function ActivityLogs() {
     )
   }
 
-  if (error) {
+  if (error && logs.length === 0) {
     return (
       <AdminLayout title="Activity Logs">
         <div className="error-container">
@@ -277,7 +303,8 @@ export default function ActivityLogs() {
             <div>
               <strong>Need sample data?</strong>
               <p>Run this SQL in Supabase SQL Editor to add sample activity logs:</p>
-              <pre>{`INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
+              <pre>{`-- First, make sure you have an admin user
+INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
 SELECT 
     uuid_generate_v4(),
     (SELECT admin_id FROM admin_users LIMIT 1),
@@ -285,6 +312,27 @@ SELECT
     'Admin logged in successfully',
     '192.168.1.1',
     NOW()
+WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);
+
+-- Add more sample logs
+INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
+SELECT 
+    uuid_generate_v4(),
+    (SELECT admin_id FROM admin_users LIMIT 1),
+    'USER_MANAGEMENT',
+    'Updated user profile',
+    '192.168.1.1',
+    NOW() - INTERVAL '1 hour'
+WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);
+
+INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
+SELECT 
+    uuid_generate_v4(),
+    (SELECT admin_id FROM admin_users LIMIT 1),
+    'SECURITY_ALERT',
+    'Failed login attempt detected',
+    '203.0.113.1',
+    NOW() - INTERVAL '2 hours'
 WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
             </div>
           </div>
