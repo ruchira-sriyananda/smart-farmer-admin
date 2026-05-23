@@ -40,7 +40,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         const parsedSession = JSON.parse(storedSession)
         setSession(parsedSession)
         
-        // Fetch fresh profile data from database
+        // Fetch fresh profile data from admin_users table
         await fetchFreshProfile(parsedSession)
         
         // Subscribe to real-time profile updates
@@ -64,35 +64,60 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }, [router])
 
-  // Fetch fresh profile data from database
+  // Fetch fresh profile data from admin_users table (not users table)
   const fetchFreshProfile = async (sessionData) => {
     try {
+      const adminId = sessionData.admin?.admin_id || sessionData.user?.id
       const adminEmail = sessionData.admin?.email || sessionData.user?.email
       
-      if (!adminEmail) return
+      if (!adminId && !adminEmail) return
 
-      const { data: adminUser, error } = await supabase
-        .from('users')
-        .select('full_name, email, profile_image, roles!left(role_name)')
-        .eq('email', adminEmail)
-        .maybeSingle()
+      // First try to get by admin_id, then by email
+      let query = supabase
+        .from('admin_users')
+        .select('admin_id, full_name, email, profile_image, is_super_admin, role_id')
+      
+      if (adminId) {
+        query = query.eq('admin_id', adminId)
+      } else {
+        query = query.eq('email', adminEmail)
+      }
+      
+      const { data: adminUser, error } = await query.maybeSingle()
 
       if (error) {
-        console.error('Error fetching profile:', error)
+        console.error('Error fetching profile from admin_users:', error)
         return
       }
 
       if (adminUser) {
+        // Get role name from admin_roles if role_id exists
+        let roleName = sessionData.role || 'Administrator'
+        if (adminUser.role_id) {
+          const { data: roleData } = await supabase
+            .from('admin_roles')
+            .select('role_name')
+            .eq('role_id', adminUser.role_id)
+            .maybeSingle()
+          if (roleData) {
+            roleName = roleData.role_name
+          }
+        } else if (adminUser.is_super_admin) {
+          roleName = 'SUPER_ADMIN'
+        }
+        
         setProfileImage(adminUser.profile_image || null)
         setProfileName(adminUser.full_name || sessionData.admin?.full_name || 'Admin')
         setProfileEmail(adminUser.email || sessionData.admin?.email || 'admin@smartfarmer.com')
-        setProfileRole(sessionData.role || adminUser.roles?.role_name || 'Administrator')
+        setProfileRole(roleName)
         
-        // Update session with latest profile image
+        // Update session with latest profile data
         const updatedSession = { ...sessionData }
         if (!updatedSession.admin) updatedSession.admin = {}
         updatedSession.admin.profile_image = adminUser.profile_image
         updatedSession.admin.full_name = adminUser.full_name
+        updatedSession.admin.email = adminUser.email
+        updatedSession.role = roleName
         localStorage.setItem('adminSession', JSON.stringify(updatedSession))
         setSession(updatedSession)
       } else {
@@ -107,29 +132,43 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     }
   }
 
-  // Subscribe to profile changes in real-time
+  // Subscribe to profile changes in admin_users table
   const subscribeToProfileUpdates = (sessionData) => {
+    const adminId = sessionData.admin?.admin_id || sessionData.user?.id
     const adminEmail = sessionData.admin?.email || sessionData.user?.email
     
-    if (!adminEmail) return
+    if (!adminId && !adminEmail) return
+
+    // Build filter condition
+    let filter = ''
+    if (adminId) {
+      filter = `admin_id=eq.${adminId}`
+    } else {
+      filter = `email=eq.${adminEmail}`
+    }
 
     const channel = supabase
-      .channel('profile_updates')
+      .channel('admin_profile_updates')
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'users',
-          filter: `email=eq.${adminEmail}`
+          table: 'admin_users',
+          filter: filter
         },
         async (payload) => {
+          console.log('Profile update received:', payload.new)
+          
           // Update profile image and name in real-time
           if (payload.new.profile_image !== undefined) {
             setProfileImage(payload.new.profile_image)
           }
           if (payload.new.full_name) {
             setProfileName(payload.new.full_name)
+          }
+          if (payload.new.email) {
+            setProfileEmail(payload.new.email)
           }
           
           // Update session storage
@@ -138,6 +177,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
             if (!currentSession.admin) currentSession.admin = {}
             currentSession.admin.profile_image = payload.new.profile_image
             currentSession.admin.full_name = payload.new.full_name
+            currentSession.admin.email = payload.new.email
             localStorage.setItem('adminSession', JSON.stringify(currentSession))
             setSession(currentSession)
           }
@@ -573,7 +613,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               )}
             </div>
 
-            {/* Profile Dropdown with Real-time Image */}
+            {/* Profile Dropdown with Real-time Image from admin_users */}
             <div className="position-relative" ref={dropdownRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 d-flex align-items-center"

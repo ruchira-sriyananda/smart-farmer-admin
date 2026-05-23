@@ -15,6 +15,8 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState(null)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showStatusModal, setShowStatusModal] = useState(false)
+  const [currentAdminId, setCurrentAdminId] = useState(null)
+  const [currentAdminName, setCurrentAdminName] = useState('')
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -23,8 +25,18 @@ export default function UserManagement() {
   })
 
   useEffect(() => {
+    fetchCurrentAdmin()
     fetchUsers()
   }, [])
+
+  const fetchCurrentAdmin = async () => {
+    const session = localStorage.getItem('adminSession')
+    if (session) {
+      const parsed = JSON.parse(session)
+      setCurrentAdminId(parsed.admin?.admin_id)
+      setCurrentAdminName(parsed.admin?.full_name)
+    }
+  }
 
   const fetchUsers = async () => {
     try {
@@ -81,7 +93,16 @@ export default function UserManagement() {
     }
   }
 
-  const handleStatusToggle = async (user) => {
+  const isCurrentUser = (userId) => {
+    return currentAdminId === userId
+  }
+
+  const handleStatusToggle = (user) => {
+    // Prevent self-deactivation
+    if (isCurrentUser(user.admin_id)) {
+      alert('You cannot deactivate your own account!')
+      return
+    }
     setSelectedUser(user)
     setShowStatusModal(true)
   }
@@ -105,6 +126,11 @@ export default function UserManagement() {
   }
 
   const handleDeleteClick = (user) => {
+    // Prevent self-deletion
+    if (isCurrentUser(user.admin_id)) {
+      alert('You cannot delete your own account!')
+      return
+    }
     setSelectedUser(user)
     setShowDeleteModal(true)
   }
@@ -253,6 +279,15 @@ export default function UserManagement() {
           </button>
         </div>
 
+        {/* Current User Info Banner */}
+        <div className="current-user-banner">
+          <i className="bi bi-person-circle"></i>
+          <div>
+            <strong>Logged in as: {currentAdminName}</strong>
+            <span>You cannot delete or deactivate your own account</span>
+          </div>
+        </div>
+
         {/* Stats Cards */}
         <div className="stats-grid">
           <div className="stat-card stat-total">
@@ -282,7 +317,7 @@ export default function UserManagement() {
               <h2 className="stat-value">{stats.inactive}</h2>
             </div>
           </div>
-          <div className="stat-card-stat-super">
+          <div className="stat-card stat-super">
             <div className="stat-icon">
               <i className="bi bi-star-fill"></i>
             </div>
@@ -380,104 +415,117 @@ export default function UserManagement() {
               </thead>
               <tbody>
                 {filteredUsers.length > 0 ? (
-                  filteredUsers.map((user) => (
-                    <tr key={user.admin_id} className="user-row">
-                      <td>
-                        <div className="user-cell">
-                          <div className="user-avatar">
-                            {user.profile_image ? (
-                              <img src={user.profile_image} alt={user.full_name} />
-                            ) : (
-                              <span>{user.full_name?.charAt(0) || 'A'}</span>
-                            )}
-                            {user.is_super_admin && (
-                              <div className="super-badge">
-                                <i className="bi bi-star-fill"></i>
+                  filteredUsers.map((user) => {
+                    const isSelf = isCurrentUser(user.admin_id)
+                    return (
+                      <tr key={user.admin_id} className={`user-row ${isSelf ? 'current-user-row' : ''}`}>
+                        <td className="user-cell-wrapper">
+                          <div className="user-cell">
+                            <div className="user-avatar">
+                              {user.profile_image ? (
+                                <img src={user.profile_image} alt={user.full_name} />
+                              ) : (
+                                <span>{user.full_name?.charAt(0) || 'A'}</span>
+                              )}
+                              {user.is_super_admin && (
+                                <div className="super-badge">
+                                  <i className="bi bi-star-fill"></i>
+                                </div>
+                              )}
+                              {isSelf && (
+                                <div className="current-badge">
+                                  <i className="bi bi-person-check-fill"></i>
+                                </div>
+                              )}
+                            </div>
+                            <div className="user-info">
+                              <div className="user-name">
+                                {user.full_name}
+                                {isSelf && <span className="current-label">(You)</span>}
+                              </div>
+                              <div className="user-id">ID: {user.admin_id?.slice(0, 8)}...</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="contact-cell">
+                            <div className="contact-email">
+                              <i className="bi bi-envelope"></i>
+                              {user.email}
+                            </div>
+                            {user.phone_number && (
+                              <div className="contact-phone">
+                                <i className="bi bi-telephone"></i>
+                                {user.phone_number}
                               </div>
                             )}
                           </div>
-                          <div className="user-info">
-                            <div className="user-name">{user.full_name}</div>
-                            <div className="user-id">ID: {user.admin_id?.slice(0, 8)}...</div>
+                        </td>
+                        <td>{getRoleBadge(user.admin_roles?.role_name)}</td>
+                        <td>
+                          <div className="status-cell">
+                            <span className={`status-badge ${user.is_active ? 'status-active' : 'status-inactive'}`}>
+                              <span className="status-dot"></span>
+                              {user.is_active ? 'Active' : 'Inactive'}
+                            </span>
                           </div>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="contact-cell">
-                          <div className="contact-email">
-                            <i className="bi bi-envelope"></i>
-                            {user.email}
+                        </td>
+                        <td>
+                          <div className="date-cell">
+                            {user.last_login ? (
+                              <>
+                                <i className="bi bi-clock"></i>
+                                {new Date(user.last_login).toLocaleDateString()}
+                                <small>{new Date(user.last_login).toLocaleTimeString()}</small>
+                              </>
+                            ) : (
+                              <span className="text-muted">Never</span>
+                            )}
                           </div>
-                          {user.phone_number && (
-                            <div className="contact-phone">
-                              <i className="bi bi-telephone"></i>
-                              {user.phone_number}
-                            </div>
-                          )}
-                        </div>
-                       </td>
-                      <td>{getRoleBadge(user.admin_roles?.role_name)}</td>
-                      <td>
-                        <div className="status-cell">
-                          <span className={`status-badge ${user.is_active ? 'status-active' : 'status-inactive'}`}>
-                            <span className="status-dot"></span>
-                            {user.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </div>
-                       </td>
-                      <td>
-                        <div className="date-cell">
-                          {user.last_login ? (
-                            <>
-                              <i className="bi bi-clock"></i>
-                              {new Date(user.last_login).toLocaleDateString()}
-                              <small>{new Date(user.last_login).toLocaleTimeString()}</small>
-                            </>
-                          ) : (
-                            <span className="text-muted">Never</span>
-                          )}
-                        </div>
-                       </td>
-                      <td>
-                        <div className="date-cell">
-                          <i className="bi bi-calendar3"></i>
-                          {new Date(user.created_at).toLocaleDateString()}
-                        </div>
-                       </td>
-                      <td>
-                        <div className="action-buttons">
-                          <button 
-                            className="action-btn view-btn" 
-                            onClick={() => router.push(`/admin/users/${user.admin_id}`)}
-                            title="View Details"
-                          >
-                            <i className="bi bi-eye"></i>
-                          </button>
-                          <button 
-                            className="action-btn edit-btn" 
-                            onClick={() => router.push(`/admin/users/${user.admin_id}/edit`)}
-                            title="Edit User"
-                          >
-                            <i className="bi bi-pencil"></i>
-                          </button>
-                          <button 
-                            className={`action-btn status-btn ${user.is_active ? 'deactivate' : 'activate'}`}
-                            onClick={() => handleStatusToggle(user)}
-                            title={user.is_active ? 'Deactivate' : 'Activate'}
-                          >
-                            <i className={`bi ${user.is_active ? 'bi-ban' : 'bi-check-circle'}`}></i>
-                          </button>
-                          <button 
-                            className="action-btn delete-btn"
-                            onClick={() => handleDeleteClick(user)}
-                            title="Delete User"
-                          >
-                            <i className="bi bi-trash"></i>
-                          </button>
-                        </div>
-                       </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td>
+                          <div className="date-cell">
+                            <i className="bi bi-calendar3"></i>
+                            {new Date(user.created_at).toLocaleDateString()}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="action-buttons">
+                            <button 
+                              className="action-btn view-btn" 
+                              onClick={() => router.push(`/admin/users/${user.admin_id}`)}
+                              title="View Details"
+                            >
+                              <i className="bi bi-eye"></i>
+                            </button>
+                            <button 
+                              className="action-btn edit-btn" 
+                              onClick={() => router.push(`/admin/users/${user.admin_id}/edit`)}
+                              title="Edit User"
+                            >
+                              <i className="bi bi-pencil"></i>
+                            </button>
+                            <button 
+                              className={`action-btn status-btn ${user.is_active ? 'deactivate' : 'activate'}`}
+                              onClick={() => handleStatusToggle(user)}
+                              title={isSelf ? 'Cannot modify your own account' : (user.is_active ? 'Deactivate' : 'Activate')}
+                              disabled={isSelf}
+                            >
+                              <i className={`bi ${user.is_active ? 'bi-ban' : 'bi-check-circle'}`}></i>
+                            </button>
+                            <button 
+                              className={`action-btn delete-btn ${isSelf ? 'disabled' : ''}`}
+                              onClick={() => handleDeleteClick(user)}
+                              title={isSelf ? 'Cannot delete your own account' : 'Delete User'}
+                              disabled={isSelf}
+                            >
+                              <i className="bi bi-trash"></i>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
                 ) : (
                   <tr className="empty-row">
                     <td colSpan="7">
@@ -503,35 +551,31 @@ export default function UserManagement() {
       {showStatusModal && selectedUser && (
         <div className="modal-overlay" onClick={() => setShowStatusModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className={`modal-icon ${selectedUser.is_active ? 'warning' : 'success'}`}>
+            <div className="modal-header warning">
+              <div className="modal-icon">
                 <i className={`bi ${selectedUser.is_active ? 'bi-ban' : 'bi-check-circle'}`}></i>
               </div>
-              <h3 className="modal-title">
-                {selectedUser.is_active ? 'Deactivate Admin' : 'Activate Admin'}
-              </h3>
+              <h3>{selectedUser.is_active ? 'Deactivate Admin' : 'Activate Admin'}</h3>
               <button className="modal-close" onClick={() => setShowStatusModal(false)}>
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <div className="modal-body">
               <p>
-                Are you sure you want to <strong>{selectedUser.is_active ? 'deactivate' : 'activate'}</strong> 
+                Are you sure you want to <strong>{selectedUser.is_active ? 'deactivate' : 'activate'}</strong>
                 <br />
-                <span className="user-name-modal">{selectedUser.full_name}</span>?
+                <span className="user-highlight">{selectedUser.full_name}</span>?
               </p>
               {selectedUser.is_active && (
-                <div className="modal-warning">
+                <div className="warning-message">
                   <i className="bi bi-exclamation-triangle-fill"></i>
-                  Deactivated users will lose access to the admin panel.
+                  Deactivated users will lose access to the admin panel immediately.
                 </div>
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowStatusModal(false)}>
-                Cancel
-              </button>
-              <button className={`btn-confirm ${selectedUser.is_active ? 'btn-danger' : 'btn-success'}`} onClick={confirmStatusChange}>
+              <button className="btn-secondary" onClick={() => setShowStatusModal(false)}>Cancel</button>
+              <button className={`btn-primary ${selectedUser.is_active ? 'danger' : 'success'}`} onClick={confirmStatusChange}>
                 {selectedUser.is_active ? 'Deactivate' : 'Activate'}
               </button>
             </div>
@@ -543,11 +587,11 @@ export default function UserManagement() {
       {showDeleteModal && selectedUser && (
         <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-icon danger">
-                <i className="bi bi-trash"></i>
+            <div className="modal-header danger">
+              <div className="modal-icon">
+                <i className="bi bi-trash-fill"></i>
               </div>
-              <h3 className="modal-title">Delete Admin</h3>
+              <h3>Delete Admin</h3>
               <button className="modal-close" onClick={() => setShowDeleteModal(false)}>
                 <i className="bi bi-x-lg"></i>
               </button>
@@ -555,20 +599,16 @@ export default function UserManagement() {
             <div className="modal-body">
               <p>
                 Are you sure you want to permanently delete <br />
-                <span className="user-name-modal">{selectedUser.full_name}</span>?
+                <span className="user-highlight">{selectedUser.full_name}</span>?
               </p>
-              <div className="modal-warning danger">
+              <div className="warning-message danger">
                 <i className="bi bi-exclamation-triangle-fill"></i>
                 This action cannot be undone. All data associated with this user will be lost.
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowDeleteModal(false)}>
-                Cancel
-              </button>
-              <button className="btn-confirm btn-danger" onClick={confirmDelete}>
-                Delete Permanently
-              </button>
+              <button className="btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+              <button className="btn-primary danger" onClick={confirmDelete}>Delete Permanently</button>
             </div>
           </div>
         </div>
@@ -585,7 +625,7 @@ export default function UserManagement() {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 32px;
+          margin-bottom: 20px;
           flex-wrap: wrap;
           gap: 16px;
         }
@@ -654,6 +694,32 @@ export default function UserManagement() {
         .create-btn:hover {
           transform: translateY(-2px);
           box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        /* Current User Banner */
+        .current-user-banner {
+          background: #e7f1ff;
+          border-radius: 12px;
+          padding: 12px 20px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .current-user-banner i {
+          font-size: 24px;
+          color: #4f46e5;
+        }
+
+        .current-user-banner strong {
+          display: block;
+          font-size: 14px;
+        }
+
+        .current-user-banner span {
+          font-size: 12px;
+          color: #6c757d;
         }
 
         /* Stats Cards */
@@ -810,7 +876,7 @@ export default function UserManagement() {
           font-size: 13px;
         }
 
-        /* Table */
+        /* Users Table */
         .users-table-container {
           background: white;
           border-radius: 24px;
@@ -858,6 +924,10 @@ export default function UserManagement() {
           background: #fafbfc;
         }
 
+        .current-user-row {
+          background: #e7f1ff;
+        }
+
         /* User Cell */
         .user-cell {
           display: flex;
@@ -894,6 +964,21 @@ export default function UserManagement() {
           border: 2px solid white;
         }
 
+        .current-badge {
+          position: absolute;
+          top: -4px;
+          left: -4px;
+          background: #10b981;
+          border-radius: 50%;
+          width: 18px;
+          height: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 10px;
+          border: 2px solid white;
+        }
+
         .user-info {
           flex: 1;
         }
@@ -902,6 +987,13 @@ export default function UserManagement() {
           font-weight: 600;
           color: #1f2937;
           margin-bottom: 4px;
+        }
+
+        .current-label {
+          font-size: 11px;
+          font-weight: normal;
+          color: #10b981;
+          margin-left: 6px;
         }
 
         .user-id {
@@ -947,11 +1039,6 @@ export default function UserManagement() {
         .badge-default { background: #f8f9fa; color: #6c757d; }
 
         /* Status Cell */
-        .status-cell {
-          display: flex;
-          align-items: center;
-        }
-
         .status-badge {
           display: inline-flex;
           align-items: center;
@@ -1017,13 +1104,18 @@ export default function UserManagement() {
           transition: all 0.2s ease;
         }
 
+        .action-btn.disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
         .view-btn { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
         .edit-btn { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .status-btn.deactivate { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .status-btn.activate { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .delete-btn { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
-        .action-btn:hover {
+        .action-btn:hover:not(.disabled) {
           transform: translateY(-2px);
         }
 
@@ -1081,6 +1173,9 @@ export default function UserManagement() {
           position: relative;
         }
 
+        .modal-header.warning .modal-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .modal-header.danger .modal-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+
         .modal-icon {
           width: 48px;
           height: 48px;
@@ -1090,17 +1185,12 @@ export default function UserManagement() {
           justify-content: center;
         }
 
-        .modal-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .modal-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .modal-icon.danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-
         .modal-icon i { font-size: 24px; }
 
-        .modal-title {
+        .modal-header h3 {
+          margin: 0;
           font-size: 18px;
           font-weight: 600;
-          margin: 0;
-          color: #1f2937;
         }
 
         .modal-close {
@@ -1110,8 +1200,8 @@ export default function UserManagement() {
           background: none;
           border: none;
           font-size: 18px;
-          color: #9ca3af;
           cursor: pointer;
+          color: #9ca3af;
         }
 
         .modal-body {
@@ -1120,18 +1210,18 @@ export default function UserManagement() {
 
         .modal-body p {
           margin: 0 0 16px;
-          color: #4b5563;
           line-height: 1.5;
+          color: #4b5563;
         }
 
-        .user-name-modal {
+        .user-highlight {
           font-weight: 600;
           color: #1f2937;
           display: inline-block;
           margin-top: 4px;
         }
 
-        .modal-warning {
+        .warning-message {
           background: #fff3cd;
           padding: 12px;
           border-radius: 12px;
@@ -1142,7 +1232,7 @@ export default function UserManagement() {
           color: #856404;
         }
 
-        .modal-warning.danger {
+        .warning-message.danger {
           background: #f8d7da;
           color: #721c24;
         }
@@ -1154,16 +1244,16 @@ export default function UserManagement() {
           gap: 12px;
         }
 
-        .btn-cancel {
+        .btn-secondary {
           padding: 10px 20px;
           background: #f8f9fa;
           border: 1px solid #e9ecef;
           border-radius: 10px;
-          font-weight: 500;
           cursor: pointer;
+          font-weight: 500;
         }
 
-        .btn-confirm {
+        .btn-primary {
           padding: 10px 24px;
           border: none;
           border-radius: 10px;
@@ -1171,8 +1261,8 @@ export default function UserManagement() {
           cursor: pointer;
         }
 
-        .btn-danger { background: #ef4444; color: white; }
-        .btn-success { background: #10b981; color: white; }
+        .btn-primary.danger { background: #ef4444; color: white; }
+        .btn-primary.success { background: #10b981; color: white; }
 
         @keyframes fadeIn {
           from { opacity: 0; }
@@ -1194,15 +1284,6 @@ export default function UserManagement() {
         @media (max-width: 1024px) {
           .stats-grid {
             grid-template-columns: repeat(2, 1fr);
-          }
-          
-          .users-table {
-            font-size: 13px;
-          }
-          
-          .users-table th,
-          .users-table td {
-            padding: 12px 16px;
           }
         }
 
