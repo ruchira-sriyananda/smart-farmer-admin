@@ -1,29 +1,33 @@
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 
 export default function ActivityLogs() {
+  const router = useRouter()
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [dateRange, setDateRange] = useState('all')
   const [stats, setStats] = useState({
     total: 0,
     uniqueIPs: 0,
     mostActive: '',
-    last24h: 0
+    last24h: 0,
+    byType: {}
   })
+  const [selectedLog, setSelectedLog] = useState(null)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
 
   useEffect(() => {
     fetchLogs()
     
-    // Real-time subscription for new logs
     const subscription = supabase
       .channel('logs_changes')
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'admin_activity_logs' },
         (payload) => {
-          // Fetch complete log with admin details
           fetchLogDetails(payload.new.log_id)
         }
       )
@@ -87,7 +91,6 @@ export default function ActivityLogs() {
       return diffHours <= 24
     }).length
 
-    // Find most active admin
     const adminActivity = {}
     logsData.forEach(log => {
       const name = log.admin_users?.full_name || 'System'
@@ -95,13 +98,44 @@ export default function ActivityLogs() {
     })
     const mostActive = Object.entries(adminActivity).sort((a, b) => b[1] - a[1])[0]?.[0] || 'None'
 
+    const byType = {}
+    logsData.forEach(log => {
+      const type = log.activity_type || 'OTHER'
+      byType[type] = (byType[type] || 0) + 1
+    })
+
     setStats({
       total: logsData.length,
       uniqueIPs: uniqueIPs.size,
       mostActive: mostActive,
-      last24h: last24h
+      last24h: last24h,
+      byType: byType
     })
   }
+
+  const getDateRangeFilter = (logsData) => {
+    const now = new Date()
+    switch(dateRange) {
+      case 'today':
+        return logsData.filter(l => new Date(l.created_at).toDateString() === now.toDateString())
+      case 'week':
+        const weekAgo = new Date(now.setDate(now.getDate() - 7))
+        return logsData.filter(l => new Date(l.created_at) >= weekAgo)
+      case 'month':
+        const monthAgo = new Date(now.setMonth(now.getMonth() - 1))
+        return logsData.filter(l => new Date(l.created_at) >= monthAgo)
+      default:
+        return logsData
+    }
+  }
+
+  const filteredLogs = getDateRangeFilter(logs.filter(log => {
+    const matchesFilter = filter === 'all' || log.activity_type === filter
+    const matchesSearch = log.activity_description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          log.admin_users?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          log.ip_address?.toLowerCase().includes(searchTerm.toLowerCase())
+    return matchesFilter && matchesSearch
+  }))
 
   const getActivityIcon = (type) => {
     const icons = {
@@ -112,7 +146,8 @@ export default function ActivityLogs() {
       'REPORT_HANDLING': 'bi-flag',
       'SECURITY_ALERT': 'bi-shield-exclamation',
       'PASSWORD_CHANGE': 'bi-key',
-      'SETTINGS_UPDATE': 'bi-gear'
+      'SETTINGS_UPDATE': 'bi-gear',
+      'PROFILE_UPDATE': 'bi-person-gear'
     }
     return icons[type] || 'bi-activity'
   }
@@ -126,171 +161,272 @@ export default function ActivityLogs() {
       'REPORT_HANDLING': 'danger',
       'SECURITY_ALERT': 'danger',
       'PASSWORD_CHANGE': 'warning',
-      'SETTINGS_UPDATE': 'secondary'
+      'SETTINGS_UPDATE': 'secondary',
+      'PROFILE_UPDATE': 'primary'
     }
     return colors[type] || 'secondary'
   }
 
-  const filteredLogs = logs.filter(log => {
-    const matchesFilter = filter === 'all' || log.activity_type === filter
-    const matchesSearch = log.activity_description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          log.admin_users?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          log.ip_address?.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesFilter && matchesSearch
-  })
+  const getActivityLabel = (type) => {
+    const labels = {
+      'LOGIN': 'Login',
+      'LOGOUT': 'Logout',
+      'USER_MANAGEMENT': 'User Management',
+      'CONTENT_MODERATION': 'Content Moderation',
+      'REPORT_HANDLING': 'Report Handling',
+      'SECURITY_ALERT': 'Security Alert',
+      'PASSWORD_CHANGE': 'Password Change',
+      'SETTINGS_UPDATE': 'Settings Update',
+      'PROFILE_UPDATE': 'Profile Update'
+    }
+    return labels[type] || type
+  }
+
+  const viewLogDetails = (log) => {
+    setSelectedLog(log)
+    setShowDetailsModal(true)
+  }
 
   const activityTypes = [...new Set(logs.map(l => l.activity_type))]
 
   if (loading) {
     return (
       <AdminLayout title="Activity Logs">
-        <div className="d-flex justify-content-center py-5">
-          <div className="spinner-border text-primary"></div>
+        <div className="loading-container">
+          <div className="loading-spinner"></div>
+          <p className="loading-text">Loading activity logs...</p>
         </div>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+          }
+          .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e9ecef;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
 
   return (
     <AdminLayout title="Activity Logs">
-      {/* Stats Cards */}
-      <div className="row g-4 mb-4">
-        <div className="col-md-3">
-          <div className="card border-0 bg-primary bg-opacity-10">
-            <div className="card-body">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h6 className="text-muted mb-1">Total Activities</h6>
-                  <h2 className="mb-0 fw-bold">{stats.total}</h2>
-                </div>
-                <i className="bi bi-activity fs-1 text-primary"></i>
-              </div>
+      <div className="logs-container">
+        {/* Header Section */}
+        <div className="page-header">
+          <div className="header-content">
+            <div className="header-icon">
+              <i className="bi bi-activity"></i>
+            </div>
+            <div>
+              <h1 className="header-title">Activity Logs</h1>
+              <p className="header-subtitle">Track and monitor all system activities</p>
             </div>
           </div>
+          <button className="refresh-btn" onClick={fetchLogs}>
+            <i className="bi bi-arrow-repeat"></i>
+            <span>Refresh</span>
+          </button>
         </div>
-        <div className="col-md-3">
-          <div className="card border-0 bg-info bg-opacity-10">
-            <div className="card-body">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h6 className="text-muted mb-1">Unique IPs</h6>
-                  <h2 className="mb-0 fw-bold">{stats.uniqueIPs}</h2>
-                </div>
-                <i className="bi bi-ip fs-1 text-info"></i>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="col-md-3">
-          <div className="card border-0 bg-success bg-opacity-10">
-            <div className="card-body">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h6 className="text-muted mb-1">Last 24 Hours</h6>
-                  <h2 className="mb-0 fw-bold">{stats.last24h}</h2>
-                </div>
-                <i className="bi bi-clock-history fs-1 text-success"></i>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="col-md-3">
-          <div className="card border-0 bg-warning bg-opacity-10">
-            <div className="card-body">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <h6 className="text-muted mb-1">Most Active</h6>
-                  <h2 className="mb-0 fw-bold fs-5">{stats.mostActive.substring(0, 20)}</h2>
-                </div>
-                <i className="bi bi-trophy fs-1 text-warning"></i>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Filters */}
-      <div className="card border-0 shadow-sm mb-4">
-        <div className="card-body">
-          <div className="row g-3">
-            <div className="col-md-5">
-              <div className="input-group">
-                <span className="input-group-text bg-white"><i className="bi bi-search"></i></span>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Search by admin, activity, or IP address..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
+        {/* Stats Cards */}
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-icon primary">
+              <i className="bi bi-database"></i>
             </div>
-            <div className="col-md-4">
-              <select className="form-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
-                <option value="all">All Activity Types</option>
+            <div className="stat-info">
+              <span className="stat-label">Total Activities</span>
+              <h2 className="stat-value">{stats.total}</h2>
+              <span className="stat-change">All time records</span>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon info">
+              <i className="bi bi-ip"></i>
+            </div>
+            <div className="stat-info">
+              <span className="stat-label">Unique IPs</span>
+              <h2 className="stat-value">{stats.uniqueIPs}</h2>
+              <span className="stat-change">Different locations</span>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon success">
+              <i className="bi bi-clock-history"></i>
+            </div>
+            <div className="stat-info">
+              <span className="stat-label">Last 24 Hours</span>
+              <h2 className="stat-value">{stats.last24h}</h2>
+              <span className="stat-change">Recent activity</span>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon warning">
+              <i className="bi bi-trophy"></i>
+            </div>
+            <div className="stat-info">
+              <span className="stat-label">Most Active</span>
+              <h2 className="stat-value">{stats.mostActive.substring(0, 15)}</h2>
+              <span className="stat-change">Top contributor</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters Section */}
+        <div className="filters-card">
+          <div className="filters-header">
+            <i className="bi bi-funnel-fill"></i>
+            <span>Filters</span>
+          </div>
+          <div className="filters-body">
+            <div className="search-wrapper">
+              <i className="bi bi-search"></i>
+              <input
+                type="text"
+                className="search-input"
+                placeholder="Search by admin, activity, or IP address..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              {searchTerm && (
+                <button className="clear-search" onClick={() => setSearchTerm('')}>
+                  <i className="bi bi-x-lg"></i>
+                </button>
+              )}
+            </div>
+            <div className="filter-group">
+              <label className="filter-label">Activity Type</label>
+              <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
+                <option value="all">All Activities</option>
                 {activityTypes.map(type => (
-                  <option key={type} value={type}>{type.replace('_', ' ')}</option>
+                  <option key={type} value={type}>{getActivityLabel(type)}</option>
                 ))}
               </select>
             </div>
-            <div className="col-md-3 text-end">
-              <button className="btn btn-outline-primary btn-sm" onClick={fetchLogs}>
-                <i className="bi bi-arrow-repeat me-1"></i>Refresh
-              </button>
+            <div className="filter-group">
+              <label className="filter-label">Date Range</label>
+              <select className="filter-select" value={dateRange} onChange={(e) => setDateRange(e.target.value)}>
+                <option value="all">All Time</option>
+                <option value="today">Today</option>
+                <option value="week">Last 7 Days</option>
+                <option value="month">Last 30 Days</option>
+              </select>
             </div>
+            <button className="reset-filters" onClick={() => {
+              setSearchTerm('')
+              setFilter('all')
+              setDateRange('all')
+            }}>
+              <i className="bi bi-arrow-repeat"></i> Reset
+            </button>
           </div>
         </div>
-      </div>
 
-      {/* Activity Logs Table */}
-      <div className="card border-0 shadow-sm">
-        <div className="card-body p-0">
+        {/* Activity Type Distribution */}
+        <div className="distribution-card">
+          <h5><i className="bi bi-pie-chart"></i> Activity Distribution</h5>
+          <div className="distribution-tags">
+            {Object.entries(stats.byType).map(([type, count]) => (
+              <div 
+                key={type} 
+                className={`dist-tag ${getActivityColor(type)}`}
+                onClick={() => setFilter(type)}
+                style={{ cursor: 'pointer' }}
+              >
+                <i className={`bi ${getActivityIcon(type)}`}></i>
+                <span>{getActivityLabel(type)}</span>
+                <span className="dist-count">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Logs Table */}
+        <div className="logs-table-container">
+          <div className="table-header-info">
+            <span className="result-count">
+              <i className="bi bi-table"></i>
+              Showing {filteredLogs.length} of {logs.length} logs
+            </span>
+          </div>
+          
           <div className="table-responsive">
-            <table className="table table-hover mb-0">
-              <thead className="bg-light">
+            <table className="logs-table">
+              <thead>
                 <tr>
-                  <th style={{ width: '160px' }}>Time</th>
-                  <th style={{ width: '200px' }}>Admin</th>
-                  <th style={{ width: '140px' }}>Activity Type</th>
+                  <th>Time</th>
+                  <th>Admin</th>
+                  <th>Activity Type</th>
                   <th>Description</th>
-                  <th style={{ width: '140px' }}>IP Address</th>
+                  <th>IP Address</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {filteredLogs.map((log) => (
-                  <tr key={log.log_id}>
-                    <td>
-                      <small className="text-muted">
-                        {new Date(log.created_at).toLocaleString()}
-                      </small>
+                  <tr key={log.log_id} className="log-row">
+                    <td className="time-cell">
+                      <div className="time-wrapper">
+                        <i className="bi bi-calendar3"></i>
+                        <span>{new Date(log.created_at).toLocaleDateString()}</span>
+                        <i className="bi bi-clock ms-2"></i>
+                        <span>{new Date(log.created_at).toLocaleTimeString()}</span>
+                      </div>
                     </td>
-                    <td>
-                      <div className="d-flex flex-column">
-                        <strong className="small">{log.admin_users?.full_name || 'System'}</strong>
-                        <small className="text-muted">{log.admin_users?.email || 'system@smartfarmer.com'}</small>
+                    <td className="admin-cell">
+                      <div className="admin-wrapper">
+                        <div className="admin-avatar">
+                          {log.admin_users?.full_name?.charAt(0) || 'S'}
+                        </div>
+                        <div>
+                          <div className="admin-name">{log.admin_users?.full_name || 'System'}</div>
+                          <div className="admin-email">{log.admin_users?.email || 'system@smartfarmer.com'}</div>
+                        </div>
                       </div>
                     </td>
                     <td>
-                      <span className={`badge bg-${getActivityColor(log.activity_type)} d-inline-flex align-items-center gap-1`}>
-                        <i className={`bi ${getActivityIcon(log.activity_type)}`} style={{ fontSize: '10px' }}></i>
-                        {log.activity_type?.replace('_', ' ')}
+                      <span className={`activity-badge ${getActivityColor(log.activity_type)}`}>
+                        <i className={`bi ${getActivityIcon(log.activity_type)}`}></i>
+                        {getActivityLabel(log.activity_type)}
                       </span>
                     </td>
-                    <td>
-                      <span className="small">{log.activity_description}</span>
+                    <td className="description-cell">
+                      <span className="description-text">{log.activity_description}</span>
                     </td>
                     <td>
                       {log.ip_address && log.ip_address !== 'unknown' && log.ip_address !== 'N/A' ? (
-                        <code className="small bg-light px-2 py-1 rounded">
-                          <i className="bi bi-wifi me-1"></i>
+                        <code className="ip-code">
+                          <i className="bi bi-wifi"></i>
                           {log.ip_address}
                         </code>
                       ) : (
-                        <span className="text-muted small">
-                          <i className="bi bi-question-circle me-1"></i>
+                        <span className="no-ip">
+                          <i className="bi bi-question-circle"></i>
                           Not recorded
                         </span>
                       )}
+                    </td>
+                    <td>
+                      <button 
+                        className="view-details-btn"
+                        onClick={() => viewLogDetails(log)}
+                        title="View Details"
+                      >
+                        <i className="bi bi-eye"></i>
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -299,14 +435,744 @@ export default function ActivityLogs() {
           </div>
           
           {filteredLogs.length === 0 && (
-            <div className="text-center py-5">
-              <i className="bi bi-inbox fs-1 text-muted"></i>
-              <p className="text-muted mt-2 mb-0">No activity logs found</p>
-              <small className="text-muted">Try adjusting your search or filter</small>
+            <div className="empty-state">
+              <i className="bi bi-inbox"></i>
+              <h4>No activity logs found</h4>
+              <p>Try adjusting your search or filter criteria</p>
             </div>
           )}
         </div>
       </div>
+
+      {/* Log Details Modal */}
+      {showDetailsModal && selectedLog && (
+        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className={`modal-icon ${getActivityColor(selectedLog.activity_type)}`}>
+                <i className={`bi ${getActivityIcon(selectedLog.activity_type)}`}></i>
+              </div>
+              <h3>Activity Details</h3>
+              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="detail-section">
+                <label>Activity Type</label>
+                <div className={`detail-value badge-large ${getActivityColor(selectedLog.activity_type)}`}>
+                  <i className={`bi ${getActivityIcon(selectedLog.activity_type)}`}></i>
+                  {getActivityLabel(selectedLog.activity_type)}
+                </div>
+              </div>
+              <div className="detail-section">
+                <label>Description</label>
+                <div className="detail-value">{selectedLog.activity_description}</div>
+              </div>
+              <div className="detail-row">
+                <div className="detail-section">
+                  <label>Admin User</label>
+                  <div className="detail-value">
+                    <strong>{selectedLog.admin_users?.full_name || 'System'}</strong>
+                    <div className="detail-sub">{selectedLog.admin_users?.email}</div>
+                  </div>
+                </div>
+                <div className="detail-section">
+                  <label>Date & Time</label>
+                  <div className="detail-value">{new Date(selectedLog.created_at).toLocaleString()}</div>
+                </div>
+              </div>
+              <div className="detail-row">
+                <div className="detail-section">
+                  <label>IP Address</label>
+                  <div className="detail-value">
+                    <code>{selectedLog.ip_address || 'Not recorded'}</code>
+                  </div>
+                </div>
+                <div className="detail-section">
+                  <label>Log ID</label>
+                  <div className="detail-value">
+                    <code>{selectedLog.log_id}</code>
+                  </div>
+                </div>
+              </div>
+              {selectedLog.affected_table && (
+                <div className="detail-section">
+                  <label>Affected Table</label>
+                  <div className="detail-value">{selectedLog.affected_table}</div>
+                </div>
+              )}
+              {selectedLog.affected_record_id && (
+                <div className="detail-section">
+                  <label>Affected Record ID</label>
+                  <div className="detail-value"><code>{selectedLog.affected_record_id}</code></div>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style jsx global>{`
+        .logs-container {
+          max-width: 1400px;
+          margin: 0 auto;
+        }
+
+        /* Header */
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 28px;
+          flex-wrap: wrap;
+          gap: 16px;
+        }
+
+        .header-content {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .header-icon {
+          width: 60px;
+          height: 60px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .header-icon i {
+          font-size: 28px;
+          color: white;
+        }
+
+        .header-title {
+          font-size: 24px;
+          font-weight: 700;
+          color: #1f2937;
+          margin: 0 0 4px 0;
+        }
+
+        .header-subtitle {
+          color: #6c757d;
+          margin: 0;
+          font-size: 14px;
+        }
+
+        .refresh-btn {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 20px;
+          background: #4f46e5;
+          border: none;
+          border-radius: 12px;
+          color: white;
+          font-weight: 500;
+          transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+          background: #4338ca;
+          transform: translateY(-1px);
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+          margin-bottom: 24px;
+        }
+
+        .stat-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .stat-icon {
+          width: 52px;
+          height: 52px;
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .stat-icon.primary { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .stat-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .stat-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .stat-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+
+        .stat-icon i {
+          font-size: 24px;
+        }
+
+        .stat-info {
+          flex: 1;
+        }
+
+        .stat-label {
+          font-size: 13px;
+          color: #6c757d;
+          margin-bottom: 4px;
+          display: block;
+        }
+
+        .stat-value {
+          font-size: 24px;
+          font-weight: 700;
+          margin: 0;
+          color: #1f2937;
+        }
+
+        .stat-change {
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
+        /* Filters Card */
+        .filters-card {
+          background: white;
+          border-radius: 20px;
+          margin-bottom: 24px;
+          overflow: hidden;
+        }
+
+        .filters-header {
+          padding: 16px 20px;
+          background: #f8f9fa;
+          border-bottom: 1px solid #e9ecef;
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .filters-header i {
+          margin-right: 8px;
+          color: #4f46e5;
+        }
+
+        .filters-body {
+          padding: 20px;
+          display: flex;
+          gap: 16px;
+          flex-wrap: wrap;
+          align-items: flex-end;
+        }
+
+        .search-wrapper {
+          flex: 2;
+          position: relative;
+          min-width: 200px;
+        }
+
+        .search-wrapper i {
+          position: absolute;
+          left: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #9ca3af;
+        }
+
+        .search-input {
+          width: 100%;
+          padding: 12px 40px 12px 44px;
+          border: 2px solid #e9ecef;
+          border-radius: 12px;
+          font-size: 14px;
+          transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+          outline: none;
+          border-color: #4f46e5;
+          box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        .clear-search {
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: #9ca3af;
+          cursor: pointer;
+        }
+
+        .filter-group {
+          flex: 1;
+          min-width: 150px;
+        }
+
+        .filter-label {
+          display: block;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6c757d;
+          margin-bottom: 6px;
+        }
+
+        .filter-select {
+          width: 100%;
+          padding: 10px 12px;
+          border: 1px solid #e9ecef;
+          border-radius: 10px;
+          font-size: 14px;
+        }
+
+        .reset-filters {
+          padding: 10px 16px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 10px;
+          color: #6c757d;
+          font-size: 13px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .reset-filters:hover {
+          background: #e9ecef;
+        }
+
+        /* Distribution Card */
+        .distribution-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+          margin-bottom: 24px;
+        }
+
+        .distribution-card h5 {
+          margin: 0 0 16px 0;
+          font-size: 16px;
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .distribution-card h5 i {
+          margin-right: 8px;
+          color: #4f46e5;
+        }
+
+        .distribution-tags {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+
+        .dist-tag {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 16px;
+          border-radius: 30px;
+          font-size: 13px;
+          font-weight: 500;
+          transition: all 0.3s ease;
+        }
+
+        .dist-tag:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .dist-tag.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .dist-tag.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .dist-tag.primary { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .dist-tag.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .dist-tag.danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .dist-tag.secondary { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
+
+        .dist-count {
+          background: rgba(0, 0, 0, 0.1);
+          padding: 2px 8px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+
+        /* Logs Table */
+        .logs-table-container {
+          background: white;
+          border-radius: 24px;
+          overflow: hidden;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .table-header-info {
+          padding: 16px 20px;
+          border-bottom: 1px solid #e9ecef;
+          background: #fafbfc;
+        }
+
+        .result-count {
+          font-size: 13px;
+          color: #6c757d;
+        }
+
+        .result-count i {
+          margin-right: 6px;
+        }
+
+        .logs-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+
+        .logs-table th {
+          text-align: left;
+          padding: 16px 20px;
+          background: #f8f9fa;
+          font-weight: 600;
+          font-size: 13px;
+          color: #495057;
+          border-bottom: 1px solid #e9ecef;
+        }
+
+        .logs-table td {
+          padding: 16px 20px;
+          border-bottom: 1px solid #e9ecef;
+          vertical-align: middle;
+        }
+
+        .log-row:hover {
+          background: #fafbfc;
+        }
+
+        /* Time Cell */
+        .time-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+          font-size: 13px;
+          color: #6c757d;
+        }
+
+        .time-wrapper i {
+          font-size: 12px;
+        }
+
+        /* Admin Cell */
+        .admin-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .admin-avatar {
+          width: 40px;
+          height: 40px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          font-size: 16px;
+        }
+
+        .admin-name {
+          font-weight: 600;
+          color: #1f2937;
+          margin-bottom: 4px;
+        }
+
+        .admin-email {
+          font-size: 11px;
+          color: #6c757d;
+        }
+
+        /* Activity Badge */
+        .activity-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .activity-badge.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .activity-badge.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .activity-badge.primary { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .activity-badge.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .activity-badge.danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .activity-badge.secondary { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
+
+        /* Description Cell */
+        .description-cell {
+          max-width: 350px;
+        }
+
+        .description-text {
+          display: block;
+          font-size: 13px;
+          color: #4b5563;
+          line-height: 1.4;
+        }
+
+        /* IP Code */
+        .ip-code {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: #f8f9fa;
+          padding: 4px 10px;
+          border-radius: 8px;
+          font-size: 12px;
+          color: #1f2937;
+        }
+
+        .no-ip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          color: #9ca3af;
+        }
+
+        /* View Details Button */
+        .view-details-btn {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          background: rgba(79, 70, 229, 0.1);
+          border: none;
+          color: #4f46e5;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .view-details-btn:hover {
+          background: #4f46e5;
+          color: white;
+          transform: translateY(-2px);
+        }
+
+        /* Empty State */
+        .empty-state {
+          text-align: center;
+          padding: 60px 20px;
+        }
+
+        .empty-state i {
+          font-size: 48px;
+          color: #cbd5e1;
+          margin-bottom: 16px;
+          display: block;
+        }
+
+        .empty-state h4 {
+          margin: 0 0 8px 0;
+          color: #64748b;
+        }
+
+        .empty-state p {
+          margin: 0;
+          color: #94a3b8;
+        }
+
+        /* Modal */
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1100;
+          animation: fadeIn 0.2s ease;
+        }
+
+        .modal-container {
+          background: white;
+          border-radius: 24px;
+          width: 90%;
+          max-width: 550px;
+          animation: slideUp 0.3s ease;
+          overflow: hidden;
+        }
+
+        .modal-header {
+          padding: 24px 24px 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          position: relative;
+          border-bottom: 1px solid #e9ecef;
+        }
+
+        .modal-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .modal-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .modal-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .modal-icon.primary { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .modal-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .modal-icon.danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+
+        .modal-icon i { font-size: 24px; }
+
+        .modal-header h3 {
+          margin: 0;
+          font-size: 18px;
+          font-weight: 600;
+        }
+
+        .modal-close {
+          position: absolute;
+          right: 20px;
+          top: 20px;
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          color: #9ca3af;
+        }
+
+        .modal-body {
+          padding: 20px 24px;
+        }
+
+        .detail-section {
+          margin-bottom: 16px;
+        }
+
+        .detail-section label {
+          display: block;
+          font-size: 11px;
+          font-weight: 600;
+          color: #6c757d;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 6px;
+        }
+
+        .detail-value {
+          font-size: 14px;
+          color: #1f2937;
+        }
+
+        .badge-large {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 14px;
+          border-radius: 20px;
+          font-size: 13px;
+        }
+
+        .detail-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+
+        .detail-sub {
+          font-size: 12px;
+          color: #6c757d;
+          margin-top: 2px;
+        }
+
+        .modal-footer {
+          padding: 16px 24px 24px;
+          display: flex;
+          justify-content: flex-end;
+          border-top: 1px solid #e9ecef;
+        }
+
+        .btn-secondary {
+          padding: 10px 24px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 500;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          
+          .filters-body {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          
+          .detail-row {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .stats-grid {
+            grid-template-columns: 1fr;
+          }
+          
+          .logs-table {
+            display: block;
+            overflow-x: auto;
+          }
+          
+          .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+        }
+      `}</style>
     </AdminLayout>
   )
 }
