@@ -159,22 +159,42 @@ export default function UserManagement() {
   }
 
   const confirmDelete = async () => {
-    if (!selectedUser) return
-    
-    const { error } = await supabase
-      .from('admin_users')
-      .delete()
-      .eq('admin_id', selectedUser.admin_id)
+  if (!selectedUser) return
+  
+  setLoading(true)
+  
+  try {
+    // Call the server-side API to delete from both tables
+    const response = await fetch('/api/admin/delete-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': JSON.stringify(JSON.parse(localStorage.getItem('adminSession') || '{}'))
+      },
+      body: JSON.stringify({
+        adminId: selectedUser.admin_id,
+        userId: selectedUser.admin_id,
+        userEmail: selectedUser.email
+      })
+    })
 
-    if (!error) {
-      fetchUsers()
+    const result = await response.json()
+
+    if (result.success) {
+      alert(result.message || 'User deleted successfully!')
+      fetchUsers() // Refresh the user list
       setShowDeleteModal(false)
       setSelectedUser(null)
     } else {
-      alert('Error deleting user: ' + error.message)
+      alert('Error deleting user: ' + result.error)
     }
+  } catch (err) {
+    console.error('Delete error:', err)
+    alert('Error deleting user: ' + err.message)
+  } finally {
+    setLoading(false)
   }
-
+}
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           user.email?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -592,35 +612,53 @@ export default function UserManagement() {
       )}
 
       {/* Delete Confirmation Modal */}
-      {showDeleteModal && selectedUser && (
-        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header danger">
-              <div className="modal-icon">
-                <i className="bi bi-trash-fill"></i>
-              </div>
-              <h3>Delete Admin</h3>
-              <button className="modal-close" onClick={() => setShowDeleteModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-            <div className="modal-body">
-              <p>
-                Are you sure you want to permanently delete <br />
-                <span className="user-highlight">{selectedUser.full_name}</span>?
-              </p>
-              <div className="warning-message danger">
-                <i className="bi bi-exclamation-triangle-fill"></i>
-                This action cannot be undone. All data associated with this user will be lost.
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
-              <button className="btn-primary danger" onClick={confirmDelete}>Delete Permanently</button>
-            </div>
-          </div>
+{showDeleteModal && selectedUser && (
+  <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+    <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-header danger">
+        <div className="modal-icon">
+          <i className="bi bi-trash-fill"></i>
         </div>
-      )}
+        <h3>Delete Admin</h3>
+        <button className="modal-close" onClick={() => setShowDeleteModal(false)}>
+          <i className="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div className="modal-body">
+        <p>
+          Are you sure you want to permanently delete <br />
+          <span className="user-highlight">{selectedUser.full_name}</span>?
+        </p>
+        <div className="warning-message danger">
+          <i className="bi bi-exclamation-triangle-fill"></i>
+          This action cannot be undone. The user will be removed from:
+          <ul className="mt-2 mb-0">
+            <li>✓ Admin users list</li>
+            <li>✓ Authentication system</li>
+            <li>✓ All associated data</li>
+          </ul>
+        </div>
+      </div>
+      <div className="modal-footer">
+        <button className="btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+        <button 
+          className="btn-primary danger" 
+          onClick={confirmDelete}
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <span className="spinner-border spinner-border-sm me-2"></span>
+              Deleting...
+            </>
+          ) : (
+            'Delete Permanently'
+          )}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
       <style jsx>{`
         .user-management-container {
