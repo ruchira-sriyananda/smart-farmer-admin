@@ -101,23 +101,48 @@ export default function UserDetails() {
   }
 
   const handleDeleteUser = async () => {
-    // Prevent self-deletion
-    if (isCurrentUser()) {
-      alert('You cannot delete your own account!')
+  if (isCurrentUser()) {
+    alert('You cannot delete your own account!')
+    return
+  }
+  
+  // Check if user is super admin
+  const session = JSON.parse(localStorage.getItem('adminSession'))
+  if (!session?.admin?.is_super_admin) {
+    alert('Only Super Admins can delete users!')
+    return
+  }
+  
+  setUpdating(true)
+  
+  try {
+    // First check if user exists
+    const { data: userExists } = await supabase
+      .from('admin_users')
+      .select('admin_id')
+      .eq('admin_id', id)
+      .single()
+    
+    if (!userExists) {
+      alert('User not found')
+      router.push('/admin/users')
       return
     }
     
-    setUpdating(true)
     const { error } = await supabase
       .from('admin_users')
       .delete()
       .eq('admin_id', id)
 
-    if (!error) {
-      router.push('/admin/users')
-    }
+    if (error) throw error
+    
+    router.push('/admin/users')
+  } catch (err) {
+    alert('Error deleting user: ' + err.message)
+  } finally {
     setUpdating(false)
   }
+}
 
   const handleRoleChange = async (newRoleId) => {
     setUpdating(true)

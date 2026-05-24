@@ -52,8 +52,8 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     
-    fetchNotifications()
-    subscribeToRealtimeNotifications()
+    fetchRealNotifications()
+    subscribeToRealTimeNotifications()
     
     return () => {
       clearInterval(timer)
@@ -63,31 +63,49 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
   const fetchFreshProfile = async (sessionData) => {
     try {
-      const adminEmail = sessionData.admin?.email || sessionData.user?.email
+      const adminId = sessionData.admin?.admin_id || sessionData.user?.id
       
-      if (!adminEmail) return
+      if (!adminId) return
 
       const { data: adminUser, error } = await supabase
-        .from('users')
-        .select('full_name, email, profile_image')
-        .eq('email', adminEmail)
+        .from('admin_users')
+        .select('admin_id, full_name, email, profile_image, is_super_admin, role_id')
+        .eq('admin_id', adminId)
         .maybeSingle()
 
       if (error) {
-        console.error('Error fetching profile:', error)
+        console.error('Error fetching profile from admin_users:', error)
         return
       }
 
       if (adminUser) {
+        let roleName = sessionData.role || 'Administrator'
+        if (adminUser.role_id) {
+          const { data: roleData } = await supabase
+            .from('admin_roles')
+            .select('role_name')
+            .eq('role_id', adminUser.role_id)
+            .maybeSingle()
+          if (roleData) {
+            roleName = roleData.role_name
+          }
+        } else if (adminUser.is_super_admin) {
+          roleName = 'SUPER_ADMIN'
+        }
+        
         setProfileImage(adminUser.profile_image || null)
         setProfileName(adminUser.full_name || sessionData.admin?.full_name || 'Admin')
         setProfileEmail(adminUser.email || sessionData.admin?.email || 'admin@smartfarmer.com')
-        setProfileRole(sessionData.role || 'Administrator')
-      } else {
-        setProfileImage(sessionData.admin?.profile_image || null)
-        setProfileName(sessionData.admin?.full_name || sessionData.user?.email?.split('@')[0] || 'Admin')
-        setProfileEmail(sessionData.admin?.email || sessionData.user?.email || 'admin@smartfarmer.com')
-        setProfileRole(sessionData.role || 'Administrator')
+        setProfileRole(roleName)
+        
+        const updatedSession = { ...sessionData }
+        if (!updatedSession.admin) updatedSession.admin = {}
+        updatedSession.admin.profile_image = adminUser.profile_image
+        updatedSession.admin.full_name = adminUser.full_name
+        updatedSession.admin.email = adminUser.email
+        updatedSession.role = roleName
+        localStorage.setItem('adminSession', JSON.stringify(updatedSession))
+        setSession(updatedSession)
       }
     } catch (err) {
       console.error('Error in fetchFreshProfile:', err)
@@ -95,19 +113,19 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   }
 
   const subscribeToProfileUpdates = (sessionData) => {
-    const adminEmail = sessionData.admin?.email || sessionData.user?.email
+    const adminId = sessionData.admin?.admin_id || sessionData.user?.id
     
-    if (!adminEmail) return
+    if (!adminId) return
 
     const channel = supabase
-      .channel('profile_updates')
+      .channel('admin_profile_updates')
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'users',
-          filter: `email=eq.${adminEmail}`
+          table: 'admin_users',
+          filter: `admin_id=eq.${adminId}`
         },
         async (payload) => {
           if (payload.new.profile_image !== undefined) {
@@ -116,12 +134,16 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           if (payload.new.full_name) {
             setProfileName(payload.new.full_name)
           }
+          if (payload.new.email) {
+            setProfileEmail(payload.new.email)
+          }
           
           const currentSession = JSON.parse(localStorage.getItem('adminSession'))
           if (currentSession) {
             if (!currentSession.admin) currentSession.admin = {}
             currentSession.admin.profile_image = payload.new.profile_image
             currentSession.admin.full_name = payload.new.full_name
+            currentSession.admin.email = payload.new.email
             localStorage.setItem('adminSession', JSON.stringify(currentSession))
             setSession(currentSession)
           }
@@ -148,12 +170,11 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const fetchNotifications = async () => {
+  const fetchRealNotifications = async () => {
     try {
       setLoadingNotifications(true)
       
-      // Fetch recent activity logs as notifications
-      const { data: logs, error } = await supabase
+      const { data: activities, error } = await supabase
         .from('admin_activity_logs')
         .select('*')
         .order('created_at', { ascending: false })
@@ -161,16 +182,16 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
       if (error) throw error
 
-      if (logs && logs.length > 0) {
-        const formattedNotifications = logs.map(log => ({
-          id: log.log_id,
-          title: getNotificationTitle(log.activity_type),
-          message: log.activity_description,
-          time: formatTimeAgo(log.created_at),
-          read: checkIfRead(log.log_id),
-          type: getNotificationType(log.activity_type),
-          icon: getNotificationIcon(log.activity_type),
-          createdAt: log.created_at
+      if (activities && activities.length > 0) {
+        const formattedNotifications = activities.map(activity => ({
+          id: activity.log_id,
+          title: getNotificationTitle(activity.activity_type),
+          message: activity.activity_description,
+          time: formatTimeAgo(activity.created_at),
+          read: checkIfRead(activity.log_id),
+          type: getNotificationType(activity.activity_type),
+          icon: getNotificationIcon(activity.activity_type),
+          createdAt: activity.created_at
         }))
         
         setNotifications(formattedNotifications)
@@ -178,9 +199,13 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
         const unread = formattedNotifications.filter(n => !readIds.includes(n.id)).length
         setUnreadCount(unread)
+      } else {
+        setNotifications([])
+        setUnreadCount(0)
       }
     } catch (err) {
       console.error('Error fetching notifications:', err)
+      setNotifications([])
     } finally {
       setLoadingNotifications(false)
     }
@@ -191,7 +216,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     return readIds.includes(notificationId)
   }
 
-  const subscribeToRealtimeNotifications = () => {
+  const subscribeToRealTimeNotifications = () => {
     const channel = supabase
       .channel('admin_activity_logs_realtime')
       .on(
@@ -202,7 +227,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           table: 'admin_activity_logs'
         },
         async (payload) => {
-          // Fetch full details of the new activity
           const { data: newActivity, error } = await supabase
             .from('admin_activity_logs')
             .select('*')
@@ -223,9 +247,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
             
             setNotifications(prev => [newNotification, ...prev.slice(0, 19)])
             setUnreadCount(prev => prev + 1)
-            
-            // Play sound (optional)
-            // new Audio('/notification.mp3').play()
           }
         }
       )
@@ -238,18 +259,17 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
 
   const getNotificationTitle = (type) => {
     const titles = {
-      'LOGIN': '🔐 New Login',
-      'LOGOUT': '🚪 User Logout',
-      'USER_MANAGEMENT': '👥 User Management',
-      'CONTENT_MODERATION': '📝 Content Moderation',
-      'REPORT_HANDLING': '📋 Report Update',
-      'SECURITY_ALERT': '⚠️ Security Alert',
-      'PASSWORD_CHANGE': '🔑 Password Changed',
-      'SETTINGS_UPDATE': '⚙️ Settings Updated',
-      'PROFILE_UPDATE': '👤 Profile Updated',
-      'BARTER_UPDATE': '🔄 Barter Update'
+      'LOGIN': 'New Login',
+      'LOGOUT': 'User Logout',
+      'USER_MANAGEMENT': 'User Management',
+      'CONTENT_MODERATION': 'Content Moderation',
+      'REPORT_HANDLING': 'Report Update',
+      'SECURITY_ALERT': 'Security Alert',
+      'PASSWORD_CHANGE': 'Password Changed',
+      'SETTINGS_UPDATE': 'Settings Updated',
+      'PROFILE_UPDATE': 'Profile Updated'
     }
-    return titles[type] || '📢 New Activity'
+    return titles[type] || 'New Activity'
   }
 
   const getNotificationType = (type) => {
@@ -262,8 +282,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       'SECURITY_ALERT': 'danger',
       'PASSWORD_CHANGE': 'warning',
       'SETTINGS_UPDATE': 'info',
-      'PROFILE_UPDATE': 'success',
-      'BARTER_UPDATE': 'primary'
+      'PROFILE_UPDATE': 'success'
     }
     return types[type] || 'info'
   }
@@ -278,8 +297,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       'SECURITY_ALERT': 'shield-exclamation',
       'PASSWORD_CHANGE': 'key',
       'SETTINGS_UPDATE': 'gear',
-      'PROFILE_UPDATE': 'person-gear',
-      'BARTER_UPDATE': 'arrow-left-right'
+      'PROFILE_UPDATE': 'person-gear'
     }
     return icons[type] || 'bell'
   }
@@ -343,10 +361,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     router.push('/admin/login')
   }
 
-  const getInitials = () => {
-    return profileName.charAt(0).toUpperCase() || 'A'
-  }
-
   if (!session) {
     return (
       <div className="min-vh-100 d-flex align-items-center justify-content-center">
@@ -385,7 +399,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
               <small className="text-success">Secure Connection</small>
             </div>
 
-            {/* Notifications Dropdown */}
+            {/* Enhanced Notifications Dropdown */}
             <div className="position-relative" ref={notificationRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 position-relative"
@@ -402,40 +416,44 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                 )}
               </button>
 
-              {/* Notifications Dropdown Menu */}
+              {/* Modern Notifications Dropdown */}
               {showNotifications && (
                 <div className="position-absolute end-0 mt-2" style={{ width: '380px', zIndex: 1050 }}>
-                  <div className="card border-0 shadow-lg rounded-3 overflow-hidden">
+                  <div className="card border-0 shadow-xl rounded-2xl overflow-hidden">
                     {/* Header */}
-                    <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
-                      <div>
-                        <h6 className="mb-0 fw-bold">
-                          <i className="bi bi-bell me-2 text-primary"></i>
-                          Notifications
-                          {unreadCount > 0 && (
-                            <span className="badge bg-danger ms-2">{unreadCount} new</span>
-                          )}
-                        </h6>
-                        <small className="text-muted">Real-time updates</small>
-                      </div>
-                      <div className="dropdown">
-                        <button className="btn btn-sm btn-link text-decoration-none p-0" data-bs-toggle="dropdown">
-                          <i className="bi bi-three-dots-vertical"></i>
-                        </button>
-                        <ul className="dropdown-menu dropdown-menu-end">
-                          <li><button className="dropdown-item small" onClick={markAllAsRead}>
-                            <i className="bi bi-check2-all me-2"></i>Mark all as read
-                          </button></li>
-                          <li><hr className="dropdown-divider" /></li>
-                          <li><button className="dropdown-item small text-danger" onClick={clearAllNotifications}>
-                            <i className="bi bi-trash me-2"></i>Clear all
-                          </button></li>
-                        </ul>
+                    <div className="bg-gradient-primary px-4 py-3 text-white">
+                      <div className="d-flex justify-content-between align-items-center">
+                        <div>
+                          <h6 className="mb-0 fw-bold">
+                            <i className="bi bi-bell-fill me-2"></i>
+                            Notifications
+                          </h6>
+                          <small className="opacity-75">Stay updated with latest activities</small>
+                        </div>
+                        {unreadCount > 0 && (
+                          <span className="badge bg-white text-primary rounded-pill">{unreadCount} new</span>
+                        )}
                       </div>
                     </div>
 
+                    {/* Quick Actions Bar */}
+                    <div className="px-3 py-2 bg-light border-bottom d-flex justify-content-between">
+                      <button 
+                        className="btn btn-sm btn-link text-decoration-none text-primary p-0"
+                        onClick={markAllAsRead}
+                      >
+                        <i className="bi bi-check2-all me-1"></i> Mark all read
+                      </button>
+                      <button 
+                        className="btn btn-sm btn-link text-decoration-none text-danger p-0"
+                        onClick={clearAllNotifications}
+                      >
+                        <i className="bi bi-trash me-1"></i> Clear all
+                      </button>
+                    </div>
+
                     {/* Notifications List */}
-                    <div className="notifications-list" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    <div className="notifications-list" style={{ maxHeight: '420px', overflowY: 'auto' }}>
                       {loadingNotifications ? (
                         <div className="text-center py-5">
                           <div className="spinner-border text-primary spinner-border-sm mb-2"></div>
@@ -445,34 +463,31 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         notifications.map((notification) => (
                           <div 
                             key={notification.id} 
-                            className={`notification-item p-3 border-bottom ${!notification.read ? 'bg-light' : ''}`}
+                            className={`notification-item ${!notification.read ? 'unread' : ''}`}
                             onClick={() => markAsRead(notification.id)}
-                            style={{ cursor: 'pointer' }}
                           >
-                            <div className="d-flex gap-3">
-                              <div className={`flex-shrink-0 bg-${notification.type} bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center`} style={{ width: '40px', height: '40px' }}>
-                                <i className={`bi bi-${notification.icon} text-${notification.type} fs-5`}></i>
+                            <div className="notification-icon">
+                              <div className={`icon-bg bg-${notification.type} bg-opacity-10`}>
+                                <i className={`bi bi-${notification.icon} text-${notification.type}`}></i>
                               </div>
-                              <div className="flex-grow-1">
-                                <div className="d-flex justify-content-between align-items-start">
-                                  <h6 className="mb-1 small fw-bold">{notification.title}</h6>
-                                  <small className="text-muted" style={{ fontSize: '10px' }}>{notification.time}</small>
-                                </div>
-                                <p className="mb-0 small text-muted">{notification.message}</p>
-                              </div>
-                              {!notification.read && (
-                                <div className="flex-shrink-0">
-                                  <div className="bg-primary rounded-circle" style={{ width: '8px', height: '8px' }}></div>
-                                </div>
-                              )}
                             </div>
+                            <div className="notification-content">
+                              <div className="d-flex justify-content-between align-items-start">
+                                <h6 className="notification-title">{notification.title}</h6>
+                                <small className="notification-time">{notification.time}</small>
+                              </div>
+                              <p className="notification-message">{notification.message}</p>
+                            </div>
+                            {!notification.read && <div className="notification-dot"></div>}
                           </div>
                         ))
                       ) : (
-                        <div className="text-center py-5">
-                          <i className="bi bi-bell-slash fs-1 text-muted"></i>
-                          <p className="text-muted mt-2 mb-0">No notifications</p>
-                          <small className="text-muted">New activities will appear here</small>
+                        <div className="empty-notifications">
+                          <div className="empty-icon">
+                            <i className="bi bi-bell-slash"></i>
+                          </div>
+                          <h6>No notifications yet</h6>
+                          <p>When you receive notifications, they'll appear here</p>
                         </div>
                       )}
                     </div>
@@ -480,13 +495,13 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                     {/* Footer */}
                     <div className="card-footer bg-white py-2 text-center border-top">
                       <button 
-                        className="btn btn-link btn-sm text-decoration-none p-0"
+                        className="btn btn-link text-decoration-none w-100"
                         onClick={() => {
                           setShowNotifications(false)
                           router.push('/admin/security/logs')
                         }}
                       >
-                        View All Activity <i className="bi bi-arrow-right ms-1"></i>
+                        View All Activity Logs <i className="bi bi-arrow-right ms-1"></i>
                       </button>
                     </div>
                   </div>
@@ -515,7 +530,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
                     ) : (
-                      <span className="text-white fw-bold">{getInitials()}</span>
+                      <i className="bi bi-person-circle fs-2 text-white"></i>
                     )}
                   </div>
                   <div className="text-start d-none d-md-block">
@@ -538,7 +553,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                         ) : (
-                          <span className="text-primary fw-bold fs-2">{getInitials()}</span>
+                          <i className="bi bi-person-circle fs-1 text-primary"></i>
                         )}
                       </div>
                       <h6 className="mb-1 fw-bold">{profileName}</h6>
@@ -609,6 +624,15 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         .bg-gradient-primary {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
+        
+        .shadow-xl {
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        
+        .rounded-2xl {
+          border-radius: 1rem;
+        }
+        
         .dropdown-item-custom {
           display: flex;
           align-items: center;
@@ -644,11 +668,103 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         }
         
         .notification-item {
-          transition: background-color 0.2s ease;
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          padding: 14px 16px;
+          border-bottom: 1px solid #e9ecef;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          position: relative;
         }
         
         .notification-item:hover {
-          background-color: #f8f9fa !important;
+          background-color: #f8f9fa;
+        }
+        
+        .notification-item.unread {
+          background-color: #f0f7ff;
+        }
+        
+        .notification-icon {
+          flex-shrink: 0;
+        }
+        
+        .icon-bg {
+          width: 40px;
+          height: 40px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .notification-content {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .notification-title {
+          font-size: 14px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+        
+        .notification-message {
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0;
+          line-height: 1.4;
+        }
+        
+        .notification-time {
+          font-size: 10px;
+          color: #9ca3af;
+          white-space: nowrap;
+        }
+        
+        .notification-dot {
+          width: 8px;
+          height: 8px;
+          background-color: #3b82f6;
+          border-radius: 50%;
+          position: absolute;
+          right: 16px;
+          top: 50%;
+          transform: translateY(-50%);
+        }
+        
+        .empty-notifications {
+          text-align: center;
+          padding: 48px 24px;
+        }
+        
+        .empty-icon {
+          width: 64px;
+          height: 64px;
+          background: #f8f9fa;
+          border-radius: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 16px;
+        }
+        
+        .empty-icon i {
+          font-size: 32px;
+          color: #cbd5e1;
+        }
+        
+        .empty-notifications h6 {
+          margin: 0 0 8px 0;
+          color: #64748b;
+        }
+        
+        .empty-notifications p {
+          margin: 0;
+          color: #94a3b8;
+          font-size: 13px;
         }
         
         @keyframes pulse {
