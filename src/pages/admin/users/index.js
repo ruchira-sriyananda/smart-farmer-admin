@@ -168,8 +168,7 @@ export default function UserManagement() {
     const response = await fetch('/api/admin/delete-user', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': JSON.stringify(JSON.parse(localStorage.getItem('adminSession') || '{}'))
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         adminId: selectedUser.admin_id,
@@ -195,15 +194,6 @@ export default function UserManagement() {
     setLoading(false)
   }
 }
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          user.email?.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesRole = selectedRole === 'all' || user.admin_roles?.role_name === selectedRole
-    const matchesStatus = selectedStatus === 'all' || 
-                          (selectedStatus === 'active' && user.is_active) ||
-                          (selectedStatus === 'inactive' && !user.is_active)
-    return matchesSearch && matchesRole && matchesStatus
-  })
 
   const getRoleBadge = (roleName) => {
     const badges = {

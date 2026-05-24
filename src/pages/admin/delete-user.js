@@ -36,7 +36,7 @@ export default async function handler(req, res) {
       deleteQuery = deleteQuery.eq('email', userEmail)
     }
     
-    const { error: adminDeleteError, data: adminData } = await deleteQuery
+    const { error: adminDeleteError } = await deleteQuery
 
     if (adminDeleteError) {
       console.error('Admin delete error:', adminDeleteError)
@@ -65,8 +65,6 @@ export default async function handler(req, res) {
       
       if (authDeleteError) {
         console.error('Auth delete error:', authDeleteError)
-        // Don't fail the whole operation - admin_users was already deleted
-        console.warn('User deleted from admin_users but auth deletion failed:', authDeleteError.message)
         return res.status(200).json({ 
           success: true, 
           warning: 'User deleted from admin panel but auth deletion failed. Manual cleanup may be needed.',
@@ -74,17 +72,6 @@ export default async function handler(req, res) {
         })
       }
     }
-
-    // Log the activity
-    const session = JSON.parse(req.headers.authorization || '{}')
-    await supabaseAdmin
-      .from('admin_activity_logs')
-      .insert({
-        admin_id: session?.admin?.admin_id,
-        activity_type: 'USER_MANAGEMENT',
-        activity_description: `Deleted user: ${userEmail || adminId}`,
-        created_at: new Date().toISOString()
-      })
 
     return res.status(200).json({ 
       success: true, 
