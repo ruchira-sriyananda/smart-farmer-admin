@@ -345,9 +345,3 @@ export const getWeeklyActivity = async () => {
   }
 }
 
-export const getSupabase = () => {
-  if (!supabase) {
-    throw new Error('Supabase client not initialized. Check environment variables.')
-  }
-  return supabase
-}

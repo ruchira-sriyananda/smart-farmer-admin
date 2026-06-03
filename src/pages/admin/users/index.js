@@ -7,6 +7,7 @@ export default function UserManagement() {
   const router = useRouter()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRole, setSelectedRole] = useState('all')
@@ -18,6 +19,7 @@ export default function UserManagement() {
   const [currentAdmin, setCurrentAdmin] = useState(null)
   const [currentAdminRole, setCurrentAdminRole] = useState('')
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+  const [deleteProgress, setDeleteProgress] = useState(null)
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -45,7 +47,6 @@ export default function UserManagement() {
       setLoading(true)
       setError(null)
       
-      // Fetch all admin_users
       const { data: usersData, error: usersError } = await supabase
         .from('admin_users')
         .select('*')
@@ -54,7 +55,6 @@ export default function UserManagement() {
       if (usersError) throw usersError
 
       if (usersData && usersData.length > 0) {
-        // Get role IDs for mapping
         const roleIds = [...new Set(usersData.map(u => u.role_id).filter(id => id))]
         
         let rolesMap = {}
@@ -102,26 +102,20 @@ export default function UserManagement() {
   }
 
   const canDeleteUser = (user) => {
-    // Only Super Admin can delete, and cannot delete themselves
     return isSuperAdmin && !isCurrentUser(user.admin_id)
   }
 
   const canDeactivateUser = (user) => {
-    // Super Admin can deactivate anyone except themselves
     if (isSuperAdmin && !isCurrentUser(user.admin_id)) return true
-    // Other admins cannot deactivate anyone (including themselves)
     return false
   }
 
   const canEditUser = (user) => {
-    // Super Admin can edit anyone
     if (isSuperAdmin) return true
-    // Other admins can only edit themselves
     return isCurrentUser(user.admin_id)
   }
 
   const handleStatusToggle = (user) => {
-    // Check permission before showing modal
     if (!canDeactivateUser(user)) {
       alert('You do not have permission to change this user\'s status')
       return
@@ -133,23 +127,27 @@ export default function UserManagement() {
   const confirmStatusChange = async () => {
     if (!selectedUser) return
     
+    setDeleting(true)
     const newStatus = !selectedUser.is_active
+    
     const { error } = await supabase
       .from('admin_users')
       .update({ is_active: newStatus })
       .eq('admin_id', selectedUser.admin_id)
 
+    setDeleting(false)
+    
     if (!error) {
       fetchUsers()
       setShowStatusModal(false)
       setSelectedUser(null)
+      alert(`User ${newStatus ? 'activated' : 'deactivated'} successfully!`)
     } else {
       alert('Error updating user status: ' + error.message)
     }
   }
 
   const handleDeleteClick = (user) => {
-    // Check permission before showing modal
     if (!canDeleteUser(user)) {
       alert('You do not have permission to delete this user')
       return
@@ -159,41 +157,58 @@ export default function UserManagement() {
   }
 
   const confirmDelete = async () => {
-  if (!selectedUser) return
-  
-  setLoading(true)
-  
-  try {
-    // Call the server-side API to delete from both tables
-    const response = await fetch('/api/admin/delete-user', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        adminId: selectedUser.admin_id,
-        userId: selectedUser.admin_id,
-        userEmail: selectedUser.email
+    if (!selectedUser) return
+    
+    setDeleting(true)
+    setDeleteProgress('Deleting user account...')
+    
+    try {
+      setDeleteProgress('Removing from admin records...')
+      
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          adminId: selectedUser.admin_id,
+          userId: selectedUser.admin_id,
+          userEmail: selectedUser.email,
+          isAdminUser: true
+        })
       })
-    })
 
-    const result = await response.json()
+      const result = await response.json()
 
-    if (result.success) {
-      alert(result.message || 'User deleted successfully!')
-      fetchUsers() // Refresh the user list
-      setShowDeleteModal(false)
-      setSelectedUser(null)
-    } else {
-      alert('Error deleting user: ' + result.error)
+      if (result.success) {
+        setDeleteProgress('Cleaning up associated data...')
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        alert(`✅ ${result.message}\n\nCleaned up: ${result.deletedTables?.join(', ') || 'All related data'}`)
+        fetchUsers()
+        setShowDeleteModal(false)
+        setSelectedUser(null)
+      } else {
+        alert('❌ Error deleting user: ' + result.error)
+      }
+    } catch (err) {
+      console.error('Delete error:', err)
+      alert('❌ Error deleting user: ' + err.message)
+    } finally {
+      setDeleting(false)
+      setDeleteProgress(null)
     }
-  } catch (err) {
-    console.error('Delete error:', err)
-    alert('Error deleting user: ' + err.message)
-  } finally {
-    setLoading(false)
   }
-}
+
+  const filteredUsers = users.filter(user => {
+    const matchesSearch = user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          user.email?.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesRole = selectedRole === 'all' || user.admin_roles?.role_name === selectedRole
+    const matchesStatus = selectedStatus === 'all' || 
+                          (selectedStatus === 'active' && user.is_active) ||
+                          (selectedStatus === 'inactive' && !user.is_active)
+    return matchesSearch && matchesRole && matchesStatus
+  })
 
   const getRoleBadge = (roleName) => {
     const badges = {
@@ -593,62 +608,85 @@ export default function UserManagement() {
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setShowStatusModal(false)}>Cancel</button>
-              <button className={`btn-primary ${selectedUser.is_active ? 'danger' : 'success'}`} onClick={confirmStatusChange}>
-                {selectedUser.is_active ? 'Deactivate' : 'Activate'}
+              <button className={`btn-primary ${selectedUser.is_active ? 'danger' : 'success'}`} onClick={confirmStatusChange} disabled={deleting}>
+                {deleting ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2"></span>
+                    Processing...
+                  </>
+                ) : (
+                  selectedUser.is_active ? 'Deactivate' : 'Activate'
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-{showDeleteModal && selectedUser && (
-  <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
-    <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-      <div className="modal-header danger">
-        <div className="modal-icon">
-          <i className="bi bi-trash-fill"></i>
+      {/* Delete Confirmation Modal - Enhanced */}
+      {showDeleteModal && selectedUser && (
+        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header danger">
+              <div className="modal-icon">
+                <i className="bi bi-trash-fill"></i>
+              </div>
+              <h3>Delete Admin User</h3>
+              <button className="modal-close" onClick={() => setShowDeleteModal(false)}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>
+                Are you sure you want to permanently delete <br />
+                <span className="user-highlight">{selectedUser.full_name}</span>?
+              </p>
+              
+              {deleteProgress && (
+                <div className="delete-progress">
+                  <div className="spinner-border spinner-border-sm text-primary me-2"></div>
+                  {deleteProgress}
+                </div>
+              )}
+              
+              <div className="warning-message danger">
+                <i className="bi bi-exclamation-triangle-fill"></i>
+                <strong>This will permanently remove:</strong>
+                <ul className="mt-2 mb-0">
+                  <li>✓ User from admin_users table</li>
+                  <li>✓ User from authentication system</li>
+                  <li>✓ All activity logs by this user</li>
+                  <li>✓ All admin sessions</li>
+                  <li>✓ References in security alerts</li>
+                  <li>✓ References in system reports</li>
+                  <li>✓ References in content moderation</li>
+                </ul>
+              </div>
+              <div className="warning-message mt-2">
+                <i className="bi bi-info-circle-fill"></i>
+                This action cannot be undone. All associated data will be permanently deleted.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+              <button 
+                className="btn-primary danger" 
+                onClick={confirmDelete}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2"></span>
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete Permanently'
+                )}
+              </button>
+            </div>
+          </div>
         </div>
-        <h3>Delete Admin</h3>
-        <button className="modal-close" onClick={() => setShowDeleteModal(false)}>
-          <i className="bi bi-x-lg"></i>
-        </button>
-      </div>
-      <div className="modal-body">
-        <p>
-          Are you sure you want to permanently delete <br />
-          <span className="user-highlight">{selectedUser.full_name}</span>?
-        </p>
-        <div className="warning-message danger">
-          <i className="bi bi-exclamation-triangle-fill"></i>
-          This action cannot be undone. The user will be removed from:
-          <ul className="mt-2 mb-0">
-            <li>✓ Admin users list</li>
-            <li>✓ Authentication system</li>
-            <li>✓ All associated data</li>
-          </ul>
-        </div>
-      </div>
-      <div className="modal-footer">
-        <button className="btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
-        <button 
-          className="btn-primary danger" 
-          onClick={confirmDelete}
-          disabled={loading}
-        >
-          {loading ? (
-            <>
-              <span className="spinner-border spinner-border-sm me-2"></span>
-              Deleting...
-            </>
-          ) : (
-            'Delete Permanently'
-          )}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+      )}
 
       <style jsx>{`
         .user-management-container {
@@ -1175,7 +1213,7 @@ export default function UserManagement() {
           background: white;
           border-radius: 24px;
           width: 90%;
-          max-width: 450px;
+          max-width: 500px;
           animation: slideUp 0.3s ease;
         }
 
@@ -1235,15 +1273,26 @@ export default function UserManagement() {
           margin-top: 4px;
         }
 
+        .delete-progress {
+          background: #e7f1ff;
+          padding: 12px;
+          border-radius: 12px;
+          margin-bottom: 16px;
+          display: flex;
+          align-items: center;
+        }
+
         .warning-message {
           background: #fff3cd;
           padding: 12px;
           border-radius: 12px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
+          margin-bottom: 12px;
           font-size: 13px;
           color: #856404;
+        }
+
+        .warning-message ul {
+          padding-left: 20px;
         }
 
         .warning-message.danger {
