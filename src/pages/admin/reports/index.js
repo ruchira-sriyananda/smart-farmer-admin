@@ -12,12 +12,19 @@ export default function ReportsManagement() {
   const [selectedReport, setSelectedReport] = useState(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showActionModal, setShowActionModal] = useState(false)
-  const [showGenerateReportModal, setShowGenerateReportModal] = useState(false)
+  const [showAddReportModal, setShowAddReportModal] = useState(false)
   const [actionType, setActionType] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
-  const [generatingReport, setGeneratingReport] = useState(false)
-  const [reportType, setReportType] = useState('system')
-  const [dateRange, setDateRange] = useState('month')
+  const [addingReport, setAddingReport] = useState(false)
+  const [users, setUsers] = useState([])
+  const [posts, setPosts] = useState([])
+  const [newReport, setNewReport] = useState({
+    reported_user_id: '',
+    reported_post_id: '',
+    report_reason: '',
+    report_description: '',
+    severity_level: 'MEDIUM'
+  })
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -29,6 +36,8 @@ export default function ReportsManagement() {
   useEffect(() => {
     fetchReports()
     fetchStats()
+    fetchUsers()
+    fetchPosts()
   }, [filter])
 
   const fetchReports = async () => {
@@ -90,6 +99,36 @@ export default function ReportsManagement() {
     }
   }
 
+  const fetchUsers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('admin_users')
+        .select('admin_id, full_name, email')
+        .limit(50)
+      
+      if (!error && data) {
+        setUsers(data)
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err)
+    }
+  }
+
+  const fetchPosts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('posts')
+        .select('post_id, title')
+        .limit(50)
+      
+      if (!error && data) {
+        setPosts(data)
+      }
+    } catch (err) {
+      console.error('Error fetching posts:', err)
+    }
+  }
+
   const updateReportStatus = async (reportId, status) => {
     setActionLoading(true)
     const session = JSON.parse(localStorage.getItem('adminSession'))
@@ -110,100 +149,75 @@ export default function ReportsManagement() {
       fetchStats()
       setShowActionModal(false)
       setSelectedReport(null)
+      alert(`Report ${status.toLowerCase()} successfully!`)
     } else {
       alert(`Error updating report: ${error.message}`)
     }
   }
 
-  // Generate Report Function
-  const generateReport = async () => {
-    setGeneratingReport(true)
+  const addNewReport = async () => {
+    if (!newReport.report_reason) {
+      alert('Please provide a reason for the report')
+      return
+    }
+
+    setAddingReport(true)
+    const session = JSON.parse(localStorage.getItem('adminSession'))
     
     try {
-      // Calculate date range
-      const endDate = new Date()
-      let startDate = new Date()
-      
-      switch(dateRange) {
-        case 'today':
-          startDate.setHours(0, 0, 0, 0)
-          break
-        case 'week':
-          startDate.setDate(startDate.getDate() - 7)
-          break
-        case 'month':
-          startDate.setMonth(startDate.getMonth() - 1)
-          break
-        case 'quarter':
-          startDate.setMonth(startDate.getMonth() - 3)
-          break
-        case 'year':
-          startDate.setFullYear(startDate.getFullYear() - 1)
-          break
-        default:
-          startDate.setMonth(startDate.getMonth() - 1)
-      }
+      const { error } = await supabase
+        .from('system_reports')
+        .insert({
+          reported_user_id: newReport.reported_user_id || null,
+          reported_post_id: newReport.reported_post_id || null,
+          report_reason: newReport.report_reason,
+          report_description: newReport.report_description || null,
+          report_status: 'PENDING',
+          severity_level: newReport.severity_level,
+          created_at: new Date().toISOString(),
+          reviewed_by: session?.admin?.admin_id
+        })
 
-      // Fetch data based on report type
-      let reportData = {}
-      
-      if (reportType === 'system' || reportType === 'all') {
-        // Fetch system reports
-        const { data: systemReports } = await supabase
-          .from('system_reports')
-          .select('*')
-          .gte('created_at', startDate.toISOString())
-          .lte('created_at', endDate.toISOString())
-        
-        reportData.systemReports = systemReports || []
-      }
-      
-      if (reportType === 'user' || reportType === 'all') {
-        // Fetch user reports
-        const { data: userReports } = await supabase
-          .from('system_reports')
-          .select('*, admin_users!reported_user_id(full_name, email)')
-          .gte('created_at', startDate.toISOString())
-          .lte('created_at', endDate.toISOString())
-          .not('reported_user_id', 'is', null)
-        
-        reportData.userReports = userReports || []
-      }
-      
-      if (reportType === 'content' || reportType === 'all') {
-        // Fetch content reports
-        const { data: contentReports } = await supabase
-          .from('system_reports')
-          .select('*')
-          .gte('created_at', startDate.toISOString())
-          .lte('created_at', endDate.toISOString())
-          .not('reported_post_id', 'is', null)
-        
-        reportData.contentReports = contentReports || []
-      }
+      if (error) throw error
 
+      alert('Report added successfully!')
+      setShowAddReportModal(false)
+      setNewReport({
+        reported_user_id: '',
+        reported_post_id: '',
+        report_reason: '',
+        report_description: '',
+        severity_level: 'MEDIUM'
+      })
+      fetchReports()
+      fetchStats()
+    } catch (err) {
+      console.error('Error adding report:', err)
+      alert('Error adding report: ' + err.message)
+    } finally {
+      setAddingReport(false)
+    }
+  }
+
+  // Export current view to CSV
+  const exportToCSV = async () => {
+    try {
       // Create CSV content
       const csvRows = []
       
       // Add headers
-      csvRows.push(['Report ID', 'Type', 'Reason', 'Description', 'Status', 'Created At', 'Reviewed By', 'Reviewed At'].join(','))
+      csvRows.push(['Report ID', 'Reason', 'Description', 'Status', 'Severity', 'Created At', 'Reviewed By', 'Reviewed At'].join(','))
       
       // Add data rows
-      const allReports = [
-        ...(reportData.systemReports || []).map(r => ({ ...r, type: 'System' })),
-        ...(reportData.userReports || []).map(r => ({ ...r, type: 'User' })),
-        ...(reportData.contentReports || []).map(r => ({ ...r, type: 'Content' }))
-      ]
-      
-      allReports.forEach(report => {
+      reports.forEach(report => {
         csvRows.push([
           `"${report.report_id}"`,
-          `"${report.type}"`,
           `"${report.report_reason?.replace(/"/g, '""') || ''}"`,
           `"${report.report_description?.replace(/"/g, '""') || ''}"`,
           `"${report.report_status}"`,
+          `"${report.severity_level || 'MEDIUM'}"`,
           `"${new Date(report.created_at).toLocaleString()}"`,
-          `"${report.reviewed_by || ''}"`,
+          `"${report.reviewed_by_admin?.full_name || ''}"`,
           `"${report.reviewed_at ? new Date(report.reviewed_at).toLocaleString() : ''}"`
         ].join(','))
       })
@@ -215,24 +229,20 @@ export default function ReportsManagement() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `reports_${reportType}_${new Date().toISOString().split('T')[0]}.csv`
+      a.download = `reports_export_${new Date().toISOString().split('T')[0]}.csv`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       window.URL.revokeObjectURL(url)
       
-      alert('Report generated successfully!')
-      setShowGenerateReportModal(false)
-      
+      alert('Reports exported successfully!')
     } catch (err) {
-      console.error('Error generating report:', err)
-      alert('Error generating report: ' + err.message)
-    } finally {
-      setGeneratingReport(false)
+      console.error('Error exporting reports:', err)
+      alert('Error exporting reports: ' + err.message)
     }
   }
 
-  // Export current view to PDF
+  // Export to PDF
   const exportToPDF = async () => {
     const printWindow = window.open('', '_blank')
     printWindow.document.write(`
@@ -242,12 +252,18 @@ export default function ReportsManagement() {
           <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
             h1 { color: #333; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; }
             .header { margin-bottom: 20px; }
-            .stats { display: flex; gap: 20px; margin-bottom: 20px; }
-            .stat-box { padding: 10px; background: #f8f9fa; border-radius: 8px; }
+            .stats { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+            .stat-box { padding: 10px 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #4f46e5; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+            th { background-color: #4f46e5; color: white; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            .badge { padding: 3px 8px; border-radius: 12px; font-size: 11px; display: inline-block; }
+            .badge-pending { background: #fef3c7; color: #92400e; }
+            .badge-resolved { background: #d1fae5; color: #065f46; }
+            .badge-dismissed { background: #fee2e2; color: #991b1b; }
+            .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #666; }
           </style>
         </head>
         <body>
@@ -266,6 +282,7 @@ export default function ReportsManagement() {
               <tr>
                 <th>Report ID</th>
                 <th>Reason</th>
+                <th>Description</th>
                 <th>Status</th>
                 <th>Created At</th>
               </tr>
@@ -275,12 +292,16 @@ export default function ReportsManagement() {
                 <tr>
                   <td>${report.report_id?.slice(0, 8)}</td>
                   <td>${report.report_reason}</td>
-                  <td>${report.report_status}</td>
+                  <td>${report.report_description?.substring(0, 50) || '-'}${report.report_description?.length > 50 ? '...' : ''}</td>
+                  <td><span class="badge badge-${report.report_status?.toLowerCase()}">${report.report_status}</span></td>
                   <td>${new Date(report.created_at).toLocaleString()}</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
+          <div class="footer">
+            <p>Smart Farmer Admin Panel - Generated Report</p>
+          </div>
         </body>
       </html>
     `)
@@ -367,7 +388,7 @@ export default function ReportsManagement() {
   return (
     <AdminLayout title="Reports Management">
       <div className="reports-container">
-        {/* Header with Generate Report Button */}
+        {/* Header with Export Buttons */}
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -379,13 +400,17 @@ export default function ReportsManagement() {
             </div>
           </div>
           <div className="header-actions">
-            <button className="btn-generate" onClick={() => setShowGenerateReportModal(true)}>
-              <i className="bi bi-file-earmark-spreadsheet-fill"></i>
-              Generate Report
+            <button className="btn-add" onClick={() => setShowAddReportModal(true)}>
+              <i className="bi bi-plus-circle-fill"></i>
+              Add Report
             </button>
-            <button className="btn-export" onClick={exportToPDF}>
+            <button className="btn-export-csv" onClick={exportToCSV}>
+              <i className="bi bi-file-earmark-spreadsheet-fill"></i>
+              Export CSV
+            </button>
+            <button className="btn-export-pdf" onClick={exportToPDF}>
               <i className="bi bi-printer-fill"></i>
-              Export
+              Export PDF
             </button>
           </div>
         </div>
@@ -499,71 +524,98 @@ export default function ReportsManagement() {
               <i className="bi bi-inbox"></i>
               <h4>No reports found</h4>
               <p>There are no {filter.toLowerCase()} reports to display.</p>
+              <button className="btn-add-report" onClick={() => setShowAddReportModal(true)}>
+                <i className="bi bi-plus-circle"></i> Add First Report
+              </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Generate Report Modal */}
-      {showGenerateReportModal && (
-        <div className="modal-overlay" onClick={() => setShowGenerateReportModal(false)}>
-          <div className="modal-container modal-generate" onClick={(e) => e.stopPropagation()}>
+      {/* Add Report Modal */}
+      {showAddReportModal && (
+        <div className="modal-overlay" onClick={() => setShowAddReportModal(false)}>
+          <div className="modal-container modal-add-report" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header info">
-              <div className="modal-icon"><i className="bi bi-file-earmark-spreadsheet-fill"></i></div>
-              <h3>Generate Report</h3>
-              <button className="modal-close" onClick={() => setShowGenerateReportModal(false)}><i className="bi bi-x-lg"></i></button>
+              <div className="modal-icon"><i className="bi bi-plus-circle-fill"></i></div>
+              <h3>Add New Report</h3>
+              <button className="modal-close" onClick={() => setShowAddReportModal(false)}><i className="bi bi-x-lg"></i></button>
             </div>
             <div className="modal-body">
               <div className="form-group">
-                <label className="form-label">Report Type</label>
-                <select className="form-select" value={reportType} onChange={(e) => setReportType(e.target.value)}>
-                  <option value="system">System Reports</option>
-                  <option value="user">User Reports</option>
-                  <option value="content">Content Reports</option>
-                  <option value="all">All Reports</option>
-                </select>
+                <label className="form-label">Report Reason *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Enter report reason"
+                  value={newReport.report_reason}
+                  onChange={(e) => setNewReport({...newReport, report_reason: e.target.value})}
+                />
               </div>
-              
+
               <div className="form-group">
-                <label className="form-label">Date Range</label>
-                <select className="form-select" value={dateRange} onChange={(e) => setDateRange(e.target.value)}>
-                  <option value="today">Today</option>
-                  <option value="week">Last 7 Days</option>
-                  <option value="month">Last 30 Days</option>
-                  <option value="quarter">Last 3 Months</option>
-                  <option value="year">Last Year</option>
+                <label className="form-label">Description</label>
+                <textarea
+                  className="form-textarea"
+                  rows="4"
+                  placeholder="Enter detailed description of the issue..."
+                  value={newReport.report_description}
+                  onChange={(e) => setNewReport({...newReport, report_description: e.target.value})}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Severity Level</label>
+                <select
+                  className="form-select"
+                  value={newReport.severity_level}
+                  onChange={(e) => setNewReport({...newReport, severity_level: e.target.value})}
+                >
+                  <option value="LOW">Low - Minor issue</option>
+                  <option value="MEDIUM">Medium - Concerning</option>
+                  <option value="HIGH">High - Urgent</option>
                 </select>
               </div>
 
-              <div className="report-preview">
-                <h4>Report Summary</h4>
-                <div className="preview-stats">
-                  <div className="preview-stat">
-                    <span>Total Reports:</span>
-                    <strong>{stats.total}</strong>
-                  </div>
-                  <div className="preview-stat">
-                    <span>Pending:</span>
-                    <strong className="text-warning">{stats.pending}</strong>
-                  </div>
-                  <div className="preview-stat">
-                    <span>Resolved:</span>
-                    <strong className="text-success">{stats.resolved}</strong>
-                  </div>
-                  <div className="preview-stat">
-                    <span>Dismissed:</span>
-                    <strong className="text-danger">{stats.dismissed}</strong>
-                  </div>
-                </div>
+              <div className="form-group">
+                <label className="form-label">Reported User (Optional)</label>
+                <select
+                  className="form-select"
+                  value={newReport.reported_user_id}
+                  onChange={(e) => setNewReport({...newReport, reported_user_id: e.target.value})}
+                >
+                  <option value="">Select a user (optional)</option>
+                  {users.map(user => (
+                    <option key={user.admin_id} value={user.admin_id}>
+                      {user.full_name} ({user.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Reported Post (Optional)</label>
+                <select
+                  className="form-select"
+                  value={newReport.reported_post_id}
+                  onChange={(e) => setNewReport({...newReport, reported_post_id: e.target.value})}
+                >
+                  <option value="">Select a post (optional)</option>
+                  {posts.map(post => (
+                    <option key={post.post_id} value={post.post_id}>
+                      {post.title?.substring(0, 50)}...
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowGenerateReportModal(false)}>Cancel</button>
-              <button className="btn-primary success" onClick={generateReport} disabled={generatingReport}>
-                {generatingReport ? (
-                  <><span className="spinner-border spinner-border-sm me-2"></span>Generating...</>
+              <button className="btn-secondary" onClick={() => setShowAddReportModal(false)}>Cancel</button>
+              <button className="btn-primary success" onClick={addNewReport} disabled={addingReport}>
+                {addingReport ? (
+                  <><span className="spinner-border spinner-border-sm me-2"></span>Adding...</>
                 ) : (
-                  <><i className="bi bi-download"></i> Generate Report</>
+                  <><i className="bi bi-plus-circle"></i> Add Report</>
                 )}
               </button>
             </div>
@@ -660,12 +712,12 @@ export default function ReportsManagement() {
               {actionType === 'RESOLVED' ? (
                 <div className="warning-message success">
                   <i className="bi bi-check-circle-fill"></i>
-                  This will mark the report as resolved. The reported content may be reviewed.
+                  This will mark the report as resolved.
                 </div>
               ) : (
                 <div className="warning-message danger">
                   <i className="bi bi-exclamation-triangle-fill"></i>
-                  This will dismiss the report without any action on the reported content.
+                  This will dismiss the report without any action.
                 </div>
               )}
             </div>
@@ -739,9 +791,10 @@ export default function ReportsManagement() {
         .header-actions {
           display: flex;
           gap: 12px;
+          flex-wrap: wrap;
         }
 
-        .btn-generate, .btn-export {
+        .btn-add, .btn-export-csv, .btn-export-pdf {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -753,24 +806,34 @@ export default function ReportsManagement() {
           transition: all 0.3s ease;
         }
 
-        .btn-generate {
+        .btn-add {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           color: white;
         }
 
-        .btn-generate:hover {
+        .btn-add:hover {
           transform: translateY(-2px);
           box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
         }
 
-        .btn-export {
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          color: #495057;
+        .btn-export-csv {
+          background: #10b981;
+          color: white;
         }
 
-        .btn-export:hover {
-          background: #e9ecef;
+        .btn-export-csv:hover {
+          background: #059669;
+          transform: translateY(-2px);
+        }
+
+        .btn-export-pdf {
+          background: #ef4444;
+          color: white;
+        }
+
+        .btn-export-pdf:hover {
+          background: #dc2626;
+          transform: translateY(-2px);
         }
 
         /* Stats Cards */
@@ -883,6 +946,10 @@ export default function ReportsManagement() {
         .filter-tab.active .tab-count {
           background: rgba(255, 255, 255, 0.2);
         }
+
+        .tab-count.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .tab-count.resolved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .tab-count.dismissed { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
         /* Reports Grid */
         .reports-grid {
@@ -1027,80 +1094,14 @@ export default function ReportsManagement() {
           grid-column: span 3;
         }
 
-        /* Generate Report Modal */
-        .modal-generate {
-          max-width: 450px;
-        }
-
-        .form-group {
-          margin-bottom: 20px;
-        }
-
-        .form-label {
-          display: block;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 8px;
-          color: #374151;
-        }
-
-        .form-select {
-          width: 100%;
-          padding: 10px 12px;
-          border: 2px solid #e9ecef;
+        .btn-add-report {
+          margin-top: 16px;
+          padding: 10px 20px;
+          background: #4f46e5;
+          border: none;
           border-radius: 10px;
-          font-size: 14px;
-        }
-
-        .report-preview {
-          background: #f8f9fa;
-          border-radius: 12px;
-          padding: 16px;
-          margin-top: 20px;
-        }
-
-        .report-preview h4 {
-          font-size: 14px;
-          font-weight: 600;
-          margin-bottom: 12px;
-        }
-
-        .preview-stats {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-        }
-
-        .preview-stat {
-          display: flex;
-          justify-content: space-between;
-          font-size: 13px;
-        }
-
-        .report-summary {
-          background: #f8f9fa;
-          padding: 12px;
-          border-radius: 12px;
-          margin: 16px 0;
-        }
-
-        .warning-message {
-          padding: 12px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-        }
-
-        .warning-message.success {
-          background: #d1fae5;
-          color: #065f46;
-        }
-
-        .warning-message.danger {
-          background: #fee2e2;
-          color: #991b1b;
+          color: white;
+          cursor: pointer;
         }
 
         /* Modal */
@@ -1131,6 +1132,10 @@ export default function ReportsManagement() {
 
         .modal-container.modal-lg {
           max-width: 700px;
+        }
+
+        .modal-container.modal-add-report {
+          max-width: 500px;
         }
 
         .modal-header {
@@ -1176,6 +1181,37 @@ export default function ReportsManagement() {
 
         .modal-body {
           padding: 24px;
+        }
+
+        .form-group {
+          margin-bottom: 20px;
+        }
+
+        .form-label {
+          display: block;
+          font-size: 13px;
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: #374151;
+        }
+
+        .form-input, .form-select, .form-textarea {
+          width: 100%;
+          padding: 10px 12px;
+          border: 2px solid #e9ecef;
+          border-radius: 10px;
+          font-size: 14px;
+          transition: all 0.3s ease;
+        }
+
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+          outline: none;
+          border-color: #667eea;
+          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-textarea {
+          resize: vertical;
         }
 
         .details-section {
@@ -1229,6 +1265,32 @@ export default function ReportsManagement() {
           border-radius: 12px;
           color: #4b5563;
           line-height: 1.5;
+        }
+
+        .report-summary {
+          background: #f8f9fa;
+          padding: 12px;
+          border-radius: 12px;
+          margin: 16px 0;
+        }
+
+        .warning-message {
+          padding: 12px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+        }
+
+        .warning-message.success {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .warning-message.danger {
+          background: #fee2e2;
+          color: #991b1b;
         }
 
         .modal-footer {
@@ -1318,8 +1380,13 @@ export default function ReportsManagement() {
             align-items: flex-start;
           }
 
-          .preview-stats {
-            grid-template-columns: 1fr;
+          .header-actions {
+            width: 100%;
+          }
+
+          .btn-add, .btn-export-csv, .btn-export-pdf {
+            flex: 1;
+            justify-content: center;
           }
         }
       `}</style>
