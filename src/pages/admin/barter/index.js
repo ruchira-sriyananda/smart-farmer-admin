@@ -45,6 +45,8 @@ export default function BarterTransactions() {
   const [selectedRequests, setSelectedRequests] = useState([])
   const [selectedListingId, setSelectedListingId] = useState(null)
   const [showFullDetails, setShowFullDetails] = useState(false)
+  const [showImageModal, setShowImageModal] = useState(false)
+  const [selectedImage, setSelectedImage] = useState('')
   const [stats, setStats] = useState({
     total: 0,
     completed: 0,
@@ -137,6 +139,7 @@ export default function BarterTransactions() {
             quantity,
             unit,
             status,
+            image_url,
             user_id,
             owner:users!barter_listings_user_id_fkey (
               full_name,
@@ -243,6 +246,11 @@ export default function BarterTransactions() {
   const viewFullDetails = (listing) => {
     setSelectedTransaction(listing)
     setShowFullDetails(true)
+  }
+
+  const viewImage = (imageUrl) => {
+    setSelectedImage(imageUrl)
+    setShowImageModal(true)
   }
 
   const viewRequests = async (listingId) => {
@@ -633,7 +641,7 @@ export default function BarterTransactions() {
         </div>
       </div>
 
-      {/* Full Details Modal */}
+      {/* Full Details Modal with Image View */}
       {showFullDetails && selectedTransaction && (
         <div className="modal-overlay" onClick={() => setShowFullDetails(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -647,6 +655,19 @@ export default function BarterTransactions() {
               </button>
             </div>
             <div className="modal-body">
+              {/* Listing Image */}
+              {selectedTransaction.image_url && (
+                <div className="image-section">
+                  <div className="image-container" onClick={() => viewImage(selectedTransaction.image_url)}>
+                    <img src={selectedTransaction.image_url} alt={selectedTransaction.title} />
+                    <div className="image-overlay">
+                      <i className="bi bi-zoom-in"></i>
+                      <span>Click to enlarge</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Listing Information */}
               <div className="details-card">
                 <h4><i className="bi bi-box-seam"></i> Listing Information</h4>
@@ -730,7 +751,33 @@ export default function BarterTransactions() {
         </div>
       )}
 
-      {/* Requests Modal */}
+      {/* Image Modal */}
+      {showImageModal && (
+        <div className="modal-overlay" onClick={() => setShowImageModal(false)}>
+          <div className="modal-container modal-image" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-icon">
+                <i className="bi bi-image-fill"></i>
+              </div>
+              <h3>Product Image</h3>
+              <button className="modal-close" onClick={() => setShowImageModal(false)}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div className="modal-body image-modal-body">
+              <img src={selectedImage} alt="Barter Listing" />
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowImageModal(false)}>Close</button>
+              <a href={selectedImage} download className="btn-primary">
+                <i className="bi bi-download"></i> Download
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Requests Modal - No Approve/Reject buttons */}
       {showRequestModal && (
         <div className="modal-overlay" onClick={() => setShowRequestModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -771,12 +818,6 @@ export default function BarterTransactions() {
                         <i className="bi bi-calendar3"></i>
                         {new Date(request.created_at).toLocaleString()}
                       </div>
-                      {request.request_status === 'PENDING' && (
-                        <div className="request-actions">
-                          <button className="btn-approve">Approve</button>
-                          <button className="btn-reject">Reject</button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 ))
@@ -1307,6 +1348,10 @@ export default function BarterTransactions() {
           max-width: 700px;
         }
 
+        .modal-container.modal-image {
+          max-width: 800px;
+        }
+
         .modal-header {
           padding: 24px 24px 16px;
           display: flex;
@@ -1348,6 +1393,71 @@ export default function BarterTransactions() {
 
         .modal-body {
           padding: 24px;
+        }
+
+        .image-section {
+          margin-bottom: 24px;
+          text-align: center;
+        }
+
+        .image-container {
+          position: relative;
+          display: inline-block;
+          max-width: 100%;
+          cursor: pointer;
+          border-radius: 12px;
+          overflow: hidden;
+        }
+
+        .image-container img {
+          max-width: 100%;
+          max-height: 300px;
+          border-radius: 12px;
+          transition: transform 0.3s ease;
+        }
+
+        .image-container:hover img {
+          transform: scale(1.05);
+        }
+
+        .image-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.6);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+          color: white;
+        }
+
+        .image-container:hover .image-overlay {
+          opacity: 1;
+        }
+
+        .image-overlay i {
+          font-size: 32px;
+          margin-bottom: 8px;
+        }
+
+        .image-overlay span {
+          font-size: 12px;
+        }
+
+        .image-modal-body {
+          text-align: center;
+          padding: 20px;
+        }
+
+        .image-modal-body img {
+          max-width: 100%;
+          max-height: 70vh;
+          border-radius: 8px;
         }
 
         .details-card {
@@ -1519,41 +1629,17 @@ export default function BarterTransactions() {
 
         .request-footer {
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-end;
           align-items: center;
         }
 
-        .request-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .btn-approve, .btn-reject {
-          padding: 4px 12px;
-          border: none;
-          border-radius: 6px;
+        .request-date {
           font-size: 11px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.3s ease;
+          color: #9ca3af;
         }
 
-        .btn-approve {
-          background: #10b981;
-          color: white;
-        }
-
-        .btn-approve:hover {
-          background: #059669;
-        }
-
-        .btn-reject {
-          background: #ef4444;
-          color: white;
-        }
-
-        .btn-reject:hover {
-          background: #dc2626;
+        .request-date i {
+          margin-right: 4px;
         }
 
         .modal-footer {
@@ -1581,6 +1667,10 @@ export default function BarterTransactions() {
           color: white;
           font-weight: 600;
           cursor: pointer;
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
         }
 
         @keyframes fadeIn {
