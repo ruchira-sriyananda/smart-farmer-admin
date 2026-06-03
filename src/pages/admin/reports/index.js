@@ -14,6 +14,7 @@ export default function ReportsManagement() {
   const [showActionModal, setShowActionModal] = useState(false)
   const [actionType, setActionType] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [reviewersMap, setReviewersMap] = useState({})
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -32,32 +33,52 @@ export default function ReportsManagement() {
       setLoading(true)
       setError(null)
       
+      // First fetch reports without joins
       let query = supabase
         .from('system_reports')
-        .select(`
-          *,
-          reviewed_by_admin:admin_users!reviewed_by (
-            admin_id,
-            full_name,
-            email
-          ),
-          reported_user:admin_users!reported_user_id (
-            admin_id,
-            full_name,
-            email
-          )
-        `)
+        .select('*')
         .order('created_at', { ascending: false })
 
       if (filter !== 'ALL') {
         query = query.eq('report_status', filter)
       }
 
-      const { data, error } = await query
+      const { data: reportsData, error: reportsError } = await query
 
-      if (error) throw error
+      if (reportsError) throw reportsError
 
-      setReports(data || [])
+      if (reportsData && reportsData.length > 0) {
+        // Get unique reviewer IDs
+        const reviewerIds = [...new Set(reportsData.map(r => r.reviewed_by).filter(id => id))]
+        
+        // Fetch reviewer names separately
+        let reviewersMapData = {}
+        if (reviewerIds.length > 0) {
+          const { data: reviewers, error: reviewersError } = await supabase
+            .from('admin_users')
+            .select('admin_id, full_name, email')
+            .in('admin_id', reviewerIds)
+
+          if (!reviewersError && reviewers) {
+            reviewersMapData = reviewers.reduce((acc, reviewer) => {
+              acc[reviewer.admin_id] = reviewer
+              return acc
+            }, {})
+          }
+        }
+        
+        setReviewersMap(reviewersMapData)
+        
+        // Combine data
+        const reportsWithReviewers = reportsData.map(report => ({
+          ...report,
+          reviewed_by_admin: reviewersMapData[report.reviewed_by] || null
+        }))
+        
+        setReports(reportsWithReviewers)
+      } else {
+        setReports([])
+      }
     } catch (err) {
       console.error('Error fetching reports:', err)
       setError(err.message)
@@ -182,7 +203,21 @@ export default function ReportsManagement() {
           <i className="bi bi-exclamation-triangle-fill"></i>
           <h3>Failed to Load Reports</h3>
           <p>{error}</p>
-          <button className="btn-primary" onClick={fetchReports}>Retry</button>
+          <div className="error-actions">
+            <button className="btn-primary" onClick={fetchReports}>
+              <i className="bi bi-arrow-repeat"></i> Retry
+            </button>
+            <button className="btn-secondary" onClick={() => router.push('/admin/dashboard')}>
+              <i className="bi bi-house"></i> Back to Dashboard
+            </button>
+          </div>
+          <div className="info-box">
+            <i className="bi bi-info-circle-fill"></i>
+            <div>
+              <strong>Need help?</strong>
+              <p>Please run the SQL fix in Supabase to set up the proper relationships.</p>
+            </div>
+          </div>
         </div>
         <style jsx>{`
           .error-container {
@@ -190,12 +225,12 @@ export default function ReportsManagement() {
             padding: 60px 20px;
             background: white;
             border-radius: 24px;
+            max-width: 600px;
             margin: 40px auto;
-            max-width: 500px;
           }
           .error-container i {
             font-size: 48px;
-            color: #dc3545;
+            color: #f59e0b;
             margin-bottom: 16px;
           }
           .error-container h3 {
@@ -206,14 +241,42 @@ export default function ReportsManagement() {
             color: #6c757d;
             margin-bottom: 24px;
           }
+          .error-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-bottom: 24px;
+          }
           .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 10px 20px;
+            background: #4f46e5;
             border: none;
-            padding: 10px 24px;
-            border-radius: 12px;
+            border-radius: 10px;
             color: white;
             font-weight: 500;
             cursor: pointer;
+          }
+          .btn-secondary {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            color: #495057;
+            font-weight: 500;
+            cursor: pointer;
+          }
+          .info-box {
+            background: #e7f1ff;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: left;
+            display: flex;
+            gap: 16px;
+          }
+          .info-box i {
+            font-size: 24px;
+            color: #0d6efd;
+            margin: 0;
           }
         `}</style>
       </AdminLayout>
@@ -419,12 +482,6 @@ export default function ReportsManagement() {
                   <h4><i className="bi bi-person"></i> Reported User</h4>
                   <div className="user-info-box">
                     <div><strong>User ID:</strong> {selectedReport.reported_user_id}</div>
-                    {selectedReport.reported_user && (
-                      <>
-                        <div><strong>Name:</strong> {selectedReport.reported_user.full_name}</div>
-                        <div><strong>Email:</strong> {selectedReport.reported_user.email}</div>
-                      </>
-                    )}
                   </div>
                 </div>
               )}
@@ -526,7 +583,6 @@ export default function ReportsManagement() {
           margin: 0 auto;
         }
 
-        /* Header */
         .page-header {
           margin-bottom: 28px;
         }
@@ -565,7 +621,6 @@ export default function ReportsManagement() {
           font-size: 14px;
         }
 
-        /* Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -627,7 +682,6 @@ export default function ReportsManagement() {
         .text-success { color: #10b981; }
         .text-danger { color: #ef4444; }
 
-        /* Filter Tabs */
         .filter-tabs {
           display: flex;
           gap: 12px;
@@ -676,11 +730,6 @@ export default function ReportsManagement() {
           background: rgba(255, 255, 255, 0.2);
         }
 
-        .tab-count.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .tab-count.resolved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .tab-count.dismissed { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-
-        /* Reports Grid */
         .reports-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
@@ -729,21 +778,6 @@ export default function ReportsManagement() {
         .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .status-badge.resolved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .status-badge.dismissed { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .status-badge.reviewed { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-
-        .severity-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 2px 8px;
-          border-radius: 12px;
-          font-size: 10px;
-          font-weight: 600;
-        }
-
-        .severity-badge.high { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .severity-badge.medium { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .severity-badge.low { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
         .report-card-body {
           padding: 16px 20px;
@@ -853,7 +887,6 @@ export default function ReportsManagement() {
           padding: 80px 20px;
           background: white;
           border-radius: 24px;
-          grid-column: span 3;
         }
 
         .empty-state i {
@@ -863,7 +896,6 @@ export default function ReportsManagement() {
           display: block;
         }
 
-        /* Modal */
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -970,17 +1002,6 @@ export default function ReportsManagement() {
           display: block;
         }
 
-        .report-detail-box, .report-description-box {
-          margin-bottom: 16px;
-        }
-
-        .report-detail-box label, .report-description-box label {
-          font-size: 12px;
-          font-weight: 600;
-          margin-bottom: 6px;
-          display: block;
-        }
-
         .report-reason-box {
           background: #fef3c7;
           padding: 12px;
@@ -994,12 +1015,6 @@ export default function ReportsManagement() {
           border-radius: 12px;
           color: #4b5563;
           line-height: 1.5;
-        }
-
-        .user-info-box, .post-info-box, .moderation-info-box {
-          background: #f8f9fa;
-          padding: 12px;
-          border-radius: 12px;
         }
 
         .report-summary {
@@ -1080,12 +1095,6 @@ export default function ReportsManagement() {
           to {
             opacity: 1;
             transform: translateY(0);
-          }
-        }
-
-        @media (max-width: 1200px) {
-          .reports-grid {
-            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
           }
         }
 
