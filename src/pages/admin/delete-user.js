@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
+// Use service role key to bypass RLS for admin operations
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -12,6 +13,7 @@ const supabaseAdmin = createClient(
 )
 
 export default async function handler(req, res) {
+  // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -82,15 +84,99 @@ export default async function handler(req, res) {
 
       result = { success: true, message: 'Admin user deleted successfully', deletedTables }
     } else {
-      // For regular users - you can implement similar cascade delete
+      // For regular users - cascade delete
+      // Delete from user_sessions
+      const { error: sessionsError } = await supabaseAdmin
+        .from('user_sessions')
+        .delete()
+        .eq('user_id', identifier)
+      if (!sessionsError) deletedTables.push('user_sessions')
+
+      // Delete from posts
+      const { error: postsError } = await supabaseAdmin
+        .from('posts')
+        .delete()
+        .eq('user_id', identifier)
+      if (!postsError) deletedTables.push('posts')
+
+      // Delete from comments
+      const { error: commentsError } = await supabaseAdmin
+        .from('comments')
+        .delete()
+        .eq('user_id', identifier)
+      if (!commentsError) deletedTables.push('comments')
+
+      // Delete from messages
+      const { error: messagesError } = await supabaseAdmin
+        .from('messages')
+        .delete()
+        .or(`sender_id.eq.${identifier},receiver_id.eq.${identifier}`)
+      if (!messagesError) deletedTables.push('messages')
+
+      // Delete from barter_listings
+      const { error: barterError } = await supabaseAdmin
+        .from('barter_listings')
+        .delete()
+        .eq('user_id', identifier)
+      if (!barterError) deletedTables.push('barter_listings')
+
+      // Delete from barter_requests
+      const { error: requestsError } = await supabaseAdmin
+        .from('barter_requests')
+        .delete()
+        .eq('requester_id', identifier)
+      if (!requestsError) deletedTables.push('barter_requests')
+
+      // Delete from advertisements
+      const { error: adsError } = await supabaseAdmin
+        .from('advertisements')
+        .delete()
+        .eq('user_id', identifier)
+      if (!adsError) deletedTables.push('advertisements')
+
+      // Delete from payments
+      const { error: paymentsError } = await supabaseAdmin
+        .from('payments')
+        .delete()
+        .eq('user_id', identifier)
+      if (!paymentsError) deletedTables.push('payments')
+
+      // Delete from ai_chat_history
+      const { error: chatError } = await supabaseAdmin
+        .from('ai_chat_history')
+        .delete()
+        .eq('user_id', identifier)
+      if (!chatError) deletedTables.push('ai_chat_history')
+
+      // Delete from notifications
+      const { error: notifError } = await supabaseAdmin
+        .from('notifications')
+        .delete()
+        .eq('user_id', identifier)
+      if (!notifError) deletedTables.push('notifications')
+
+      // Delete from audit_logs
+      const { error: auditError } = await supabaseAdmin
+        .from('audit_logs')
+        .delete()
+        .eq('user_id', identifier)
+      if (!auditError) deletedTables.push('audit_logs')
+
+      // Delete from online_users
+      const { error: onlineError } = await supabaseAdmin
+        .from('online_users')
+        .delete()
+        .eq('user_id', identifier)
+      if (!onlineError) deletedTables.push('online_users')
+
+      // Finally delete from users
       const { error: userError } = await supabaseAdmin
         .from('users')
         .delete()
         .eq('user_id', identifier)
-      
       if (userError) throw userError
       deletedTables.push('users')
-      
+
       result = { success: true, message: 'User deleted successfully', deletedTables }
     }
 
