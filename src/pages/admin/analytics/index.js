@@ -62,7 +62,6 @@ export default function AnalyticsDashboard() {
       ads: 0
     },
     postActivity: [],
-    reportTrends: [],
     userActivity: [],
     topContributors: [],
     popularCategories: []
@@ -100,9 +99,6 @@ export default function AnalyticsDashboard() {
         newThisMonth,
         verifiedUsers,
         pendingUsers,
-        farmers,
-        vendors,
-        admins,
         posts,
         comments,
         reports,
@@ -114,7 +110,6 @@ export default function AnalyticsDashboard() {
         ads,
         userGrowthData,
         weeklyActivity,
-        reportTrendsData,
         topContributorsData,
         popularCategoriesData
       ] = await Promise.all([
@@ -125,9 +120,6 @@ export default function AnalyticsDashboard() {
         supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', monthAgo.toISOString()),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', 'farmer-role-id'),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', 'vendor-role-id'),
-        supabase.from('admin_users').select('*', { count: 'exact', head: true }),
         supabase.from('posts').select('*', { count: 'exact', head: true }),
         supabase.from('comments').select('*', { count: 'exact', head: true }),
         supabase.from('system_reports').select('*', { count: 'exact', head: true }),
@@ -139,7 +131,6 @@ export default function AnalyticsDashboard() {
         supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
         fetchUserGrowth(startDate),
         fetchWeeklyActivity(startDate),
-        fetchReportTrends(startDate),
         fetchTopContributors(),
         fetchPopularCategories()
       ])
@@ -152,6 +143,8 @@ export default function AnalyticsDashboard() {
       // Update farmers and vendors with proper role IDs
       let farmersCount = 0
       let vendorsCount = 0
+      let adminsCount = 0
+      
       if (roleMap['FARMER']) {
         const { count } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER'])
         farmersCount = count || 0
@@ -159,6 +152,10 @@ export default function AnalyticsDashboard() {
       if (roleMap['VENDOR']) {
         const { count } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR'])
         vendorsCount = count || 0
+      }
+      if (roleMap['ADMIN']) {
+        const { count } = await supabase.from('admin_users').select('*', { count: 'exact', head: true })
+        adminsCount = count || 0
       }
 
       setAnalytics({
@@ -172,7 +169,7 @@ export default function AnalyticsDashboard() {
           pending: pendingUsers.count || 0,
           farmers: farmersCount,
           vendors: vendorsCount,
-          admins: admins.count || 0
+          admins: adminsCount
         },
         contentStats: {
           posts: posts.count || 0,
@@ -187,7 +184,6 @@ export default function AnalyticsDashboard() {
         },
         userGrowth: userGrowthData,
         postActivity: weeklyActivity,
-        reportTrends: reportTrendsData,
         topContributors: topContributorsData,
         popularCategories: popularCategoriesData
       })
@@ -232,32 +228,6 @@ export default function AnalyticsDashboard() {
     })
 
     return { labels: days, values: activityByDay }
-  }
-
-  const fetchReportTrends = async (startDate) => {
-    const { data } = await supabase
-      .from('system_reports')
-      .select('created_at, report_status')
-      .gte('created_at', startDate.toISOString())
-
-    const pendingByDay = {}
-    const resolvedByDay = {}
-    
-    data?.forEach(report => {
-      const date = new Date(report.created_at).toLocaleDateString()
-      if (report.report_status === 'PENDING') {
-        pendingByDay[date] = (pendingByDay[date] || 0) + 1
-      } else if (report.report_status === 'RESOLVED') {
-        resolvedByDay[date] = (resolvedByDay[date] || 0) + 1
-      }
-    })
-
-    const labels = Object.keys(pendingByDay).slice(-14)
-    return {
-      labels,
-      pending: labels.map(d => pendingByDay[d] || 0),
-      resolved: labels.map(d => resolvedByDay[d] || 0)
-    }
   }
 
   const fetchTopContributors = async () => {
@@ -330,28 +300,6 @@ export default function AnalyticsDashboard() {
       borderRadius: 8,
       barPercentage: 0.65
     }]
-  }
-
-  const reportTrendsChart = {
-    labels: analytics.reportTrends.labels || [],
-    datasets: [
-      {
-        label: 'Pending Reports',
-        data: analytics.reportTrends.pending || [],
-        borderColor: '#f59e0b',
-        backgroundColor: 'rgba(245, 158, 11, 0.1)',
-        fill: true,
-        tension: 0.4
-      },
-      {
-        label: 'Resolved Reports',
-        data: analytics.reportTrends.resolved || [],
-        borderColor: '#10b981',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-        fill: true,
-        tension: 0.4
-      }
-    ]
   }
 
   const categoryChart = {
@@ -603,12 +551,23 @@ export default function AnalyticsDashboard() {
           <div className="chart-card">
             <div className="chart-header">
               <div>
-                <h5>📋 Report Trends</h5>
-                <p>Pending vs Resolved reports</p>
+                <h5>🏆 Top Contributors</h5>
+                <p>Most active community members</p>
               </div>
             </div>
             <div className="chart-body">
-              <Line data={reportTrendsChart} options={chartOptions} />
+              <div className="contributor-summary">
+                {analytics.topContributors.map((contributor, idx) => (
+                  <div key={idx} className="contributor-summary-item">
+                    <div className="contributor-rank">#{idx + 1}</div>
+                    <div className="contributor-name">{contributor.name}</div>
+                    <div className="contributor-count">{contributor.count} posts</div>
+                  </div>
+                ))}
+                {analytics.topContributors.length === 0 && (
+                  <div className="no-data">No contributor data available</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -642,28 +601,16 @@ export default function AnalyticsDashboard() {
 
           <div className="dist-card">
             <div className="dist-header">
-              <h5><i className="bi bi-trophy"></i> Top Contributors</h5>
-              <p>Most active community members</p>
+              <h5><i className="bi bi-star"></i> Community Leaders</h5>
+              <p>Top contributors by posts</p>
             </div>
             <div className="dist-body">
-              <div className="dist-chart">
+              <div className="polar-container">
                 {analytics.topContributors.length > 0 ? (
                   <PolarArea data={contributorChart} options={chartOptions} />
                 ) : (
-                  <div className="no-data">No contributor data available</div>
+                  <div className="no-data">No leader data available</div>
                 )}
-              </div>
-              <div className="contributor-list">
-                {analytics.topContributors.map((contributor, idx) => (
-                  <div key={idx} className="contributor-item">
-                    <div className="contributor-rank">#{idx + 1}</div>
-                    <div className="contributor-info">
-                      <div className="contributor-name">{contributor.name}</div>
-                      <div className="contributor-stats">{contributor.count} posts</div>
-                    </div>
-                    <i className="bi bi-award-fill"></i>
-                  </div>
-                ))}
               </div>
             </div>
           </div>
@@ -970,6 +917,41 @@ export default function AnalyticsDashboard() {
           height: 300px;
         }
 
+        .contributor-summary {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          padding: 10px;
+        }
+
+        .contributor-summary-item {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 12px;
+          background: #f8f9fa;
+          border-radius: 12px;
+        }
+
+        .contributor-rank {
+          width: 40px;
+          font-weight: 700;
+          color: #4f46e5;
+          font-size: 18px;
+        }
+
+        .contributor-name {
+          flex: 1;
+          font-weight: 500;
+          color: #1f2937;
+        }
+
+        .contributor-count {
+          font-size: 13px;
+          font-weight: 600;
+          color: #10b981;
+        }
+
         .distribution-section {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -1012,6 +994,11 @@ export default function AnalyticsDashboard() {
           height: 200px;
         }
 
+        .polar-container {
+          flex: 1;
+          height: 280px;
+        }
+
         .dist-list {
           flex: 1;
           display: flex;
@@ -1042,54 +1029,6 @@ export default function AnalyticsDashboard() {
           font-size: 13px;
           font-weight: 600;
           color: #1f2937;
-        }
-
-        .contributor-list {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .contributor-item {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 10px;
-          background: #f8f9fa;
-          border-radius: 12px;
-          transition: all 0.3s ease;
-        }
-
-        .contributor-item:hover {
-          background: #e9ecef;
-        }
-
-        .contributor-rank {
-          width: 35px;
-          font-weight: 700;
-          color: #4f46e5;
-          font-size: 16px;
-        }
-
-        .contributor-info {
-          flex: 1;
-        }
-
-        .contributor-name {
-          font-weight: 600;
-          color: #1f2937;
-          font-size: 13px;
-        }
-
-        .contributor-stats {
-          font-size: 11px;
-          color: #6c757d;
-        }
-
-        .contributor-item i {
-          color: #f59e0b;
-          font-size: 18px;
         }
 
         .no-data {
@@ -1193,6 +1132,9 @@ export default function AnalyticsDashboard() {
             flex-direction: column;
           }
           .dist-chart {
+            height: 250px;
+          }
+          .polar-container {
             height: 250px;
           }
           .summary-grid {
