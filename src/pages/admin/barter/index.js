@@ -2,232 +2,308 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+  Filler
+} from 'chart.js'
+import { Line, Bar, Doughnut } from 'react-chartjs-2'
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+  Filler
+)
 
 export default function BarterTransactions() {
   const router = useRouter()
-  const [listings, setListings] = useState([])
-  const [requests, setRequests] = useState([])
+  const [transactions, setTransactions] = useState([])
+  const [barterListings, setBarterListings] = useState([])
+  const [barterRequests, setBarterRequests] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('listings')
-  const [selectedItem, setSelectedItem] = useState(null)
-  const [showActionModal, setShowActionModal] = useState(false)
-  const [actionType, setActionType] = useState('')
-  const [actionComment, setActionComment] = useState('')
-  const [actionLoading, setActionLoading] = useState(false)
+  const [dateRange, setDateRange] = useState('month')
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [selectedTransaction, setSelectedTransaction] = useState(null)
+  const [showRequestModal, setShowRequestModal] = useState(false)
+  const [selectedRequests, setSelectedRequests] = useState([])
   const [stats, setStats] = useState({
-    totalListings: 0,
+    total: 0,
+    completed: 0,
+    pending: 0,
+    cancelled: 0,
     activeListings: 0,
+    totalListings: 0,
+    totalRequests: 0,
     pendingRequests: 0,
-    completedTrades: 0,
-    totalValue: 0
+    successRate: 0,
+    monthlyGrowth: 0
+  })
+  const [trendData, setTrendData] = useState({
+    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+    transactions: [0, 0, 0, 0],
+    completion: [0, 0, 0, 0]
   })
 
   useEffect(() => {
     fetchData()
     
-    // Real-time subscriptions
-    const listingsSubscription = supabase
-      .channel('barter_listings_changes')
+    const subscription = supabase
+      .channel('barter_changes')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'barter_listings' },
         () => fetchData()
       )
       .subscribe()
 
-    const requestsSubscription = supabase
-      .channel('barter_requests_changes')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'barter_requests' },
-        () => fetchData()
-      )
-      .subscribe()
-
-    return () => {
-      listingsSubscription.unsubscribe()
-      requestsSubscription.unsubscribe()
-    }
-  }, [])
+    return () => subscription.unsubscribe()
+  }, [dateRange])
 
   const fetchData = async () => {
     try {
       setLoading(true)
       
-      await Promise.all([
-        fetchListings(),
-        fetchRequests(),
-        fetchStats()
-      ])
+      // Fetch barter listings
+      const { data: listingsData, error: listingsError } = await supabase
+        .from('barter_listings')
+        .select(`
+          *,
+          users!barter_listings_user_id_fkey (
+            user_id,
+            full_name,
+            email,
+            profile_image
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      if (!listingsError && listingsData) {
+        setBarterListings(listingsData)
+      }
+
+      // Fetch barter requests
+      const { data: requestsData, error: requestsError } = await supabase
+        .from('barter_requests')
+        .select(`
+          *,
+          users!barter_requests_requester_id_fkey (
+            user_id,
+            full_name,
+            email
+          ),
+          barter_listings!barter_requests_listing_id_fkey (
+            listing_id,
+            title,
+            user_id,
+            users!barter_listings_user_id_fkey (
+              full_name
+            )
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      if (!requestsError && requestsData) {
+        setBarterRequests(requestsData)
+      }
+
+      // Calculate stats from actual data
+      calculateStatsFromData(listingsData || [], requestsData || [])
+      
+      // Generate trend data from listings (by created_at date)
+      calculateTrendsFromListings(listingsData || [])
+      
     } catch (err) {
-      console.error('Error fetching barter data:', err)
+      console.error('Error fetching data:', err)
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchListings = async () => {
-    const { data, error } = await supabase
-      .from('barter_listings')
-      .select(`
-        *,
-        users!barter_listings_user_id_fkey (
-          user_id,
-          full_name,
-          email,
-          profile_image
-        )
-      `)
-      .order('created_at', { ascending: false })
-
-    if (!error && data) {
-      setListings(data)
-    }
-  }
-
-  const fetchRequests = async () => {
-    const { data, error } = await supabase
-      .from('barter_requests')
-      .select(`
-        *,
-        listing:barter_listings!listing_id (
-          listing_id,
-          title,
-          description,
-          quantity,
-          unit,
-          users!barter_listings_user_id_fkey (
-            full_name,
-            email
-          )
-        ),
-        requester:users!requester_id (
-          user_id,
-          full_name,
-          email,
-          profile_image
-        )
-      `)
-      .order('created_at', { ascending: false })
-
-    if (!error && data) {
-      setRequests(data)
-    }
-  }
-
-  const fetchStats = async () => {
-    // Get listings stats
-    const { data: listingsData } = await supabase
-      .from('barter_listings')
-      .select('status')
-
-    // Get requests stats
-    const { data: requestsData } = await supabase
-      .from('barter_requests')
-      .select('request_status')
-
-    // Calculate total trade value (simplified)
-    const { data: listingsValue } = await supabase
-      .from('barter_listings')
-      .select('quantity, unit')
-
-    const totalValue = listingsValue?.reduce((sum, l) => sum + (parseFloat(l.quantity) || 0), 0) || 0
+  const calculateStatsFromData = (listingsData, requestsData) => {
+    const activeListings = listingsData.filter(l => l.status === 'ACTIVE').length
+    const totalListings = listingsData.length
+    const totalRequests = requestsData.length
+    const pendingRequests = requestsData.filter(r => r.request_status === 'PENDING').length
+    
+    // Calculate completed vs pending vs cancelled from requests
+    const completed = requestsData.filter(r => r.request_status === 'COMPLETED').length
+    const pending = requestsData.filter(r => r.request_status === 'PENDING').length
+    const cancelled = requestsData.filter(r => r.request_status === 'CANCELLED').length
+    const total = completed + pending + cancelled
+    
+    const successRate = total > 0 ? Math.round((completed / total) * 100) : 0
+    
+    // Calculate monthly growth (compare last 30 days with previous 30 days)
+    const now = new Date()
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const sixtyDaysAgo = new Date()
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60)
+    
+    const recentRequests = requestsData.filter(r => new Date(r.created_at) >= thirtyDaysAgo)
+    const previousRequests = requestsData.filter(r => 
+      new Date(r.created_at) >= sixtyDaysAgo && new Date(r.created_at) < thirtyDaysAgo
+    )
+    
+    const monthlyGrowth = previousRequests.length > 0 
+      ? Math.round(((recentRequests.length - previousRequests.length) / previousRequests.length) * 100)
+      : 0
 
     setStats({
-      totalListings: listingsData?.length || 0,
-      activeListings: listingsData?.filter(l => l.status === 'ACTIVE').length || 0,
-      pendingRequests: requestsData?.filter(r => r.request_status === 'PENDING').length || 0,
-      completedTrades: requestsData?.filter(r => r.request_status === 'COMPLETED').length || 0,
-      totalValue: totalValue
+      total,
+      completed,
+      pending,
+      cancelled,
+      activeListings,
+      totalListings,
+      totalRequests,
+      pendingRequests,
+      successRate,
+      monthlyGrowth
     })
   }
 
-  const updateRequestStatus = async (requestId, status, comment = '') => {
-    setActionLoading(true)
-    const session = JSON.parse(localStorage.getItem('adminSession'))
+  const calculateTrendsFromListings = (listingsData) => {
+    // Group listings by week (last 4 weeks)
+    const weeks = [
+      { name: 'Week 1', count: 0, completed: 0 },
+      { name: 'Week 2', count: 0, completed: 0 },
+      { name: 'Week 3', count: 0, completed: 0 },
+      { name: 'Week 4', count: 0, completed: 0 }
+    ]
     
-    const updateData = {
-      request_status: status,
-      updated_at: new Date().toISOString(),
-      admin_notes: comment || (status === 'APPROVED' ? 'Request approved by admin' : 'Request rejected by admin')
-    }
-
-    const { error } = await supabase
-      .from('barter_requests')
-      .update(updateData)
-      .eq('request_id', requestId)
-
-    if (!error) {
-      // If approved, update the listing status
-      if (status === 'APPROVED' && selectedItem?.listing_id) {
-        await supabase
-          .from('barter_listings')
-          .update({ status: 'COMPLETED' })
-          .eq('listing_id', selectedItem.listing_id)
-      }
+    const now = new Date()
+    
+    listingsData.forEach(listing => {
+      const daysSince = Math.floor((now - new Date(listing.created_at)) / (1000 * 60 * 60 * 24))
+      const weekIndex = Math.floor(daysSince / 7)
       
-      fetchData()
-      setShowActionModal(false)
-      setSelectedItem(null)
-      setActionComment('')
-      alert(`Request ${status.toLowerCase()} successfully!`)
-    } else {
-      alert(`Error updating request: ${error.message}`)
-    }
-    setActionLoading(false)
+      if (weekIndex >= 0 && weekIndex < 4) {
+        weeks[3 - weekIndex].count++
+        if (listing.status === 'COMPLETED') {
+          weeks[3 - weekIndex].completed++
+        }
+      }
+    })
+    
+    setTrendData({
+      labels: weeks.map(w => w.name),
+      transactions: weeks.map(w => w.count),
+      completion: weeks.map(w => w.count > 0 ? Math.round((w.completed / w.count) * 100) : 0)
+    })
   }
 
-  const updateListingStatus = async (listingId, status) => {
-    setActionLoading(true)
-    
-    const { error } = await supabase
-      .from('barter_listings')
-      .update({ 
-        status: status,
-        updated_at: new Date().toISOString()
-      })
-      .eq('listing_id', listingId)
+  const viewDetails = (listing) => {
+    setSelectedTransaction(listing)
+    setShowDetailsModal(true)
+  }
 
-    if (!error) {
-      fetchData()
-      setShowActionModal(false)
-      setSelectedItem(null)
-      alert(`Listing ${status.toLowerCase()} successfully!`)
-    } else {
-      alert(`Error updating listing: ${error.message}`)
-    }
-    setActionLoading(false)
+  const viewRequests = (listingId) => {
+    const requests = barterRequests.filter(r => r.listing_id === listingId)
+    setSelectedRequests(requests)
+    setShowRequestModal(true)
   }
 
   const getStatusBadge = (status) => {
     const badges = {
-      'ACTIVE': <span className="badge-active"><i className="bi bi-check-circle-fill"></i> Active</span>,
-      'PENDING': <span className="badge-pending"><i className="bi bi-clock-fill"></i> Pending</span>,
-      'APPROVED': <span className="badge-approved"><i className="bi bi-check-circle-fill"></i> Approved</span>,
-      'REJECTED': <span className="badge-rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>,
-      'COMPLETED': <span className="badge-completed"><i className="bi bi-check-double-fill"></i> Completed</span>,
-      'CANCELLED': <span className="badge-cancelled"><i className="bi bi-ban-fill"></i> Cancelled</span>
+      'ACTIVE': <span className="status-badge active"><i className="bi bi-check-circle-fill"></i> Active</span>,
+      'INACTIVE': <span className="status-badge inactive"><i className="bi bi-x-circle-fill"></i> Inactive</span>,
+      'PENDING': <span className="status-badge pending"><i className="bi bi-clock-fill"></i> Pending</span>,
+      'COMPLETED': <span className="status-badge completed"><i className="bi bi-check-circle-fill"></i> Completed</span>,
+      'CANCELLED': <span className="status-badge cancelled"><i className="bi bi-x-circle-fill"></i> Cancelled</span>
     }
-    return badges[status] || <span className="badge-default">{status}</span>
+    return badges[status] || <span className="status-badge default">{status}</span>
   }
 
   const getRequestStatusBadge = (status) => {
     const badges = {
-      'PENDING': <span className="badge-pending"><i className="bi bi-clock-fill"></i> Pending</span>,
-      'APPROVED': <span className="badge-approved"><i className="bi bi-check-circle-fill"></i> Approved</span>,
-      'REJECTED': <span className="badge-rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>,
-      'COMPLETED': <span className="badge-completed"><i className="bi bi-check-double-fill"></i> Completed</span>
+      'PENDING': <span className="status-badge pending"><i className="bi bi-clock-fill"></i> Pending</span>,
+      'APPROVED': <span className="status-badge completed"><i className="bi bi-check-circle-fill"></i> Approved</span>,
+      'REJECTED': <span className="status-badge cancelled"><i className="bi bi-x-circle-fill"></i> Rejected</span>,
+      'COMPLETED': <span className="status-badge completed"><i className="bi bi-check-circle-fill"></i> Completed</span>
     }
-    return badges[status] || <span className="badge-default">{status}</span>
+    return badges[status] || <span className="status-badge default">{status}</span>
   }
 
-  const openActionModal = (item, type, action) => {
-    setSelectedItem(item)
-    setActionType(action)
-    setShowActionModal(true)
+  const transactionsChart = {
+    labels: trendData.labels,
+    datasets: [{
+      label: 'New Listings',
+      data: trendData.transactions,
+      borderColor: '#4f46e5',
+      backgroundColor: 'rgba(79, 70, 229, 0.1)',
+      fill: true,
+      tension: 0.4,
+      pointBackgroundColor: '#4f46e5',
+      pointBorderColor: '#fff',
+      pointBorderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 6
+    }]
+  }
+
+  const completionChart = {
+    labels: trendData.labels,
+    datasets: [{
+      label: 'Completion Rate (%)',
+      data: trendData.completion,
+      borderColor: '#10b981',
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      fill: true,
+      tension: 0.4,
+      pointBackgroundColor: '#10b981',
+      pointBorderColor: '#fff',
+      pointBorderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 6
+    }]
+  }
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { usePointStyle: true, boxWidth: 10, font: { size: 11 } }
+      },
+      tooltip: {
+        backgroundColor: '#1f2937',
+        titleColor: '#fff',
+        bodyColor: '#9ca3af',
+        padding: 10,
+        cornerRadius: 8
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        grid: { color: '#e5e7eb' },
+        ticks: { stepSize: 1 }
+      },
+      x: {
+        grid: { display: false }
+      }
+    }
   }
 
   if (loading) {
     return (
-      <AdminLayout title="Barter Management">
+      <AdminLayout title="Barter System">
         <div className="loading-container">
           <div className="loading-spinner"></div>
           <p>Loading barter data...</p>
@@ -258,7 +334,7 @@ export default function BarterTransactions() {
   }
 
   return (
-    <AdminLayout title="Barter Management">
+    <AdminLayout title="Barter System">
       <div className="barter-container">
         {/* Header */}
         <div className="page-header">
@@ -267,262 +343,293 @@ export default function BarterTransactions() {
               <i className="bi bi-arrow-left-right"></i>
             </div>
             <div>
-              <h1 className="header-title">Barter Management</h1>
-              <p className="header-subtitle">Manage barter listings and trade requests</p>
+              <h1 className="header-title">Barter System</h1>
+              <p className="header-subtitle">Track and manage barter transactions and listings</p>
             </div>
           </div>
+          <button className="refresh-btn" onClick={fetchData}>
+            <i className="bi bi-arrow-repeat"></i> Refresh
+          </button>
         </div>
 
         {/* Stats Cards */}
         <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon primary"><i className="bi bi-box-seam"></i></div>
+          <div className="stat-card total">
+            <div className="stat-icon"><i className="bi bi-arrow-left-right"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Total Listings</span>
-              <h2 className="stat-value">{stats.totalListings}</h2>
+              <span className="stat-label">Total Requests</span>
+              <h2 className="stat-value">{stats.total.toLocaleString()}</h2>
+              <span className={`stat-change ${stats.monthlyGrowth >= 0 ? 'positive' : 'negative'}`}>
+                <i className={`bi bi-arrow-${stats.monthlyGrowth >= 0 ? 'up' : 'down'}`}></i> {Math.abs(stats.monthlyGrowth)}% vs last month
+              </span>
             </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon success"><i className="bi bi-check-circle"></i></div>
+          <div className="stat-card completed">
+            <div className="stat-icon"><i className="bi bi-check-circle"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Completed</span>
+              <h2 className="stat-value text-success">{stats.completed.toLocaleString()}</h2>
+              <span className="stat-change">{stats.successRate}% success rate</span>
+            </div>
+          </div>
+          <div className="stat-card pending">
+            <div className="stat-icon"><i className="bi bi-clock"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Pending</span>
+              <h2 className="stat-value text-warning">{stats.pending.toLocaleString()}</h2>
+              <span className="stat-change">Awaiting action</span>
+            </div>
+          </div>
+          <div className="stat-card cancelled">
+            <div className="stat-icon"><i className="bi bi-x-circle"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Cancelled/Rejected</span>
+              <h2 className="stat-value text-danger">{stats.cancelled.toLocaleString()}</h2>
+              <span className="stat-change">Failed trades</span>
+            </div>
+          </div>
+          <div className="stat-card listings">
+            <div className="stat-icon"><i className="bi bi-box-seam"></i></div>
             <div className="stat-info">
               <span className="stat-label">Active Listings</span>
-              <h2 className="stat-value text-success">{stats.activeListings}</h2>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon warning"><i className="bi bi-clock-history"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Pending Requests</span>
-              <h2 className="stat-value text-warning">{stats.pendingRequests}</h2>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon info"><i className="bi bi-check-double"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Completed Trades</span>
-              <h2 className="stat-value text-info">{stats.completedTrades}</h2>
+              <h2 className="stat-value">{stats.activeListings}</h2>
+              <span className="stat-change">Out of {stats.totalListings} total</span>
             </div>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="tabs-container">
-          <button 
-            className={`tab-btn ${activeTab === 'listings' ? 'active' : ''}`}
-            onClick={() => setActiveTab('listings')}
-          >
-            <i className="bi bi-box-seam"></i> Barter Listings
-            <span className="tab-count">{listings.length}</span>
-          </button>
-          <button 
-            className={`tab-btn ${activeTab === 'requests' ? 'active' : ''}`}
-            onClick={() => setActiveTab('requests')}
-          >
-            <i className="bi bi-chat-dots"></i> Trade Requests
-            <span className="tab-count pending">{requests.filter(r => r.request_status === 'PENDING').length}</span>
-          </button>
+        {/* Secondary Stats Row */}
+        <div className="secondary-stats">
+          <div className="secondary-card">
+            <div className="secondary-icon"><i className="bi bi-chat-dots"></i></div>
+            <div className="secondary-info">
+              <span className="secondary-label">Total Requests</span>
+              <strong className="secondary-value">{stats.totalRequests}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon"><i className="bi bi-hourglass-split"></i></div>
+            <div className="secondary-info">
+              <span className="secondary-label">Pending Requests</span>
+              <strong className="secondary-value text-warning">{stats.pendingRequests}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon"><i className="bi bi-check-circle"></i></div>
+            <div className="secondary-info">
+              <span className="secondary-label">Success Rate</span>
+              <strong className="secondary-value text-success">{stats.successRate}%</strong>
+            </div>
+          </div>
         </div>
 
-        {/* Listings Tab */}
-        {activeTab === 'listings' && (
+        {/* Charts Section */}
+        <div className="charts-section">
+          <div className="chart-card">
+            <div className="chart-header">
+              <h5>📈 Listing Trends</h5>
+              <p>New barter listings over the last 4 weeks</p>
+            </div>
+            <div className="chart-body">
+              <Line data={transactionsChart} options={chartOptions} />
+            </div>
+          </div>
+          <div className="chart-card">
+            <div className="chart-header">
+              <h5>📊 Completion Rate</h5>
+              <p>Success rate of barter transactions (%)</p>
+            </div>
+            <div className="chart-body">
+              <Line data={completionChart} options={chartOptions} />
+            </div>
+          </div>
+        </div>
+
+        {/* Active Barter Listings */}
+        <div className="listings-section">
+          <div className="section-header">
+            <h5><i className="bi bi-box-seam me-2"></i> Active Barter Listings</h5>
+            <span className="section-badge">{barterListings.filter(l => l.status === 'ACTIVE').length} active</span>
+          </div>
           <div className="listings-grid">
-            {listings.length > 0 ? (
-              listings.map((listing) => (
+            {barterListings.filter(l => l.status === 'ACTIVE').length > 0 ? (
+              barterListings.filter(l => l.status === 'ACTIVE').slice(0, 6).map((listing) => (
                 <div key={listing.listing_id} className="listing-card">
                   <div className="listing-header">
-                    <div className="listing-title">
-                      <h6>{listing.title}</h6>
-                      {getStatusBadge(listing.status)}
+                    <div className="listing-user">
+                      <div className="user-avatar">
+                        {listing.users?.profile_image ? (
+                          <img src={listing.users.profile_image} alt={listing.users.full_name} />
+                        ) : (
+                          <span>{listing.users?.full_name?.charAt(0) || 'U'}</span>
+                        )}
+                      </div>
+                      <div className="user-info">
+                        <div className="user-name">{listing.users?.full_name || 'Anonymous'}</div>
+                        <div className="listing-date">{new Date(listing.created_at).toLocaleDateString()}</div>
+                      </div>
                     </div>
+                    {getStatusBadge(listing.status)}
                   </div>
                   <div className="listing-body">
-                    <p className="listing-description">{listing.description}</p>
+                    <h6 className="listing-title">{listing.title}</h6>
+                    <p className="listing-description">{listing.description?.substring(0, 80)}...</p>
                     <div className="listing-details">
-                      <div className="detail-item">
+                      <span className="detail-item">
                         <i className="bi bi-box"></i>
-                        <span>{listing.quantity} {listing.unit}</span>
-                      </div>
-                      <div className="detail-item">
-                        <i className="bi bi-person"></i>
-                        <span>{listing.users?.full_name || 'Anonymous'}</span>
-                      </div>
-                      <div className="detail-item">
-                        <i className="bi bi-calendar3"></i>
-                        <span>{new Date(listing.created_at).toLocaleDateString()}</span>
-                      </div>
+                        {listing.quantity} {listing.unit}
+                      </span>
                     </div>
                   </div>
                   <div className="listing-footer">
-                    {listing.status === 'ACTIVE' && (
-                      <button 
-                        className="btn-complete"
-                        onClick={() => openActionModal(listing, 'listing', 'complete')}
-                      >
-                        <i className="bi bi-check-lg"></i> Mark as Completed
-                      </button>
-                    )}
-                    {listing.status === 'ACTIVE' && (
-                      <button 
-                        className="btn-cancel"
-                        onClick={() => openActionModal(listing, 'listing', 'cancel')}
-                      >
-                        <i className="bi bi-x-lg"></i> Cancel Listing
-                      </button>
-                    )}
+                    <button className="btn-view-listing" onClick={() => viewDetails(listing)}>
+                      <i className="bi bi-eye"></i> Details
+                    </button>
+                    <button className="btn-view-requests" onClick={() => viewRequests(listing.listing_id)}>
+                      <i className="bi bi-chat-dots"></i> Requests ({barterRequests.filter(r => r.listing_id === listing.listing_id).length})
+                    </button>
                   </div>
                 </div>
               ))
             ) : (
               <div className="empty-state">
                 <i className="bi bi-inbox"></i>
-                <h4>No barter listings</h4>
-                <p>No listings have been created yet.</p>
+                <h4>No Active Listings</h4>
+                <p>There are no active barter listings at the moment.</p>
               </div>
             )}
           </div>
-        )}
+        </div>
 
-        {/* Requests Tab */}
-        {activeTab === 'requests' && (
-          <div className="requests-grid">
-            {requests.length > 0 ? (
-              requests.map((request) => (
-                <div key={request.request_id} className="request-card">
-                  <div className="request-header">
-                    <div className="request-info">
-                      <div className="requester-avatar">
-                        {request.requester?.profile_image ? (
-                          <img src={request.requester.profile_image} alt={request.requester.full_name} />
-                        ) : (
-                          <i className="bi bi-person-circle"></i>
-                        )}
-                      </div>
-                      <div className="requester-details">
-                        <div className="requester-name">{request.requester?.full_name || 'Anonymous'}</div>
-                        <div className="requester-email">{request.requester?.email}</div>
-                      </div>
-                    </div>
-                    {getRequestStatusBadge(request.request_status)}
+        {/* Recent Barter Requests */}
+        <div className="requests-section">
+          <div className="section-header">
+            <h5><i className="bi bi-chat-dots me-2"></i> Recent Barter Requests</h5>
+            <span className="section-badge">{barterRequests.length} total</span>
+          </div>
+          <div className="requests-list">
+            {barterRequests.slice(0, 10).map((request) => (
+              <div key={request.request_id} className="request-item">
+                <div className="request-info">
+                  <div className="requester">
+                    <i className="bi bi-person-circle"></i>
+                    <span>{request.users?.full_name || 'Anonymous'}</span>
                   </div>
-                  
-                  <div className="request-body">
-                    <div className="listing-info">
-                      <div className="listing-label">Requested Item:</div>
-                      <div className="listing-value">{request.listing?.title}</div>
-                    </div>
-                    <div className="offer-info">
-                      <div className="offer-label">Offered Item:</div>
-                      <div className="offer-value">{request.offered_item}</div>
-                    </div>
-                    {request.admin_notes && (
-                      <div className="admin-notes">
-                        <i className="bi bi-chat-text"></i>
-                        <span>{request.admin_notes}</span>
-                      </div>
-                    )}
-                    <div className="request-meta">
-                      <span><i className="bi bi-calendar3"></i> {new Date(request.created_at).toLocaleString()}</span>
-                      <span><i className="bi bi-person"></i> Owner: {request.listing?.users?.full_name}</span>
-                    </div>
+                  <div className="request-details">
+                    <span className="offered-item">
+                      <i className="bi bi-box"></i>
+                      Offered: {request.offered_item}
+                    </span>
+                    <span className="listing-title">
+                      <i className="bi bi-tag"></i>
+                      For: {request.barter_listings?.title}
+                    </span>
                   </div>
-                  
-                  {request.request_status === 'PENDING' && (
-                    <div className="request-footer">
-                      <button 
-                        className="btn-approve"
-                        onClick={() => openActionModal(request, 'request', 'approve')}
-                      >
-                        <i className="bi bi-check-lg"></i> Approve
-                      </button>
-                      <button 
-                        className="btn-reject"
-                        onClick={() => openActionModal(request, 'request', 'reject')}
-                      >
-                        <i className="bi bi-x-lg"></i> Reject
-                      </button>
-                    </div>
-                  )}
+                  <div className="request-time">
+                    <i className="bi bi-calendar3"></i>
+                    {new Date(request.created_at).toLocaleString()}
+                  </div>
                 </div>
-              ))
-            ) : (
-              <div className="empty-state">
-                <i className="bi bi-inbox"></i>
-                <h4>No trade requests</h4>
-                <p>No barter requests have been made yet.</p>
+                {getRequestStatusBadge(request.request_status)}
+              </div>
+            ))}
+            {barterRequests.length === 0 && (
+              <div className="empty-state-small">
+                <i className="bi bi-chat-dots"></i>
+                <p>No barter requests yet</p>
               </div>
             )}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Action Modal */}
-      {showActionModal && selectedItem && (
-        <div className="modal-overlay" onClick={() => setShowActionModal(false)}>
+      {/* Listing Details Modal */}
+      {showDetailsModal && selectedTransaction && (
+        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className={`modal-header ${actionType === 'approve' ? 'success' : 'danger'}`}>
+            <div className="modal-header info">
               <div className="modal-icon">
-                <i className={`bi ${actionType === 'approve' ? 'bi-check-circle-fill' : 'bi-x-circle-fill'}`}></i>
+                <i className="bi bi-info-circle-fill"></i>
               </div>
-              <h3>
-                {actionType === 'approve' ? 'Approve Request' : 
-                 actionType === 'reject' ? 'Reject Request' :
-                 actionType === 'complete' ? 'Complete Listing' : 'Cancel Listing'}
-              </h3>
-              <button className="modal-close" onClick={() => setShowActionModal(false)}>
+              <h3>Barter Listing Details</h3>
+              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <div className="modal-body">
-              <p>
-                Are you sure you want to <strong>{actionType}</strong> this {activeTab === 'listings' ? 'listing' : 'request'}?
-              </p>
-              
-              {(actionType === 'reject' || actionType === 'cancel') && (
-                <div className="form-group">
-                  <label className="form-label">Reason (Optional)</label>
-                  <textarea
-                    className="form-textarea"
-                    rows="3"
-                    placeholder="Enter reason for rejection/cancellation..."
-                    value={actionComment}
-                    onChange={(e) => setActionComment(e.target.value)}
-                  />
+              <div className="details-section">
+                <div className="detail-row">
+                  <span className="detail-label">Title</span>
+                  <span className="detail-value">{selectedTransaction.title}</span>
                 </div>
-              )}
-              
-              {actionType === 'approve' && (
-                <div className="warning-message success">
-                  <i className="bi bi-info-circle-fill"></i>
-                  Approving this request will mark the barter listing as completed.
+                <div className="detail-row">
+                  <span className="detail-label">Description</span>
+                  <span className="detail-value">{selectedTransaction.description || 'No description'}</span>
                 </div>
-              )}
-              
-              {(actionType === 'reject' || actionType === 'cancel') && (
-                <div className="warning-message danger">
-                  <i className="bi bi-exclamation-triangle-fill"></i>
-                  This action cannot be undone.
+                <div className="detail-row">
+                  <span className="detail-label">Quantity</span>
+                  <span className="detail-value">{selectedTransaction.quantity} {selectedTransaction.unit}</span>
                 </div>
+                <div className="detail-row">
+                  <span className="detail-label">Status</span>
+                  <span className="detail-value">{getStatusBadge(selectedTransaction.status)}</span>
+                </div>
+                <div className="detail-row">
+                  <span className="detail-label">Posted By</span>
+                  <span className="detail-value">{selectedTransaction.users?.full_name || 'Anonymous'}</span>
+                </div>
+                <div className="detail-row">
+                  <span className="detail-label">Posted On</span>
+                  <span className="detail-value">{new Date(selectedTransaction.created_at).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Requests Modal */}
+      {showRequestModal && (
+        <div className="modal-overlay" onClick={() => setShowRequestModal(false)}>
+          <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header info">
+              <div className="modal-icon">
+                <i className="bi bi-chat-dots-fill"></i>
+              </div>
+              <h3>Barter Requests</h3>
+              <button className="modal-close" onClick={() => setShowRequestModal(false)}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div className="modal-body">
+              {selectedRequests.length > 0 ? (
+                selectedRequests.map((request) => (
+                  <div key={request.request_id} className="request-detail-item">
+                    <div className="request-header">
+                      <div className="requester-name">
+                        <i className="bi bi-person-circle"></i>
+                        {request.users?.full_name || 'Anonymous'}
+                      </div>
+                      {getRequestStatusBadge(request.request_status)}
+                    </div>
+                    <div className="offered-item-detail">
+                      <strong>Offered:</strong> {request.offered_item}
+                    </div>
+                    <div className="request-date">
+                      <i className="bi bi-calendar3"></i>
+                      {new Date(request.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-state-small">No requests for this listing</div>
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowActionModal(false)}>Cancel</button>
-              <button 
-                className={`btn-primary ${actionType === 'approve' ? 'success' : 'danger'}`}
-                onClick={() => {
-                  if (activeTab === 'listings') {
-                    updateListingStatus(selectedItem.listing_id, actionType === 'complete' ? 'COMPLETED' : 'CANCELLED')
-                  } else {
-                    updateRequestStatus(selectedItem.request_id, actionType.toUpperCase(), actionComment)
-                  }
-                }}
-                disabled={actionLoading}
-              >
-                {actionLoading ? (
-                  <><span className="spinner-border spinner-border-sm me-2"></span>Processing...</>
-                ) : (
-                  'Confirm'
-                )}
-              </button>
+              <button className="btn-secondary" onClick={() => setShowRequestModal(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -535,7 +642,12 @@ export default function BarterTransactions() {
         }
 
         .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           margin-bottom: 28px;
+          flex-wrap: wrap;
+          gap: 16px;
         }
 
         .header-content {
@@ -572,11 +684,29 @@ export default function BarterTransactions() {
           font-size: 14px;
         }
 
+        .refresh-btn {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 20px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 12px;
+          color: #495057;
+          font-weight: 500;
+          transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+          background: #e9ecef;
+          transform: translateY(-1px);
+        }
+
         .stats-grid {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(5, 1fr);
           gap: 20px;
-          margin-bottom: 28px;
+          margin-bottom: 20px;
         }
 
         .stat-card {
@@ -594,6 +724,12 @@ export default function BarterTransactions() {
           box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
         }
 
+        .stat-card.total .stat-icon { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
+        .stat-card.completed .stat-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .stat-card.pending .stat-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .stat-card.cancelled .stat-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .stat-card.listings .stat-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+
         .stat-icon {
           width: 52px;
           height: 52px;
@@ -602,11 +738,6 @@ export default function BarterTransactions() {
           align-items: center;
           justify-content: center;
         }
-
-        .stat-icon.primary { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
-        .stat-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .stat-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .stat-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
         .stat-icon i {
           font-size: 24px;
@@ -630,97 +761,208 @@ export default function BarterTransactions() {
           color: #1f2937;
         }
 
-        .text-success { color: #10b981; }
-        .text-warning { color: #f59e0b; }
-        .text-info { color: #3b82f6; }
-
-        .tabs-container {
-          display: flex;
-          gap: 12px;
-          margin-bottom: 24px;
-          background: white;
-          padding: 6px;
-          border-radius: 16px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        .stat-change {
+          font-size: 11px;
         }
 
-        .tab-btn {
-          flex: 1;
+        .stat-change.positive {
+          color: #10b981;
+        }
+
+        .stat-change.negative {
+          color: #ef4444;
+        }
+
+        .text-success { color: #10b981; }
+        .text-warning { color: #f59e0b; }
+        .text-danger { color: #ef4444; }
+
+        .secondary-stats {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 20px;
+          margin-bottom: 28px;
+        }
+
+        .secondary-card {
+          background: white;
+          border-radius: 16px;
+          padding: 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          transition: all 0.3s ease;
+        }
+
+        .secondary-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .secondary-icon {
+          width: 44px;
+          height: 44px;
+          background: #f8f9fa;
+          border-radius: 12px;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          padding: 12px 20px;
-          background: transparent;
-          border: none;
-          border-radius: 12px;
-          font-size: 14px;
-          font-weight: 500;
-          color: #6c757d;
-          transition: all 0.3s ease;
-          cursor: pointer;
+          color: #4f46e5;
         }
 
-        .tab-btn:hover {
-          background: #f8f9fa;
+        .secondary-icon i {
+          font-size: 22px;
         }
 
-        .tab-btn.active {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
+        .secondary-info {
+          flex: 1;
         }
 
-        .tab-count {
-          background: rgba(0, 0, 0, 0.1);
-          padding: 2px 8px;
-          border-radius: 20px;
+        .secondary-label {
           font-size: 11px;
-          margin-left: 6px;
+          color: #6c757d;
+          display: block;
         }
 
-        .tab-count.pending {
-          background: rgba(245, 158, 11, 0.2);
-          color: #f59e0b;
+        .secondary-value {
+          font-size: 18px;
+          font-weight: 700;
+          color: #1f2937;
+        }
+
+        .charts-section {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-bottom: 28px;
+        }
+
+        .chart-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+          transition: all 0.3s ease;
+        }
+
+        .chart-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+
+        .chart-header {
+          margin-bottom: 20px;
+        }
+
+        .chart-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .chart-header p {
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0;
+        }
+
+        .chart-body {
+          height: 280px;
+        }
+
+        .listings-section {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          margin-bottom: 28px;
+        }
+
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 20px;
+        }
+
+        .section-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0;
+          color: #1f2937;
+        }
+
+        .section-badge {
+          background: #f8f9fa;
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          color: #6c757d;
         }
 
         .listings-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-          gap: 24px;
+          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+          gap: 20px;
         }
 
-        .listing-card, .request-card {
-          background: white;
-          border-radius: 20px;
+        .listing-card {
+          background: #f8f9fa;
+          border-radius: 16px;
           overflow: hidden;
           transition: all 0.3s ease;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
 
-        .listing-card:hover, .request-card:hover {
+        .listing-card:hover {
           transform: translateY(-4px);
-          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
         }
 
         .listing-header {
-          padding: 16px 20px;
-          background: #f8f9fa;
+          padding: 16px;
+          background: white;
           border-bottom: 1px solid #e9ecef;
-        }
-
-        .listing-title {
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
 
-        .listing-title h6 {
-          margin: 0;
-          font-size: 16px;
-          font-weight: 600;
+        .listing-user {
+          display: flex;
+          align-items: center;
+          gap: 12px;
         }
 
-        .badge-active, .badge-pending, .badge-approved, .badge-rejected, .badge-completed, .badge-cancelled, .badge-default {
+        .user-avatar {
+          width: 40px;
+          height: 40px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          overflow: hidden;
+        }
+
+        .user-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .user-name {
+          font-weight: 600;
+          color: #1f2937;
+          font-size: 14px;
+        }
+
+        .listing-date {
+          font-size: 10px;
+          color: #9ca3af;
+        }
+
+        .status-badge {
           display: inline-flex;
           align-items: center;
           gap: 4px;
@@ -730,179 +972,170 @@ export default function BarterTransactions() {
           font-weight: 500;
         }
 
-        .badge-active { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .badge-pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .badge-approved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .badge-rejected { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .badge-completed { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        .badge-cancelled { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
-        .badge-default { background: #f8f9fa; color: #6c757d; }
+        .status-badge.active { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .status-badge.inactive { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
+        .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .status-badge.completed { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .status-badge.cancelled { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
-        .listing-body, .request-body {
-          padding: 16px 20px;
-          border-bottom: 1px solid #e9ecef;
+        .listing-body {
+          padding: 16px;
+        }
+
+        .listing-title {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 8px 0;
+          color: #1f2937;
         }
 
         .listing-description {
-          font-size: 13px;
-          color: #4b5563;
-          margin-bottom: 12px;
-          line-height: 1.5;
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0 0 12px 0;
+          line-height: 1.4;
         }
 
         .listing-details {
           display: flex;
           gap: 16px;
-          flex-wrap: wrap;
+          font-size: 11px;
+          color: #9ca3af;
         }
 
-        .detail-item {
+        .listing-footer {
+          padding: 12px 16px;
+          border-top: 1px solid #e9ecef;
           display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 12px;
-          color: #6c757d;
+          gap: 8px;
         }
 
-        .listing-footer, .request-footer {
-          padding: 16px 20px;
-          display: flex;
-          gap: 12px;
-        }
-
-        .btn-complete, .btn-cancel, .btn-approve, .btn-reject {
+        .btn-view-listing, .btn-view-requests {
           flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 8px 12px;
+          padding: 6px 12px;
           border: none;
-          border-radius: 10px;
-          font-size: 13px;
+          border-radius: 8px;
+          font-size: 11px;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
         }
 
-        .btn-complete, .btn-approve {
+        .btn-view-listing {
+          background: rgba(79, 70, 229, 0.1);
+          color: #4f46e5;
+        }
+
+        .btn-view-listing:hover {
+          background: #4f46e5;
+          color: white;
+        }
+
+        .btn-view-requests {
           background: rgba(16, 185, 129, 0.1);
           color: #10b981;
         }
 
-        .btn-complete:hover, .btn-approve:hover {
+        .btn-view-requests:hover {
           background: #10b981;
           color: white;
         }
 
-        .btn-cancel, .btn-reject {
-          background: rgba(239, 68, 68, 0.1);
-          color: #ef4444;
+        .requests-section {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+          margin-bottom: 28px;
         }
 
-        .btn-cancel:hover, .btn-reject:hover {
-          background: #ef4444;
-          color: white;
+        .requests-list {
+          max-height: 400px;
+          overflow-y: auto;
         }
 
-        .request-header {
-          padding: 16px 20px;
-          background: #f8f9fa;
-          border-bottom: 1px solid #e9ecef;
+        .request-item {
           display: flex;
           justify-content: space-between;
           align-items: center;
+          padding: 16px;
+          border-bottom: 1px solid #e9ecef;
+          transition: all 0.3s ease;
+        }
+
+        .request-item:hover {
+          background: #f8f9fa;
         }
 
         .request-info {
+          flex: 1;
+        }
+
+        .requester {
+          font-size: 13px;
+          font-weight: 600;
+          color: #1f2937;
+          margin-bottom: 4px;
+        }
+
+        .request-details {
           display: flex;
-          align-items: center;
-          gap: 12px;
+          gap: 16px;
+          font-size: 11px;
+          color: #6c757d;
+          margin-bottom: 4px;
+          flex-wrap: wrap;
         }
 
-        .requester-avatar {
-          width: 44px;
-          height: 44px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 50%;
+        .request-time {
+          font-size: 10px;
+          color: #9ca3af;
+        }
+
+        .request-detail-item {
+          padding: 16px;
+          border-bottom: 1px solid #e9ecef;
+        }
+
+        .request-header {
           display: flex;
+          justify-content: space-between;
           align-items: center;
-          justify-content: center;
-          overflow: hidden;
-        }
-
-        .requester-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .requester-avatar i {
-          font-size: 24px;
-          color: white;
+          margin-bottom: 8px;
         }
 
         .requester-name {
           font-weight: 600;
           color: #1f2937;
-          margin-bottom: 2px;
         }
 
-        .requester-email {
-          font-size: 11px;
-          color: #6c757d;
+        .offered-item-detail {
+          font-size: 13px;
+          color: #4b5563;
+          margin-bottom: 8px;
         }
 
-        .listing-info, .offer-info {
-          margin-bottom: 12px;
-        }
-
-        .listing-label, .offer-label {
-          font-size: 11px;
-          font-weight: 600;
-          color: #6c757d;
-          text-transform: uppercase;
-          margin-bottom: 4px;
-        }
-
-        .listing-value, .offer-value {
-          font-size: 14px;
-          color: #1f2937;
-        }
-
-        .admin-notes {
-          background: #fef3c7;
-          padding: 8px 12px;
-          border-radius: 8px;
-          font-size: 12px;
-          color: #92400e;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          margin-top: 12px;
-        }
-
-        .request-meta {
-          display: flex;
-          justify-content: space-between;
-          font-size: 11px;
+        .request-date {
+          font-size: 10px;
           color: #9ca3af;
-          margin-top: 12px;
         }
 
         .empty-state {
           text-align: center;
-          padding: 80px 20px;
-          background: white;
-          border-radius: 24px;
-          grid-column: span 2;
+          padding: 60px 20px;
+          grid-column: span 3;
         }
 
         .empty-state i {
-          font-size: 64px;
+          font-size: 48px;
           color: #cbd5e1;
           margin-bottom: 16px;
           display: block;
+        }
+
+        .empty-state-small {
+          text-align: center;
+          padding: 40px 20px;
+          color: #9ca3af;
         }
 
         .modal-overlay {
@@ -923,9 +1156,13 @@ export default function BarterTransactions() {
           background: white;
           border-radius: 24px;
           width: 90%;
-          max-width: 500px;
+          max-width: 550px;
           animation: slideUp 0.3s ease;
           overflow: hidden;
+        }
+
+        .modal-container.modal-lg {
+          max-width: 700px;
         }
 
         .modal-header {
@@ -934,10 +1171,10 @@ export default function BarterTransactions() {
           align-items: center;
           gap: 12px;
           position: relative;
+          border-bottom: 1px solid #e9ecef;
         }
 
-        .modal-header.success .modal-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .modal-header.danger .modal-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .modal-header.info .modal-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
         .modal-icon {
           width: 48px;
@@ -971,74 +1208,44 @@ export default function BarterTransactions() {
           padding: 24px;
         }
 
-        .form-group {
-          margin-top: 16px;
-        }
-
-        .form-label {
-          display: block;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 8px;
-          color: #374151;
-        }
-
-        .form-textarea {
-          width: 100%;
-          padding: 12px;
-          border: 2px solid #e9ecef;
-          border-radius: 12px;
-          font-size: 14px;
-          resize: vertical;
-        }
-
-        .warning-message {
-          padding: 12px;
-          border-radius: 12px;
+        .details-section {
           display: flex;
-          align-items: center;
-          gap: 8px;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .detail-row {
+          display: flex;
+        }
+
+        .detail-label {
+          width: 100px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6c757d;
+        }
+
+        .detail-value {
+          flex: 1;
           font-size: 13px;
-          margin-top: 16px;
-        }
-
-        .warning-message.success {
-          background: #d1fae5;
-          color: #065f46;
-        }
-
-        .warning-message.danger {
-          background: #fee2e2;
-          color: #991b1b;
+          color: #1f2937;
         }
 
         .modal-footer {
           padding: 16px 24px 24px;
           display: flex;
           justify-content: flex-end;
-          gap: 12px;
           border-top: 1px solid #e9ecef;
         }
 
         .btn-secondary {
-          padding: 10px 20px;
+          padding: 10px 24px;
           background: #f8f9fa;
           border: 1px solid #e9ecef;
           border-radius: 10px;
           cursor: pointer;
           font-weight: 500;
         }
-
-        .btn-primary {
-          padding: 10px 24px;
-          border: none;
-          border-radius: 10px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .btn-primary.success { background: #10b981; color: white; }
-        .btn-primary.danger { background: #ef4444; color: white; }
 
         @keyframes fadeIn {
           from { opacity: 0; }
@@ -1056,31 +1263,38 @@ export default function BarterTransactions() {
           }
         }
 
-        @media (max-width: 1024px) {
+        @media (max-width: 1200px) {
           .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(3, 1fr);
+          }
+          .charts-section {
+            grid-template-columns: 1fr;
           }
           .listings-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
           }
         }
 
         @media (max-width: 768px) {
           .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .secondary-stats {
             grid-template-columns: 1fr;
           }
-          .tabs-container {
+          .page-header {
             flex-direction: column;
+            align-items: flex-start;
           }
-          .request-header {
-            flex-direction: column;
-            gap: 12px;
-            text-align: center;
+          .listings-grid {
+            grid-template-columns: 1fr;
           }
-          .request-meta {
+          .detail-row {
             flex-direction: column;
-            gap: 8px;
-            text-align: center;
+            gap: 4px;
+          }
+          .detail-label {
+            width: auto;
           }
         }
       `}</style>
