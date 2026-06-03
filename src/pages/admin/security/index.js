@@ -13,6 +13,7 @@ export default function SecurityDashboard() {
   const [selectedIP, setSelectedIP] = useState('')
   const [blockReason, setBlockReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [currentUserIP, setCurrentUserIP] = useState('')
   const [stats, setStats] = useState({
     totalAlerts: 0,
     highSeverity: 0,
@@ -22,7 +23,9 @@ export default function SecurityDashboard() {
     uniqueAttackers: 0
   })
 
+  // Get current user's IP on mount
   useEffect(() => {
+    getCurrentUserIP()
     fetchSecurityData()
     
     const alertsSubscription = supabase
@@ -40,6 +43,16 @@ export default function SecurityDashboard() {
       alertsSubscription.unsubscribe()
     }
   }, [])
+
+  const getCurrentUserIP = async () => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json')
+      const data = await response.json()
+      setCurrentUserIP(data.ip)
+    } catch (err) {
+      console.error('Error getting IP:', err)
+    }
+  }
 
   const fetchSecurityData = async () => {
     try {
@@ -100,10 +113,19 @@ export default function SecurityDashboard() {
   const blockIP = async () => {
     if (!selectedIP) return
     
+    // Prevent self-blocking
+    if (selectedIP === currentUserIP) {
+      alert('⚠️ You cannot block your own IP address! This would lock you out of the admin panel.')
+      setShowBlockModal(false)
+      setSelectedIP('')
+      setBlockReason('')
+      return
+    }
+    
     setActionLoading(true)
     
     try {
-      // First check if IP is already blacklisted
+      // Check if IP is already blacklisted
       const { data: existing } = await supabase
         .from('ip_blacklist')
         .select('ip_address')
@@ -132,7 +154,7 @@ export default function SecurityDashboard() {
         console.error('Block IP error:', error)
         alert(`Failed to block IP: ${error.message}`)
       } else {
-        alert(`IP ${selectedIP} has been blocked successfully!`)
+        alert(`✅ IP ${selectedIP} has been blocked successfully! This IP can no longer access the admin panel.`)
         fetchSecurityData()
         setShowBlockModal(false)
         setSelectedIP('')
@@ -147,7 +169,7 @@ export default function SecurityDashboard() {
   }
 
   const unblockIP = async (ipId, ipAddress) => {
-    if (!confirm(`Are you sure you want to unblock ${ipAddress}?`)) return
+    if (!confirm(`Are you sure you want to unblock ${ipAddress}? This IP will regain access to the admin panel.`)) return
     
     setActionLoading(true)
     try {
@@ -160,7 +182,7 @@ export default function SecurityDashboard() {
         console.error('Unblock IP error:', error)
         alert(`Failed to unblock IP: ${error.message}`)
       } else {
-        alert(`IP ${ipAddress} has been unblocked successfully!`)
+        alert(`✅ IP ${ipAddress} has been unblocked successfully! This IP can now access the admin panel.`)
         fetchSecurityData()
       }
     } catch (err) {
@@ -169,6 +191,11 @@ export default function SecurityDashboard() {
     } finally {
       setActionLoading(false)
     }
+  }
+
+  // Helper to check if an IP is the current user's IP
+  const isCurrentUserIP = (ip) => {
+    return ip === currentUserIP
   }
 
   const getSeverityClass = (severity) => {
@@ -224,6 +251,15 @@ export default function SecurityDashboard() {
   return (
     <AdminLayout title="Security Dashboard">
       <div className="security-container">
+        {/* Current IP Info Banner */}
+        <div className="current-ip-banner">
+          <i className="bi bi-ip"></i>
+          <div>
+            <strong>Your IP Address:</strong> {currentUserIP || 'Loading...'}
+            <span className="text-muted small ms-2">(You cannot block your own IP)</span>
+          </div>
+        </div>
+
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -277,7 +313,6 @@ export default function SecurityDashboard() {
           </div>
         </div>
 
-        {/* Failed Login Attempts & Blacklisted IPs */}
         <div className="two-columns">
           {/* Failed Login Attempts */}
           <div className="failed-attempts-card">
@@ -298,6 +333,9 @@ export default function SecurityDashboard() {
                         <span className="attempt-ip">
                           <i className="bi bi-ip"></i>
                           {attempt.ip_address}
+                          {isCurrentUserIP(attempt.ip_address) && (
+                            <span className="current-ip-badge">(You)</span>
+                          )}
                         </span>
                         <span className="attempt-reason">
                           <i className="bi bi-info-circle"></i>
@@ -309,7 +347,7 @@ export default function SecurityDashboard() {
                         {new Date(attempt.attempt_time).toLocaleString()}
                       </div>
                     </div>
-                    {attempt.ip_address && (
+                    {attempt.ip_address && !isCurrentUserIP(attempt.ip_address) && (
                       <button 
                         className="btn-block"
                         onClick={() => {
@@ -318,6 +356,11 @@ export default function SecurityDashboard() {
                         }}
                       >
                         <i className="bi bi-ban"></i> Block IP
+                      </button>
+                    )}
+                    {attempt.ip_address && isCurrentUserIP(attempt.ip_address) && (
+                      <button className="btn-block-disabled" disabled title="You cannot block your own IP">
+                        <i className="bi bi-ban"></i> Cannot Block Self
                       </button>
                     )}
                   </div>
@@ -344,6 +387,9 @@ export default function SecurityDashboard() {
                     <div className="blacklist-info">
                       <div className="blacklist-ip">
                         <code>{ip.ip_address}</code>
+                        {isCurrentUserIP(ip.ip_address) && (
+                          <span className="self-block-warning">⚠️ YOUR IP</span>
+                        )}
                       </div>
                       <div className="blacklist-reason">
                         <i className="bi bi-exclamation-circle"></i>
@@ -390,6 +436,12 @@ export default function SecurityDashboard() {
             <div className="modal-body">
               <p>Are you sure you want to block this IP address?</p>
               <div className="ip-display">{selectedIP}</div>
+              {selectedIP === currentUserIP && (
+                <div className="warning-message danger">
+                  <i className="bi bi-exclamation-triangle-fill"></i>
+                  <strong>WARNING:</strong> You are trying to block your own IP address! This will lock you out of the admin panel.
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Reason (Optional)</label>
                 <textarea
@@ -400,14 +452,18 @@ export default function SecurityDashboard() {
                   onChange={(e) => setBlockReason(e.target.value)}
                 />
               </div>
-              <div className="warning-message danger">
-                <i className="bi bi-exclamation-triangle-fill"></i>
-                Blocked IPs will be unable to access the platform.
+              <div className="warning-message">
+                <i className="bi bi-info-circle-fill"></i>
+                Blocked IPs will be unable to access the admin panel. They will see an "Access Denied" message.
               </div>
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setShowBlockModal(false)}>Cancel</button>
-              <button className="btn-primary danger" onClick={blockIP} disabled={actionLoading}>
+              <button 
+                className="btn-primary danger" 
+                onClick={blockIP} 
+                disabled={actionLoading || selectedIP === currentUserIP}
+              >
                 {actionLoading ? (
                   <><span className="spinner-border spinner-border-sm me-2"></span>Blocking...</>
                 ) : (
@@ -425,6 +481,49 @@ export default function SecurityDashboard() {
           margin: 0 auto;
         }
 
+        .current-ip-banner {
+          background: #e7f1ff;
+          border-radius: 12px;
+          padding: 12px 20px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+
+        .current-ip-banner i {
+          font-size: 20px;
+          color: #4f46e5;
+        }
+
+        .current-ip-badge {
+          background: #e9ecef;
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-size: 10px;
+          margin-left: 6px;
+        }
+
+        .self-block-warning {
+          background: #fee2e2;
+          color: #dc2626;
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-size: 10px;
+          margin-left: 8px;
+        }
+
+        .btn-block-disabled {
+          padding: 6px 12px;
+          background: #f8f9fa;
+          border: 1px solid #dee2e6;
+          border-radius: 8px;
+          color: #adb5bd;
+          font-size: 11px;
+          cursor: not-allowed;
+        }
+
+        /* Rest of the styles remain the same as before */
         .page-header {
           display: flex;
           justify-content: space-between;
@@ -836,6 +935,7 @@ export default function SecurityDashboard() {
         }
 
         .btn-primary.danger { background: #ef4444; color: white; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
         @keyframes fadeIn {
           from { opacity: 0; }
@@ -854,27 +954,14 @@ export default function SecurityDashboard() {
         }
 
         @media (max-width: 1200px) {
-          .stats-grid {
-            grid-template-columns: repeat(3, 1fr);
-          }
-          .two-columns {
-            grid-template-columns: 1fr;
-          }
+          .stats-grid { grid-template-columns: repeat(3, 1fr); }
+          .two-columns { grid-template-columns: 1fr; }
         }
 
         @media (max-width: 768px) {
-          .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .attempt-item {
-            flex-direction: column;
-            gap: 12px;
-          }
-          .blacklist-item {
-            flex-direction: column;
-            gap: 12px;
-            text-align: center;
-          }
+          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .attempt-item { flex-direction: column; gap: 12px; }
+          .blacklist-item { flex-direction: column; gap: 12px; text-align: center; }
         }
       `}</style>
     </AdminLayout>
