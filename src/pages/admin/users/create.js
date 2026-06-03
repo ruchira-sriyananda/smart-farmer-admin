@@ -153,34 +153,45 @@ export default function CreateUser() {
     return Object.keys(newErrors).length === 0
   }
 
-  // Function to create user with retry on rate limit
-  const createUserWithRetry = async (email, password, userData, retryCount = 0) => {
+  // Create user with proper error handling
+  const createUser = async () => {
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: email,
-        password: password,
+      // First, check if user already exists in auth
+      const { data: existingUser, error: searchError } = await supabase
+        .from('admin_users')
+        .select('email')
+        .eq('email', formData.email)
+        .maybeSingle()
+
+      if (existingUser) {
+        throw new Error('A user with this email already exists')
+      }
+
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
         options: {
-          data: { full_name: userData.full_name },
+          data: { full_name: formData.full_name },
           emailRedirectTo: undefined,
         }
       })
 
-      if (error) {
-        // Check if it's a rate limit error
-        if (error.message.includes('rate limit') || error.status === 429) {
-          if (retryCount < 3) {
-            // Wait longer before retry (exponential backoff)
-            const waitTime = Math.pow(2, retryCount) * 1000
-            setRateLimitError(true)
-            await new Promise(resolve => setTimeout(resolve, waitTime))
-            return createUserWithRetry(email, password, userData, retryCount + 1)
-          }
-          throw new Error('Email rate limit exceeded. Please wait a few minutes before trying again.')
+      if (authError) {
+        if (authError.message.includes('rate limit') || authError.status === 429) {
+          throw new Error('Too many signup attempts. Please wait a minute before trying again.')
         }
-        throw error
+        if (authError.message.includes('already registered')) {
+          throw new Error('This email is already registered. Please use a different email.')
+        }
+        throw authError
       }
 
-      return data
+      if (!authData.user) {
+        throw new Error('Failed to create user account')
+      }
+
+      return authData
     } catch (err) {
       throw err
     }
@@ -190,20 +201,20 @@ export default function CreateUser() {
     e.preventDefault()
     
     if (!validateForm()) {
-      const firstError = document.querySelector('.is-invalid')
+      const firstError = document.querySelector('.error')
       if (firstError) firstError.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
     
     setLoading(true)
     setRateLimitError(false)
+    setErrors({})
 
     try {
-      // Create auth user with retry logic
-      const authData = await createUserWithRetry(formData.email, formData.password, {
-        full_name: formData.full_name
-      })
+      // Create auth user
+      const authData = await createUser()
 
+      // Prepare admin data
       const adminData = {
         admin_id: authData.user.id,
         full_name: formData.full_name,
@@ -215,21 +226,46 @@ export default function CreateUser() {
         updated_at: new Date().toISOString()
       }
 
+      // Add role if selected
       if (formData.role_id && formData.role_id !== '') {
         adminData.role_id = formData.role_id
       }
 
+      console.log('Attempting to insert admin user:', { 
+        admin_id: adminData.admin_id, 
+        email: adminData.email,
+        role_id: adminData.role_id 
+      })
+
+      // Insert into admin_users
       const { error: adminError } = await supabase
         .from('admin_users')
         .insert(adminData)
+        .select()
 
-      if (adminError) throw adminError
+      if (adminError) {
+        console.error('Admin insert error:', adminError)
+        
+        // Handle RLS error specifically
+        if (adminError.message.includes('row-level security')) {
+          throw new Error('Permission denied: Unable to create admin user due to security policies. Please contact your system administrator.')
+        }
+        throw adminError
+      }
 
+      // Success - redirect
       router.push('/admin/users')
+      
     } catch (err) {
       console.error('Error:', err)
+      
+      // User-friendly error messages
       if (err.message.includes('rate limit')) {
-        setErrors({ submit: 'Email rate limit exceeded. Please wait a few minutes before creating another user.' })
+        setErrors({ submit: 'Too many attempts. Please wait a few minutes before trying again.' })
+      } else if (err.message.includes('already registered')) {
+        setErrors({ submit: 'This email is already registered. Please use a different email address.' })
+      } else if (err.message.includes('row-level security')) {
+        setErrors({ submit: 'Unable to create admin user. Please ensure you have proper permissions.' })
       } else {
         setErrors({ submit: err.message })
       }
@@ -327,6 +363,17 @@ export default function CreateUser() {
         </div>
 
         <div className="form-card">
+          {/* RLS Error Banner */}
+          {errors.submit && errors.submit.includes('row-level security') && (
+            <div className="alert-rls-error">
+              <i className="bi bi-shield-exclamation"></i>
+              <div>
+                <strong>Permission Error</strong>
+                <p>You don't have permission to create admin users. Please contact your system administrator.</p>
+              </div>
+            </div>
+          )}
+
           {roleError && (
             <div className="alert-warning-card">
               <i className="bi bi-exclamation-triangle-fill"></i>
@@ -340,7 +387,7 @@ export default function CreateUser() {
             </div>
           )}
 
-          {errors.submit && (
+          {errors.submit && !errors.submit.includes('row-level security') && (
             <div className="alert-error-card">
               <i className="bi bi-x-circle-fill"></i>
               <div>
@@ -591,7 +638,6 @@ export default function CreateUser() {
           margin: 0 auto;
         }
 
-        /* Rate Limit Alert */
         .alert-rate-limit {
           background: #fff3cd;
           border-left: 4px solid #ffc107;
@@ -608,7 +654,22 @@ export default function CreateUser() {
           color: #ffc107;
         }
 
-        /* Page Header */
+        .alert-rls-error {
+          background: #f8d7da;
+          border-left: 4px solid #dc3545;
+          padding: 16px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .alert-rls-error i {
+          font-size: 24px;
+          color: #dc3545;
+        }
+
         .page-header {
           display: flex;
           justify-content: space-between;
@@ -675,7 +736,6 @@ export default function CreateUser() {
           transform: translateX(-2px);
         }
 
-        /* Form Card */
         .form-card {
           background: white;
           border-radius: 28px;
@@ -683,7 +743,6 @@ export default function CreateUser() {
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
         }
 
-        /* Alert Cards */
         .alert-warning-card {
           background: #fff3cd;
           border-left: 4px solid #ffc107;
@@ -757,7 +816,6 @@ export default function CreateUser() {
           color: #0d6efd;
         }
 
-        /* Form Grid */
         .form-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -922,7 +980,6 @@ export default function CreateUser() {
           color: #374151;
         }
 
-        /* Super Admin Card */
         .super-admin-card {
           background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
           border-radius: 16px;
@@ -976,7 +1033,6 @@ export default function CreateUser() {
           color: #b45309;
         }
 
-        /* Action Buttons */
         .action-buttons {
           display: flex;
           justify-content: flex-end;
@@ -1026,19 +1082,15 @@ export default function CreateUser() {
           .form-grid {
             grid-template-columns: 1fr;
           }
-
           .page-header {
             flex-direction: column;
           }
-
           .header-content {
             width: 100%;
           }
-
           .action-buttons {
             flex-direction: column;
           }
-
           .btn-cancel, .btn-submit {
             width: 100%;
           }
