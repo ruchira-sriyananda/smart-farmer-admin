@@ -1435,8 +1435,8 @@ export default function BarterTransactions() {
         }
 
         .image-container img {
-          max-width: 100%;
-          max-height: 300px;
+          max-width: 80%;
+          max-height: 80%;
           border-radius: 12px;
           transition: transform 0.3s ease;
         }
