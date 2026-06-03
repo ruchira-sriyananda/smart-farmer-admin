@@ -9,8 +9,6 @@ export default function SecurityDashboard() {
   const [failedAttempts, setFailedAttempts] = useState([])
   const [blacklistedIPs, setBlacklistedIPs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedAlert, setSelectedAlert] = useState(null)
-  const [showAlertModal, setShowAlertModal] = useState(false)
   const [showBlockModal, setShowBlockModal] = useState(false)
   const [selectedIP, setSelectedIP] = useState('')
   const [blockReason, setBlockReason] = useState('')
@@ -21,14 +19,12 @@ export default function SecurityDashboard() {
     mediumSeverity: 0,
     lowSeverity: 0,
     blockedIPs: 0,
-    uniqueAttackers: 0,
-    last24hAlerts: 0
+    uniqueAttackers: 0
   })
 
   useEffect(() => {
     fetchSecurityData()
     
-    // Real-time subscription for new alerts
     const alertsSubscription = supabase
       .channel('security_alerts_realtime')
       .on('postgres_changes', 
@@ -73,23 +69,15 @@ export default function SecurityDashboard() {
   }
 
   const calculateStats = (alerts, attempts, blacklist) => {
-    const last24h = alerts.filter(a => {
-      const date = new Date(a.created_at)
-      const now = new Date()
-      const diffHours = (now - date) / (1000 * 60 * 60)
-      return diffHours <= 24
-    }).length
-
     const uniqueAttackers = new Set(attempts.map(a => a.ip_address).filter(ip => ip)).size
 
     setStats({
-      totalAlerts: alerts.length,
+      totalAlerts: alerts.filter(a => !a.resolved).length,
       highSeverity: alerts.filter(a => a.severity_level === 'HIGH' && !a.resolved).length,
       mediumSeverity: alerts.filter(a => a.severity_level === 'MEDIUM' && !a.resolved).length,
       lowSeverity: alerts.filter(a => a.severity_level === 'LOW' && !a.resolved).length,
       blockedIPs: blacklist.length,
-      uniqueAttackers: uniqueAttackers,
-      last24hAlerts: last24h
+      uniqueAttackers: uniqueAttackers
     })
   }
 
@@ -105,8 +93,6 @@ export default function SecurityDashboard() {
 
     if (!error) {
       fetchSecurityData()
-      setShowAlertModal(false)
-      setSelectedAlert(null)
     }
     setActionLoading(false)
   }
@@ -115,32 +101,74 @@ export default function SecurityDashboard() {
     if (!selectedIP) return
     
     setActionLoading(true)
-    const { error } = await supabase
-      .from('ip_blacklist')
-      .insert({ 
-        ip_address: selectedIP, 
-        blocked_reason: blockReason || 'Suspicious activity detected',
-        blocked_at: new Date().toISOString()
-      })
+    
+    try {
+      // First check if IP is already blacklisted
+      const { data: existing } = await supabase
+        .from('ip_blacklist')
+        .select('ip_address')
+        .eq('ip_address', selectedIP)
+        .maybeSingle()
 
-    if (!error) {
-      fetchSecurityData()
-      setShowBlockModal(false)
-      setSelectedIP('')
-      setBlockReason('')
+      if (existing) {
+        alert('IP address is already blacklisted!')
+        setShowBlockModal(false)
+        setSelectedIP('')
+        setBlockReason('')
+        setActionLoading(false)
+        return
+      }
+
+      // Block the IP
+      const { error } = await supabase
+        .from('ip_blacklist')
+        .insert({ 
+          ip_address: selectedIP, 
+          blocked_reason: blockReason || 'Suspicious activity detected',
+          blocked_at: new Date().toISOString()
+        })
+
+      if (error) {
+        console.error('Block IP error:', error)
+        alert(`Failed to block IP: ${error.message}`)
+      } else {
+        alert(`IP ${selectedIP} has been blocked successfully!`)
+        fetchSecurityData()
+        setShowBlockModal(false)
+        setSelectedIP('')
+        setBlockReason('')
+      }
+    } catch (err) {
+      console.error('Error blocking IP:', err)
+      alert('Error blocking IP: ' + err.message)
+    } finally {
+      setActionLoading(false)
     }
-    setActionLoading(false)
   }
 
-  const unblockIP = async (ipId) => {
+  const unblockIP = async (ipId, ipAddress) => {
+    if (!confirm(`Are you sure you want to unblock ${ipAddress}?`)) return
+    
     setActionLoading(true)
-    const { error } = await supabase
-      .from('ip_blacklist')
-      .delete()
-      .eq('blacklist_id', ipId)
+    try {
+      const { error } = await supabase
+        .from('ip_blacklist')
+        .delete()
+        .eq('blacklist_id', ipId)
 
-    if (!error) fetchSecurityData()
-    setActionLoading(false)
+      if (error) {
+        console.error('Unblock IP error:', error)
+        alert(`Failed to unblock IP: ${error.message}`)
+      } else {
+        alert(`IP ${ipAddress} has been unblocked successfully!`)
+        fetchSecurityData()
+      }
+    } catch (err) {
+      console.error('Error unblocking IP:', err)
+      alert('Error unblocking IP: ' + err.message)
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   const getSeverityClass = (severity) => {
@@ -159,16 +187,6 @@ export default function SecurityDashboard() {
       'LOW': 'bi-info-circle-fill'
     }
     return icons[severity] || 'bi-shield'
-  }
-
-  const viewAlertDetails = (alert) => {
-    setSelectedAlert(alert)
-    setShowAlertModal(true)
-  }
-
-  const openBlockModal = (ip) => {
-    setSelectedIP(ip)
-    setShowBlockModal(true)
   }
 
   if (loading) {
@@ -206,7 +224,6 @@ export default function SecurityDashboard() {
   return (
     <AdminLayout title="Security Dashboard">
       <div className="security-container">
-        {/* Header */}
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -222,14 +239,12 @@ export default function SecurityDashboard() {
           </button>
         </div>
 
-        {/* Stats Cards */}
         <div className="stats-grid">
           <div className="stat-card total">
             <div className="stat-icon"><i className="bi bi-shield-exclamation"></i></div>
             <div className="stat-info">
               <span className="stat-label">Active Alerts</span>
               <h2 className="stat-value">{stats.totalAlerts}</h2>
-              <span className="stat-change">{stats.last24hAlerts} in last 24h</span>
             </div>
           </div>
           <div className="stat-card high">
@@ -237,7 +252,6 @@ export default function SecurityDashboard() {
             <div className="stat-info">
               <span className="stat-label">High Severity</span>
               <h2 className="stat-value text-danger">{stats.highSeverity}</h2>
-              <span className="stat-change">Critical issues</span>
             </div>
           </div>
           <div className="stat-card medium">
@@ -245,7 +259,6 @@ export default function SecurityDashboard() {
             <div className="stat-info">
               <span className="stat-label">Medium Severity</span>
               <h2 className="stat-value text-warning">{stats.mediumSeverity}</h2>
-              <span className="stat-change">Requires attention</span>
             </div>
           </div>
           <div className="stat-card low">
@@ -253,7 +266,6 @@ export default function SecurityDashboard() {
             <div className="stat-info">
               <span className="stat-label">Low Severity</span>
               <h2 className="stat-value text-info">{stats.lowSeverity}</h2>
-              <span className="stat-change">Informational</span>
             </div>
           </div>
           <div className="stat-card blocked">
@@ -261,72 +273,7 @@ export default function SecurityDashboard() {
             <div className="stat-info">
               <span className="stat-label">Blocked IPs</span>
               <h2 className="stat-value">{stats.blockedIPs}</h2>
-              <span className="stat-change">{stats.uniqueAttackers} unique attackers</span>
             </div>
-          </div>
-        </div>
-
-        {/* Security Alerts Section */}
-        <div className="alerts-section">
-          <div className="section-header">
-            <h5><i className="bi bi-shield-exclamation me-2 text-danger"></i> Security Alerts</h5>
-            <span className="section-badge">{securityAlerts.length} total</span>
-          </div>
-          <div className="alerts-grid">
-            {securityAlerts.length > 0 ? (
-              securityAlerts.map((alert) => (
-                <div key={alert.alert_id} className={`alert-card ${alert.resolved ? 'resolved' : ''}`}>
-                  <div className="alert-card-header">
-                    <div className={`alert-severity severity-${getSeverityClass(alert.severity_level)}`}>
-                      <i className={`bi ${getSeverityIcon(alert.severity_level)}`}></i>
-                      <span>{alert.severity_level}</span>
-                    </div>
-                    <div className="alert-time">
-                      <i className="bi bi-clock"></i>
-                      {new Date(alert.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                  <div className="alert-card-body">
-                    <div className="alert-type">
-                      <code>{alert.alert_type}</code>
-                    </div>
-                    <div className="alert-message">{alert.alert_message}</div>
-                    {alert.detected_ip && (
-                      <div className="alert-ip">
-                        <i className="bi bi-ip"></i>
-                        IP: {alert.detected_ip}
-                        <button 
-                          className="btn-block-small"
-                          onClick={() => openBlockModal(alert.detected_ip)}
-                        >
-                          <i className="bi bi-ban"></i> Block
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="alert-card-footer">
-                    {!alert.resolved ? (
-                      <button 
-                        className="btn-resolve"
-                        onClick={() => viewAlertDetails(alert)}
-                      >
-                        <i className="bi bi-check-circle"></i> Resolve Alert
-                      </button>
-                    ) : (
-                      <span className="resolved-badge">
-                        <i className="bi bi-check-circle-fill"></i> Resolved
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="empty-state">
-                <i className="bi bi-shield-check"></i>
-                <h4>No Security Alerts</h4>
-                <p>All systems are secure</p>
-              </div>
-            )}
           </div>
         </div>
 
@@ -365,7 +312,10 @@ export default function SecurityDashboard() {
                     {attempt.ip_address && (
                       <button 
                         className="btn-block"
-                        onClick={() => openBlockModal(attempt.ip_address)}
+                        onClick={() => {
+                          setSelectedIP(attempt.ip_address)
+                          setShowBlockModal(true)
+                        }}
                       >
                         <i className="bi bi-ban"></i> Block IP
                       </button>
@@ -406,7 +356,7 @@ export default function SecurityDashboard() {
                     </div>
                     <button 
                       className="btn-unblock"
-                      onClick={() => unblockIP(ip.blacklist_id)}
+                      onClick={() => unblockIP(ip.blacklist_id, ip.ip_address)}
                       disabled={actionLoading}
                     >
                       <i className="bi bi-unlock"></i> Unblock
@@ -423,65 +373,6 @@ export default function SecurityDashboard() {
           </div>
         </div>
       </div>
-
-      {/* Alert Resolution Modal */}
-      {showAlertModal && selectedAlert && (
-        <div className="modal-overlay" onClick={() => setShowAlertModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className={`modal-header ${getSeverityClass(selectedAlert.severity_level)}`}>
-              <div className="modal-icon">
-                <i className={`bi ${getSeverityIcon(selectedAlert.severity_level)}`}></i>
-              </div>
-              <h3>Resolve Security Alert</h3>
-              <button className="modal-close" onClick={() => setShowAlertModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="alert-details">
-                <div className="detail-row">
-                  <span className="detail-label">Alert Type:</span>
-                  <span className="detail-value">{selectedAlert.alert_type}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="detail-label">Severity:</span>
-                  <span className={`detail-value severity-${getSeverityClass(selectedAlert.severity_level)}`}>
-                    {selectedAlert.severity_level}
-                  </span>
-                </div>
-                <div className="detail-row">
-                  <span className="detail-label">Message:</span>
-                  <span className="detail-value">{selectedAlert.alert_message}</span>
-                </div>
-                {selectedAlert.detected_ip && (
-                  <div className="detail-row">
-                    <span className="detail-label">Source IP:</span>
-                    <span className="detail-value">{selectedAlert.detected_ip}</span>
-                  </div>
-                )}
-                <div className="detail-row">
-                  <span className="detail-label">Created At:</span>
-                  <span className="detail-value">{new Date(selectedAlert.created_at).toLocaleString()}</span>
-                </div>
-              </div>
-              <div className="warning-message">
-                <i className="bi bi-info-circle-fill"></i>
-                Resolving this alert will mark it as handled. The alert will be archived but remain visible in logs.
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowAlertModal(false)}>Cancel</button>
-              <button className="btn-primary" onClick={() => resolveAlert(selectedAlert.alert_id)} disabled={actionLoading}>
-                {actionLoading ? (
-                  <><span className="spinner-border spinner-border-sm me-2"></span>Resolving...</>
-                ) : (
-                  'Confirm Resolve'
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Block IP Modal */}
       {showBlockModal && (
@@ -654,14 +545,22 @@ export default function SecurityDashboard() {
           color: #1f2937;
         }
 
-        .stat-change {
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
         .text-danger { color: #ef4444; }
         .text-warning { color: #f59e0b; }
         .text-info { color: #3b82f6; }
+
+        .two-columns {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-bottom: 28px;
+        }
+
+        .failed-attempts-card, .blacklist-card {
+          background: white;
+          border-radius: 24px;
+          padding: 20px;
+        }
 
         .section-header {
           display: flex;
@@ -683,144 +582,6 @@ export default function SecurityDashboard() {
           border-radius: 20px;
           font-size: 12px;
           color: #6c757d;
-        }
-
-        .alerts-section {
-          background: white;
-          border-radius: 24px;
-          padding: 20px;
-          margin-bottom: 28px;
-        }
-
-        .alerts-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-          gap: 20px;
-        }
-
-        .alert-card {
-          background: #f8f9fa;
-          border-radius: 16px;
-          padding: 16px;
-          transition: all 0.3s ease;
-          border-left: 4px solid #e9ecef;
-        }
-
-        .alert-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-        }
-
-        .alert-card.resolved {
-          opacity: 0.6;
-          background: #f1f3f5;
-        }
-
-        .alert-card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-
-        .alert-severity {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 10px;
-          border-radius: 20px;
-          font-size: 11px;
-          font-weight: 600;
-        }
-
-        .severity-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .severity-warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .severity-info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-
-        .alert-time {
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .alert-type {
-          font-family: monospace;
-          font-size: 12px;
-          background: #e9ecef;
-          display: inline-block;
-          padding: 4px 8px;
-          border-radius: 6px;
-          margin-bottom: 10px;
-        }
-
-        .alert-message {
-          font-size: 13px;
-          color: #4b5563;
-          margin-bottom: 12px;
-          line-height: 1.5;
-        }
-
-        .alert-ip {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 11px;
-          color: #6c757d;
-          margin-top: 8px;
-        }
-
-        .btn-block-small {
-          margin-left: auto;
-          background: none;
-          border: none;
-          color: #ef4444;
-          font-size: 11px;
-          cursor: pointer;
-        }
-
-        .alert-card-footer {
-          margin-top: 12px;
-          padding-top: 12px;
-          border-top: 1px solid #e9ecef;
-        }
-
-        .btn-resolve {
-          width: 100%;
-          padding: 8px;
-          background: none;
-          border: 1px solid #10b981;
-          border-radius: 8px;
-          color: #10b981;
-          font-size: 12px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-resolve:hover {
-          background: #10b981;
-          color: white;
-        }
-
-        .resolved-badge {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          font-size: 12px;
-          color: #10b981;
-        }
-
-        .two-columns {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 24px;
-          margin-bottom: 28px;
-        }
-
-        .failed-attempts-card, .blacklist-card {
-          background: white;
-          border-radius: 24px;
-          padding: 20px;
         }
 
         .attempts-list, .blacklist-list {
@@ -930,28 +691,6 @@ export default function SecurityDashboard() {
           color: white;
         }
 
-        .empty-state {
-          text-align: center;
-          padding: 60px 20px;
-        }
-
-        .empty-state i {
-          font-size: 48px;
-          color: #10b981;
-          margin-bottom: 16px;
-          display: block;
-        }
-
-        .empty-state h4 {
-          margin: 0 0 8px 0;
-          color: #64748b;
-        }
-
-        .empty-state p {
-          margin: 0;
-          color: #94a3b8;
-        }
-
         .empty-state-small {
           text-align: center;
           padding: 40px 20px;
@@ -990,8 +729,6 @@ export default function SecurityDashboard() {
         }
 
         .modal-header.danger .modal-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .modal-header.warning .modal-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .modal-header.info .modal-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
         .modal-icon {
           width: 48px;
@@ -1023,27 +760,6 @@ export default function SecurityDashboard() {
 
         .modal-body {
           padding: 24px;
-        }
-
-        .alert-details {
-          margin-bottom: 20px;
-        }
-
-        .detail-row {
-          display: flex;
-          margin-bottom: 12px;
-          font-size: 13px;
-        }
-
-        .detail-label {
-          width: 100px;
-          font-weight: 600;
-          color: #6c757d;
-        }
-
-        .detail-value {
-          flex: 1;
-          color: #1f2937;
         }
 
         .ip-display {
@@ -1119,7 +835,6 @@ export default function SecurityDashboard() {
           cursor: pointer;
         }
 
-        .btn-primary { background: #4f46e5; color: white; }
         .btn-primary.danger { background: #ef4444; color: white; }
 
         @keyframes fadeIn {
@@ -1151,9 +866,6 @@ export default function SecurityDashboard() {
           .stats-grid {
             grid-template-columns: repeat(2, 1fr);
           }
-          .alerts-grid {
-            grid-template-columns: 1fr;
-          }
           .attempt-item {
             flex-direction: column;
             gap: 12px;
@@ -1162,13 +874,6 @@ export default function SecurityDashboard() {
             flex-direction: column;
             gap: 12px;
             text-align: center;
-          }
-          .detail-row {
-            flex-direction: column;
-            gap: 4px;
-          }
-          .detail-label {
-            width: auto;
           }
         }
       `}</style>

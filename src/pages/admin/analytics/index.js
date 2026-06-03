@@ -53,9 +53,6 @@ export default function AnalyticsDashboard() {
     contentStats: {
       posts: 0,
       comments: 0,
-      reports: 0,
-      pendingReports: 0,
-      resolvedReports: 0,
       barterListings: 0,
       activeBarter: 0,
       messages: 0,
@@ -75,8 +72,6 @@ export default function AnalyticsDashboard() {
     try {
       setLoading(true)
       
-      // Calculate date ranges
-      const now = new Date()
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       
@@ -90,7 +85,6 @@ export default function AnalyticsDashboard() {
       if (dateRange === 'week') startDate = weekAgo
       if (dateRange === 'today') startDate = today
 
-      // Fetch all data in parallel
       const [
         totalUsers,
         activeUsers,
@@ -101,9 +95,6 @@ export default function AnalyticsDashboard() {
         pendingUsers,
         posts,
         comments,
-        reports,
-        pendingReports,
-        resolvedReports,
         barterListings,
         activeBarter,
         messages,
@@ -122,9 +113,6 @@ export default function AnalyticsDashboard() {
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
         supabase.from('posts').select('*', { count: 'exact', head: true }),
         supabase.from('comments').select('*', { count: 'exact', head: true }),
-        supabase.from('system_reports').select('*', { count: 'exact', head: true }),
-        supabase.from('system_reports').select('*', { count: 'exact', head: true }).eq('report_status', 'PENDING'),
-        supabase.from('system_reports').select('*', { count: 'exact', head: true }).eq('report_status', 'RESOLVED'),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
         supabase.from('messages').select('*', { count: 'exact', head: true }),
@@ -135,12 +123,10 @@ export default function AnalyticsDashboard() {
         fetchPopularCategories()
       ])
 
-      // Get role IDs properly
       const { data: roles } = await supabase.from('roles').select('role_id, role_name')
       const roleMap = {}
       roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
 
-      // Update farmers and vendors with proper role IDs
       let farmersCount = 0
       let vendorsCount = 0
       let adminsCount = 0
@@ -174,9 +160,6 @@ export default function AnalyticsDashboard() {
         contentStats: {
           posts: posts.count || 0,
           comments: comments.count || 0,
-          reports: reports.count || 0,
-          pendingReports: pendingReports.count || 0,
-          resolvedReports: resolvedReports.count || 0,
           barterListings: barterListings.count || 0,
           activeBarter: activeBarter.count || 0,
           messages: messages.count || 0,
@@ -273,7 +256,6 @@ export default function AnalyticsDashboard() {
       .map(([name, count]) => ({ name, count }))
   }
 
-  // Chart configurations
   const userGrowthChart = {
     labels: analytics.userGrowth.labels || [],
     datasets: [{
@@ -385,7 +367,6 @@ export default function AnalyticsDashboard() {
   return (
     <AdminLayout title="Analytics Dashboard">
       <div className="analytics-container">
-        {/* Header */}
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -397,45 +378,23 @@ export default function AnalyticsDashboard() {
             </div>
           </div>
           <div className="date-range-selector">
-            <button 
-              className={`range-btn ${dateRange === 'today' ? 'active' : ''}`}
-              onClick={() => setDateRange('today')}
-            >
-              Today
-            </button>
-            <button 
-              className={`range-btn ${dateRange === 'week' ? 'active' : ''}`}
-              onClick={() => setDateRange('week')}
-            >
-              This Week
-            </button>
-            <button 
-              className={`range-btn ${dateRange === 'month' ? 'active' : ''}`}
-              onClick={() => setDateRange('month')}
-            >
-              This Month
-            </button>
+            <button className={`range-btn ${dateRange === 'today' ? 'active' : ''}`} onClick={() => setDateRange('today')}>Today</button>
+            <button className={`range-btn ${dateRange === 'week' ? 'active' : ''}`} onClick={() => setDateRange('week')}>This Week</button>
+            <button className={`range-btn ${dateRange === 'month' ? 'active' : ''}`} onClick={() => setDateRange('month')}>This Month</button>
           </div>
         </div>
 
-        {/* Key Metrics Cards */}
         <div className="metrics-grid">
           <div className="metric-card">
-            <div className="metric-icon primary">
-              <i className="bi bi-people-fill"></i>
-            </div>
+            <div className="metric-icon primary"><i className="bi bi-people-fill"></i></div>
             <div className="metric-info">
               <span className="metric-label">Total Users</span>
               <h2 className="metric-value">{analytics.userStats.total.toLocaleString()}</h2>
-              <span className="metric-trend positive">
-                <i className="bi bi-arrow-up"></i> +{analytics.userStats.newThisMonth} this month
-              </span>
+              <span className="metric-trend positive"><i className="bi bi-arrow-up"></i> +{analytics.userStats.newThisMonth} this month</span>
             </div>
           </div>
           <div className="metric-card">
-            <div className="metric-icon success">
-              <i className="bi bi-person-check-fill"></i>
-            </div>
+            <div className="metric-icon success"><i className="bi bi-person-check-fill"></i></div>
             <div className="metric-info">
               <span className="metric-label">Active Users</span>
               <h2 className="metric-value">{analytics.userStats.active.toLocaleString()}</h2>
@@ -443,78 +402,53 @@ export default function AnalyticsDashboard() {
             </div>
           </div>
           <div className="metric-card">
-            <div className="metric-icon info">
-              <i className="bi bi-file-post-fill"></i>
-            </div>
+            <div className="metric-icon info"><i className="bi bi-file-post-fill"></i></div>
             <div className="metric-info">
               <span className="metric-label">Total Posts</span>
               <h2 className="metric-value">{analytics.contentStats.posts.toLocaleString()}</h2>
               <span className="metric-trend">Community content</span>
             </div>
           </div>
-          <div className="metric-card">
-            <div className="metric-icon warning">
-              <i className="bi bi-flag-fill"></i>
-            </div>
-            <div className="metric-info">
-              <span className="metric-label">Active Reports</span>
-              <h2 className="metric-value">{analytics.contentStats.pendingReports}</h2>
-              <span className="metric-trend negative">Needs attention</span>
-            </div>
-          </div>
         </div>
 
-        {/* Secondary Metrics */}
         <div className="secondary-metrics">
           <div className="secondary-card">
-            <div className="secondary-icon">
-              <i className="bi bi-tree-fill"></i>
-            </div>
+            <div className="secondary-icon"><i className="bi bi-tree-fill"></i></div>
             <div className="secondary-info">
               <span className="secondary-label">Farmers</span>
               <strong className="secondary-value">{analytics.userStats.farmers.toLocaleString()}</strong>
             </div>
           </div>
           <div className="secondary-card">
-            <div className="secondary-icon">
-              <i className="bi bi-shop"></i>
-            </div>
+            <div className="secondary-icon"><i className="bi bi-shop"></i></div>
             <div className="secondary-info">
               <span className="secondary-label">Vendors</span>
               <strong className="secondary-value">{analytics.userStats.vendors.toLocaleString()}</strong>
             </div>
           </div>
           <div className="secondary-card">
-            <div className="secondary-icon">
-              <i className="bi bi-chat-dots"></i>
-            </div>
+            <div className="secondary-icon"><i className="bi bi-chat-dots"></i></div>
             <div className="secondary-info">
               <span className="secondary-label">Messages</span>
               <strong className="secondary-value">{analytics.contentStats.messages.toLocaleString()}</strong>
             </div>
           </div>
           <div className="secondary-card">
-            <div className="secondary-icon">
-              <i className="bi bi-arrow-left-right"></i>
-            </div>
+            <div className="secondary-icon"><i className="bi bi-arrow-left-right"></i></div>
             <div className="secondary-info">
               <span className="secondary-label">Active Barter</span>
               <strong className="secondary-value">{analytics.contentStats.activeBarter}</strong>
             </div>
           </div>
           <div className="secondary-card">
-            <div className="secondary-icon">
-              <i className="bi bi-megaphone"></i>
-            </div>
+            <div className="secondary-icon"><i className="bi bi-megaphone"></i></div>
             <div className="secondary-info">
               <span className="secondary-label">Active Ads</span>
               <strong className="secondary-value">{analytics.contentStats.ads}</strong>
             </div>
           </div>
           <div className="secondary-card">
-            <div className="secondary-icon">
-              <i className="bi bi-check-circle"></i>
-            </div>
+            <div className="secondary-icon"><i className="bi bi-check-circle"></i></div>
             <div className="secondary-info">
               <span className="secondary-label">Verified Users</span>
               <strong className="secondary-value">{Math.round((analytics.userStats.verified / analytics.userStats.total) * 100)}%</strong>
@@ -522,38 +456,25 @@ export default function AnalyticsDashboard() {
           </div>
         </div>
 
-        {/* Charts Section */}
         <div className="charts-section">
           <div className="chart-card full-width">
             <div className="chart-header">
-              <div>
-                <h5>📈 User Growth Trend</h5>
-                <p>New user registrations over time</p>
-              </div>
+              <h5>📈 User Growth Trend</h5>
+              <p>New user registrations over time</p>
             </div>
-            <div className="chart-body">
-              <Line data={userGrowthChart} options={chartOptions} />
-            </div>
+            <div className="chart-body"><Line data={userGrowthChart} options={chartOptions} /></div>
           </div>
-
           <div className="chart-card">
             <div className="chart-header">
-              <div>
-                <h5>📊 Platform Activity</h5>
-                <p>Posts created per day</p>
-              </div>
+              <h5>📊 Platform Activity</h5>
+              <p>Posts created per day</p>
             </div>
-            <div className="chart-body">
-              <Bar data={activityChart} options={chartOptions} />
-            </div>
+            <div className="chart-body"><Bar data={activityChart} options={chartOptions} /></div>
           </div>
-
           <div className="chart-card">
             <div className="chart-header">
-              <div>
-                <h5>🏆 Top Contributors</h5>
-                <p>Most active community members</p>
-              </div>
+              <h5>🏆 Top Contributors</h5>
+              <p>Most active community members</p>
             </div>
             <div className="chart-body">
               <div className="contributor-summary">
@@ -564,15 +485,11 @@ export default function AnalyticsDashboard() {
                     <div className="contributor-count">{contributor.count} posts</div>
                   </div>
                 ))}
-                {analytics.topContributors.length === 0 && (
-                  <div className="no-data">No contributor data available</div>
-                )}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Distribution Section */}
         <div className="distribution-section">
           <div className="dist-card">
             <div className="dist-header">
@@ -580,13 +497,7 @@ export default function AnalyticsDashboard() {
               <p>Most discussed topics</p>
             </div>
             <div className="dist-body">
-              <div className="dist-chart">
-                {analytics.popularCategories.length > 0 ? (
-                  <Doughnut data={categoryChart} options={chartOptions} />
-                ) : (
-                  <div className="no-data">No category data available</div>
-                )}
-              </div>
+              <div className="dist-chart"><Doughnut data={categoryChart} options={chartOptions} /></div>
               <div className="dist-list">
                 {analytics.popularCategories.map((cat, idx) => (
                   <div key={idx} className="dist-item">
@@ -598,25 +509,17 @@ export default function AnalyticsDashboard() {
               </div>
             </div>
           </div>
-
           <div className="dist-card">
             <div className="dist-header">
               <h5><i className="bi bi-star"></i> Community Leaders</h5>
               <p>Top contributors by posts</p>
             </div>
             <div className="dist-body">
-              <div className="polar-container">
-                {analytics.topContributors.length > 0 ? (
-                  <PolarArea data={contributorChart} options={chartOptions} />
-                ) : (
-                  <div className="no-data">No leader data available</div>
-                )}
-              </div>
+              <div className="polar-container"><PolarArea data={contributorChart} options={chartOptions} /></div>
             </div>
           </div>
         </div>
 
-        {/* User Stats Summary */}
         <div className="stats-summary">
           <div className="summary-card">
             <h5>User Statistics</h5>
@@ -643,7 +546,6 @@ export default function AnalyticsDashboard() {
               </div>
             </div>
           </div>
-
           <div className="summary-card">
             <h5>Content Statistics</h5>
             <div className="summary-grid">
@@ -658,14 +560,14 @@ export default function AnalyticsDashboard() {
                 <small>Available trades</small>
               </div>
               <div className="summary-item">
-                <span>Pending Reports</span>
-                <strong className="text-warning">{analytics.contentStats.pendingReports}</strong>
-                <small>Needs review</small>
+                <span>Active Barter</span>
+                <strong className="text-success">{analytics.contentStats.activeBarter}</strong>
+                <small>Live trades</small>
               </div>
               <div className="summary-item">
-                <span>Resolved Reports</span>
-                <strong className="text-success">{analytics.contentStats.resolvedReports}</strong>
-                <small>Completed</small>
+                <span>Active Ads</span>
+                <strong className="text-info">{analytics.contentStats.ads}</strong>
+                <small>Live campaigns</small>
               </div>
             </div>
           </div>
@@ -741,10 +643,6 @@ export default function AnalyticsDashboard() {
           transition: all 0.3s ease;
         }
 
-        .range-btn:hover {
-          background: #f8f9fa;
-        }
-
         .range-btn.active {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           color: white;
@@ -752,7 +650,7 @@ export default function AnalyticsDashboard() {
 
         .metrics-grid {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(3, 1fr);
           gap: 20px;
           margin-bottom: 24px;
         }
@@ -784,41 +682,14 @@ export default function AnalyticsDashboard() {
         .metric-icon.primary { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
         .metric-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .metric-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        .metric-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
 
-        .metric-icon i {
-          font-size: 24px;
-        }
+        .metric-icon i { font-size: 24px; }
 
-        .metric-info {
-          flex: 1;
-        }
-
-        .metric-label {
-          font-size: 13px;
-          color: #6c757d;
-          margin-bottom: 4px;
-          display: block;
-        }
-
-        .metric-value {
-          font-size: 28px;
-          font-weight: 700;
-          margin: 0 0 4px 0;
-          color: #1f2937;
-        }
-
-        .metric-trend {
-          font-size: 11px;
-        }
-
-        .metric-trend.positive {
-          color: #10b981;
-        }
-
-        .metric-trend.negative {
-          color: #ef4444;
-        }
+        .metric-info { flex: 1; }
+        .metric-label { font-size: 13px; color: #6c757d; margin-bottom: 4px; display: block; }
+        .metric-value { font-size: 28px; font-weight: 700; margin: 0 0 4px 0; color: #1f2937; }
+        .metric-trend { font-size: 11px; }
+        .metric-trend.positive { color: #10b981; }
 
         .secondary-metrics {
           display: grid;
@@ -853,25 +724,10 @@ export default function AnalyticsDashboard() {
           color: #4f46e5;
         }
 
-        .secondary-icon i {
-          font-size: 20px;
-        }
-
-        .secondary-info {
-          flex: 1;
-        }
-
-        .secondary-label {
-          font-size: 11px;
-          color: #6c757d;
-          display: block;
-        }
-
-        .secondary-value {
-          font-size: 16px;
-          font-weight: 700;
-          color: #1f2937;
-        }
+        .secondary-icon i { font-size: 20px; }
+        .secondary-info { flex: 1; }
+        .secondary-label { font-size: 11px; color: #6c757d; display: block; }
+        .secondary-value { font-size: 16px; font-weight: 700; color: #1f2937; }
 
         .charts-section {
           display: grid;
@@ -896,26 +752,10 @@ export default function AnalyticsDashboard() {
           box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
         }
 
-        .chart-header {
-          margin-bottom: 20px;
-        }
-
-        .chart-header h5 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0 0 4px 0;
-          color: #1f2937;
-        }
-
-        .chart-header p {
-          font-size: 12px;
-          color: #6c757d;
-          margin: 0;
-        }
-
-        .chart-body {
-          height: 300px;
-        }
+        .chart-header { margin-bottom: 20px; }
+        .chart-header h5 { font-size: 16px; font-weight: 600; margin: 0 0 4px 0; color: #1f2937; }
+        .chart-header p { font-size: 12px; color: #6c757d; margin: 0; }
+        .chart-body { height: 280px; }
 
         .contributor-summary {
           display: flex;
@@ -933,24 +773,9 @@ export default function AnalyticsDashboard() {
           border-radius: 12px;
         }
 
-        .contributor-rank {
-          width: 40px;
-          font-weight: 700;
-          color: #4f46e5;
-          font-size: 18px;
-        }
-
-        .contributor-name {
-          flex: 1;
-          font-weight: 500;
-          color: #1f2937;
-        }
-
-        .contributor-count {
-          font-size: 13px;
-          font-weight: 600;
-          color: #10b981;
-        }
+        .contributor-rank { width: 40px; font-weight: 700; color: #4f46e5; font-size: 18px; }
+        .contributor-name { flex: 1; font-weight: 500; color: #1f2937; }
+        .contributor-count { font-size: 13px; font-weight: 600; color: #10b981; }
 
         .distribution-section {
           display: grid;
@@ -965,22 +790,10 @@ export default function AnalyticsDashboard() {
           padding: 20px;
         }
 
-        .dist-header {
-          margin-bottom: 20px;
-        }
-
-        .dist-header h5 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0 0 4px 0;
-          color: #1f2937;
-        }
-
-        .dist-header p {
-          font-size: 12px;
-          color: #6c757d;
-          margin: 0;
-        }
+        .dist-header { margin-bottom: 20px; }
+        .dist-header h5 { font-size: 16px; font-weight: 600; margin: 0 0 4px 0; color: #1f2937; }
+        .dist-header h5 i { margin-right: 8px; color: #4f46e5; }
+        .dist-header p { font-size: 12px; color: #6c757d; margin: 0; }
 
         .dist-body {
           display: flex;
@@ -988,24 +801,9 @@ export default function AnalyticsDashboard() {
           flex-wrap: wrap;
         }
 
-        .dist-chart {
-          flex: 1;
-          min-width: 200px;
-          height: 200px;
-        }
-
-        .polar-container {
-          flex: 1;
-          height: 280px;
-        }
-
-        .dist-list {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          justify-content: center;
-        }
+        .dist-chart { flex: 1; min-width: 200px; height: 200px; }
+        .polar-container { flex: 1; height: 280px; }
+        .dist-list { flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: center; }
 
         .dist-item {
           display: flex;
@@ -1013,32 +811,9 @@ export default function AnalyticsDashboard() {
           gap: 10px;
         }
 
-        .dist-color {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-        }
-
-        .dist-name {
-          flex: 1;
-          font-size: 13px;
-          color: #4b5563;
-        }
-
-        .dist-value {
-          font-size: 13px;
-          font-weight: 600;
-          color: #1f2937;
-        }
-
-        .no-data {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          color: #9ca3af;
-          font-size: 13px;
-        }
+        .dist-color { width: 12px; height: 12px; border-radius: 50%; }
+        .dist-name { flex: 1; font-size: 13px; color: #4b5563; }
+        .dist-value { font-size: 13px; font-weight: 600; color: #1f2937; }
 
         .stats-summary {
           display: grid;
@@ -1088,58 +863,26 @@ export default function AnalyticsDashboard() {
           margin-top: 2px;
         }
 
-        .text-warning {
-          color: #f59e0b;
-        }
-
-        .text-success {
-          color: #10b981;
-        }
+        .text-success { color: #10b981; }
+        .text-info { color: #3b82f6; }
 
         @media (max-width: 1200px) {
-          .metrics-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .secondary-metrics {
-            grid-template-columns: repeat(3, 1fr);
-          }
-          .charts-section {
-            grid-template-columns: 1fr;
-          }
-          .chart-card.full-width {
-            grid-column: span 1;
-          }
-          .distribution-section {
-            grid-template-columns: 1fr;
-          }
-          .stats-summary {
-            grid-template-columns: 1fr;
-          }
+          .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+          .secondary-metrics { grid-template-columns: repeat(3, 1fr); }
+          .charts-section { grid-template-columns: 1fr; }
+          .chart-card.full-width { grid-column: span 1; }
+          .distribution-section { grid-template-columns: 1fr; }
+          .stats-summary { grid-template-columns: 1fr; }
         }
 
         @media (max-width: 768px) {
-          .metrics-grid {
-            grid-template-columns: 1fr;
-          }
-          .secondary-metrics {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .page-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          .dist-body {
-            flex-direction: column;
-          }
-          .dist-chart {
-            height: 250px;
-          }
-          .polar-container {
-            height: 250px;
-          }
-          .summary-grid {
-            grid-template-columns: 1fr;
-          }
+          .metrics-grid { grid-template-columns: 1fr; }
+          .secondary-metrics { grid-template-columns: repeat(2, 1fr); }
+          .page-header { flex-direction: column; align-items: flex-start; }
+          .dist-body { flex-direction: column; }
+          .dist-chart { height: 250px; }
+          .polar-container { height: 250px; }
+          .summary-grid { grid-template-columns: 1fr; }
         }
       `}</style>
     </AdminLayout>
