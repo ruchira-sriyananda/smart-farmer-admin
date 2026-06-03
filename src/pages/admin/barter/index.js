@@ -673,6 +673,7 @@ export default function BarterTransactions() {
       {showFullDetails && selectedTransaction && (
         <div className="modal-overlay" onClick={() => setShowFullDetails(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div class="wrap">
             <div className="modal-header info">
               <div className="modal-icon">
                 <i className="bi bi-info-circle-fill"></i>
@@ -720,7 +721,7 @@ export default function BarterTransactions() {
                   </div>
                 </div>
               </div>
-
+                </div>
               <div className="details-card">
                 <h4><i className="bi bi-person-badge"></i> Seller Information</h4>
                 <div className="seller-info">
@@ -1435,8 +1436,8 @@ export default function BarterTransactions() {
         }
 
         .image-container img {
-          max-width: 80%;
-          max-height: 80%;
+          max-width: 100%;
+          max-height: 300px;
           border-radius: 12px;
           transition: transform 0.3s ease;
         }
