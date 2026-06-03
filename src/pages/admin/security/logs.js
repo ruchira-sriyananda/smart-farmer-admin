@@ -11,6 +11,7 @@ export default function ActivityLogs() {
   const [filter, setFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [dateRange, setDateRange] = useState('all')
+  const [showFilters, setShowFilters] = useState(false)
   const [stats, setStats] = useState({
     total: 0,
     uniqueIPs: 0,
@@ -48,7 +49,6 @@ export default function ActivityLogs() {
       .single()
 
     if (!error && data) {
-      // Fetch admin user separately
       if (data.admin_id) {
         const { data: adminUser } = await supabase
           .from('admin_users')
@@ -69,7 +69,6 @@ export default function ActivityLogs() {
       setLoading(true)
       setError(null)
       
-      // First, check if table has any records
       const { count, error: countError } = await supabase
         .from('admin_activity_logs')
         .select('*', { count: 'exact', head: true })
@@ -81,15 +80,12 @@ export default function ActivityLogs() {
         return
       }
 
-      console.log('Total logs count:', count)
-
       if (count === 0) {
-        setError('No activity logs found. Please run the SQL to insert sample logs.')
+        setError('No activity logs found.')
         setLoading(false)
         return
       }
 
-      // Fetch logs without join first
       const { data: logsData, error: logsError } = await supabase
         .from('admin_activity_logs')
         .select('*')
@@ -103,10 +99,8 @@ export default function ActivityLogs() {
       }
 
       if (logsData && logsData.length > 0) {
-        // Get unique admin IDs
         const adminIds = [...new Set(logsData.map(log => log.admin_id).filter(id => id))]
         
-        // Fetch admin users separately
         let adminUsersMap = {}
         if (adminIds.length > 0) {
           const { data: adminUsers, error: adminError } = await supabase
@@ -124,7 +118,6 @@ export default function ActivityLogs() {
         
         setAdminUsersMap(adminUsersMap)
         
-        // Combine logs with admin users
         const logsWithUsers = logsData.map(log => ({
           ...log,
           admin_users: adminUsersMap[log.admin_id] || null
@@ -181,10 +174,12 @@ export default function ActivityLogs() {
       case 'today':
         return logsData.filter(l => new Date(l.created_at).toDateString() === now.toDateString())
       case 'week':
-        const weekAgo = new Date(now.setDate(now.getDate() - 7))
+        const weekAgo = new Date()
+        weekAgo.setDate(weekAgo.getDate() - 7)
         return logsData.filter(l => new Date(l.created_at) >= weekAgo)
       case 'month':
-        const monthAgo = new Date(now.setMonth(now.getMonth() - 1))
+        const monthAgo = new Date()
+        monthAgo.setMonth(monthAgo.getMonth() - 1)
         return logsData.filter(l => new Date(l.created_at) >= monthAgo)
       default:
         return logsData
@@ -290,52 +285,9 @@ export default function ActivityLogs() {
           <i className="bi bi-exclamation-triangle-fill"></i>
           <h3>No Activity Logs Found</h3>
           <p>{error}</p>
-          <div className="error-actions">
-            <button className="btn-primary" onClick={fetchLogs}>
-              <i className="bi bi-arrow-repeat"></i> Retry
-            </button>
-            <button className="btn-secondary" onClick={() => router.push('/admin/dashboard')}>
-              <i className="bi bi-house"></i> Back to Dashboard
-            </button>
-          </div>
-          <div className="info-box">
-            <i className="bi bi-info-circle-fill"></i>
-            <div>
-              <strong>Need sample data?</strong>
-              <p>Run this SQL in Supabase SQL Editor to add sample activity logs:</p>
-              <pre>{`-- First, make sure you have an admin user
-INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
-SELECT 
-    uuid_generate_v4(),
-    (SELECT admin_id FROM admin_users LIMIT 1),
-    'LOGIN',
-    'Admin logged in successfully',
-    '192.168.1.1',
-    NOW()
-WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);
-
--- Add more sample logs
-INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
-SELECT 
-    uuid_generate_v4(),
-    (SELECT admin_id FROM admin_users LIMIT 1),
-    'USER_MANAGEMENT',
-    'Updated user profile',
-    '192.168.1.1',
-    NOW() - INTERVAL '1 hour'
-WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);
-
-INSERT INTO admin_activity_logs (log_id, admin_id, activity_type, activity_description, ip_address, created_at)
-SELECT 
-    uuid_generate_v4(),
-    (SELECT admin_id FROM admin_users LIMIT 1),
-    'SECURITY_ALERT',
-    'Failed login attempt detected',
-    '203.0.113.1',
-    NOW() - INTERVAL '2 hours'
-WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
-            </div>
-          </div>
+          <button className="retry-btn" onClick={fetchLogs}>
+            <i className="bi bi-arrow-repeat"></i> Retry
+          </button>
         </div>
         <style jsx>{`
           .error-container {
@@ -343,7 +295,7 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
             padding: 60px 20px;
             background: white;
             border-radius: 24px;
-            max-width: 600px;
+            max-width: 500px;
             margin: 40px auto;
           }
           .error-container i {
@@ -359,51 +311,14 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
             color: #6c757d;
             margin-bottom: 24px;
           }
-          .error-actions {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            margin-bottom: 24px;
-          }
-          .btn-primary {
-            padding: 10px 20px;
-            background: #4f46e5;
+          .retry-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: none;
-            border-radius: 10px;
+            padding: 10px 24px;
+            border-radius: 12px;
             color: white;
             font-weight: 500;
             cursor: pointer;
-          }
-          .btn-secondary {
-            padding: 10px 20px;
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 10px;
-            color: #495057;
-            font-weight: 500;
-            cursor: pointer;
-          }
-          .info-box {
-            background: #e7f1ff;
-            border-radius: 16px;
-            padding: 20px;
-            text-align: left;
-            display: flex;
-            gap: 16px;
-          }
-          .info-box i {
-            font-size: 24px;
-            color: #0d6efd;
-            margin: 0;
-          }
-          .info-box pre {
-            background: #1f2937;
-            color: #10b981;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 12px;
-            margin-top: 8px;
-            overflow-x: auto;
           }
         `}</style>
       </AdminLayout>
@@ -413,7 +328,7 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
   return (
     <AdminLayout title="Activity Logs">
       <div className="logs-container">
-        {/* Header Section */}
+        {/* Header */}
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -424,122 +339,110 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
               <p className="header-subtitle">Track and monitor all system activities</p>
             </div>
           </div>
-          <button className="refresh-btn" onClick={fetchLogs}>
-            <i className="bi bi-arrow-repeat"></i>
-            <span>Refresh</span>
+          <button className="filter-toggle-btn" onClick={() => setShowFilters(!showFilters)}>
+            <i className="bi bi-funnel-fill"></i>
+            <span>Filters</span>
+            {(filter !== 'all' || searchTerm || dateRange !== 'all') && (
+              <span className="active-filter-badge"></span>
+            )}
           </button>
         </div>
 
         {/* Stats Cards */}
         <div className="stats-grid">
           <div className="stat-card">
-            <div className="stat-icon primary">
-              <i className="bi bi-database"></i>
-            </div>
+            <div className="stat-icon primary"><i className="bi bi-database"></i></div>
             <div className="stat-info">
               <span className="stat-label">Total Activities</span>
               <h2 className="stat-value">{stats.total}</h2>
-              <span className="stat-change">All time records</span>
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon info">
-              <i className="bi bi-ip"></i>
-            </div>
+            <div className="stat-icon info"><i className="bi bi-ip"></i></div>
             <div className="stat-info">
               <span className="stat-label">Unique IPs</span>
               <h2 className="stat-value">{stats.uniqueIPs}</h2>
-              <span className="stat-change">Different locations</span>
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon success">
-              <i className="bi bi-clock-history"></i>
-            </div>
+            <div className="stat-icon success"><i className="bi bi-clock-history"></i></div>
             <div className="stat-info">
               <span className="stat-label">Last 24 Hours</span>
               <h2 className="stat-value">{stats.last24h}</h2>
-              <span className="stat-change">Recent activity</span>
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon warning">
-              <i className="bi bi-trophy"></i>
-            </div>
+            <div className="stat-icon warning"><i className="bi bi-trophy"></i></div>
             <div className="stat-info">
               <span className="stat-label">Most Active</span>
               <h2 className="stat-value">{stats.mostActive.substring(0, 15)}</h2>
-              <span className="stat-change">Top contributor</span>
             </div>
           </div>
         </div>
 
-        {/* Filters Section */}
-        <div className="filters-card">
-          <div className="filters-header">
-            <i className="bi bi-funnel-fill"></i>
-            <span>Filters</span>
+        {/* Filters Panel */}
+        {showFilters && (
+          <div className="filters-panel">
+            <div className="filters-row">
+              <div className="filter-group search-group">
+                <i className="bi bi-search"></i>
+                <input
+                  type="text"
+                  className="filter-input"
+                  placeholder="Search by admin, activity, or IP..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                {searchTerm && (
+                  <button className="clear-btn" onClick={() => setSearchTerm('')}>
+                    <i className="bi bi-x-lg"></i>
+                  </button>
+                )}
+              </div>
+              <div className="filter-group">
+                <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
+                  <option value="all">All Activities</option>
+                  {activityTypes.map(type => (
+                    <option key={type} value={type}>{getActivityLabel(type)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-group">
+                <select className="filter-select" value={dateRange} onChange={(e) => setDateRange(e.target.value)}>
+                  <option value="all">All Time</option>
+                  <option value="today">Today</option>
+                  <option value="week">Last 7 Days</option>
+                  <option value="month">Last 30 Days</option>
+                </select>
+              </div>
+              <button className="reset-btn" onClick={() => {
+                setSearchTerm('')
+                setFilter('all')
+                setDateRange('all')
+              }}>
+                <i className="bi bi-arrow-repeat"></i> Reset
+              </button>
+            </div>
           </div>
-          <div className="filters-body">
-            <div className="search-wrapper">
-              <i className="bi bi-search"></i>
-              <input
-                type="text"
-                className="search-input"
-                placeholder="Search by admin, activity, or IP address..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              {searchTerm && (
-                <button className="clear-search" onClick={() => setSearchTerm('')}>
-                  <i className="bi bi-x-lg"></i>
-                </button>
-              )}
-            </div>
-            <div className="filter-group">
-              <label className="filter-label">Activity Type</label>
-              <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
-                <option value="all">All Activities</option>
-                {activityTypes.map(type => (
-                  <option key={type} value={type}>{getActivityLabel(type)}</option>
-                ))}
-              </select>
-            </div>
-            <div className="filter-group">
-              <label className="filter-label">Date Range</label>
-              <select className="filter-select" value={dateRange} onChange={(e) => setDateRange(e.target.value)}>
-                <option value="all">All Time</option>
-                <option value="today">Today</option>
-                <option value="week">Last 7 Days</option>
-                <option value="month">Last 30 Days</option>
-              </select>
-            </div>
-            <button className="reset-filters" onClick={() => {
-              setSearchTerm('')
-              setFilter('all')
-              setDateRange('all')
-            }}>
-              <i className="bi bi-arrow-repeat"></i> Reset
-            </button>
-          </div>
-        </div>
+        )}
 
-        {/* Activity Type Distribution */}
+        {/* Activity Distribution */}
         {Object.keys(stats.byType).length > 0 && (
           <div className="distribution-card">
-            <h5><i className="bi bi-pie-chart"></i> Activity Distribution</h5>
+            <div className="distribution-header">
+              <h5><i className="bi bi-pie-chart"></i> Activity Distribution</h5>
+            </div>
             <div className="distribution-tags">
               {Object.entries(stats.byType).map(([type, count]) => (
-                <div 
+                <button 
                   key={type} 
                   className={`dist-tag ${getActivityColor(type)}`}
                   onClick={() => setFilter(type)}
-                  style={{ cursor: 'pointer' }}
                 >
                   <i className={`bi ${getActivityIcon(type)}`}></i>
                   <span>{getActivityLabel(type)}</span>
                   <span className="dist-count">{count}</span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -547,11 +450,14 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
 
         {/* Logs Table */}
         <div className="logs-table-container">
-          <div className="table-header-info">
+          <div className="table-header">
             <span className="result-count">
               <i className="bi bi-table"></i>
-              Showing {filteredLogs.length} of {logs.length} logs
+              {filteredLogs.length} of {logs.length} logs
             </span>
+            <button className="refresh-table-btn" onClick={fetchLogs}>
+              <i className="bi bi-arrow-repeat"></i> Refresh
+            </button>
           </div>
           
           <div className="table-responsive">
@@ -649,42 +555,40 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
               </button>
             </div>
             <div className="modal-body">
-              <div className="detail-section">
-                <label>Activity Type</label>
-                <div className={`detail-value badge-large ${getActivityColor(selectedLog.activity_type)}`}>
-                  <i className={`bi ${getActivityIcon(selectedLog.activity_type)}`}></i>
-                  {getActivityLabel(selectedLog.activity_type)}
+              <div className="details-section">
+                <div className="detail-row">
+                  <span className="detail-label">Activity Type</span>
+                  <span className={`detail-value ${getActivityColor(selectedLog.activity_type)}`}>
+                    <i className={`bi ${getActivityIcon(selectedLog.activity_type)}`}></i>
+                    {getActivityLabel(selectedLog.activity_type)}
+                  </span>
                 </div>
-              </div>
-              <div className="detail-section">
-                <label>Description</label>
-                <div className="detail-value">{selectedLog.activity_description}</div>
-              </div>
-              <div className="detail-row">
-                <div className="detail-section">
-                  <label>Admin User</label>
-                  <div className="detail-value">
+                <div className="detail-row">
+                  <span className="detail-label">Description</span>
+                  <span className="detail-value">{selectedLog.activity_description}</span>
+                </div>
+                <div className="detail-row">
+                  <span className="detail-label">Admin</span>
+                  <span className="detail-value">
                     <strong>{selectedLog.admin_users?.full_name || 'System'}</strong>
                     <div className="detail-sub">{selectedLog.admin_users?.email}</div>
-                  </div>
+                  </span>
                 </div>
-                <div className="detail-section">
-                  <label>Date & Time</label>
-                  <div className="detail-value">{new Date(selectedLog.created_at).toLocaleString()}</div>
+                <div className="detail-row">
+                  <span className="detail-label">Date & Time</span>
+                  <span className="detail-value">{new Date(selectedLog.created_at).toLocaleString()}</span>
                 </div>
-              </div>
-              <div className="detail-row">
-                <div className="detail-section">
-                  <label>IP Address</label>
-                  <div className="detail-value">
+                <div className="detail-row">
+                  <span className="detail-label">IP Address</span>
+                  <span className="detail-value">
                     <code>{selectedLog.ip_address || 'Not recorded'}</code>
-                  </div>
+                  </span>
                 </div>
-                <div className="detail-section">
-                  <label>Log ID</label>
-                  <div className="detail-value">
+                <div className="detail-row">
+                  <span className="detail-label">Log ID</span>
+                  <span className="detail-value">
                     <code>{selectedLog.log_id}</code>
-                  </div>
+                  </span>
                 </div>
               </div>
             </div>
@@ -695,7 +599,7 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
         </div>
       )}
 
-      <style jsx global>{`
+      <style jsx>{`
         .logs-container {
           max-width: 1400px;
           margin: 0 auto;
@@ -744,22 +648,33 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           font-size: 14px;
         }
 
-        .refresh-btn {
+        .filter-toggle-btn {
           display: flex;
           align-items: center;
           gap: 8px;
           padding: 10px 20px;
-          background: #4f46e5;
-          border: none;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
           border-radius: 12px;
-          color: white;
+          color: #495057;
           font-weight: 500;
+          position: relative;
+          cursor: pointer;
           transition: all 0.3s ease;
         }
 
-        .refresh-btn:hover {
-          background: #4338ca;
-          transform: translateY(-1px);
+        .filter-toggle-btn:hover {
+          background: #e9ecef;
+        }
+
+        .active-filter-badge {
+          position: absolute;
+          top: -4px;
+          right: -4px;
+          width: 10px;
+          height: 10px;
+          background: #4f46e5;
+          border-radius: 50%;
         }
 
         .stats-grid {
@@ -820,46 +735,32 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           color: #1f2937;
         }
 
-        .stat-change {
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .filters-card {
+        .filters-panel {
           background: white;
           border-radius: 20px;
-          margin-bottom: 24px;
-          overflow: hidden;
-        }
-
-        .filters-header {
-          padding: 16px 20px;
-          background: #f8f9fa;
-          border-bottom: 1px solid #e9ecef;
-          font-weight: 600;
-          color: #1f2937;
-        }
-
-        .filters-header i {
-          margin-right: 8px;
-          color: #4f46e5;
-        }
-
-        .filters-body {
           padding: 20px;
+          margin-bottom: 24px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .filters-row {
           display: flex;
           gap: 16px;
           flex-wrap: wrap;
           align-items: flex-end;
         }
 
-        .search-wrapper {
-          flex: 2;
-          position: relative;
-          min-width: 200px;
+        .filter-group {
+          flex: 1;
+          min-width: 180px;
         }
 
-        .search-wrapper i {
+        .search-group {
+          position: relative;
+          flex: 2;
+        }
+
+        .search-group i {
           position: absolute;
           left: 14px;
           top: 50%;
@@ -867,24 +768,24 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           color: #9ca3af;
         }
 
-        .search-input {
+        .filter-input {
           width: 100%;
-          padding: 12px 40px 12px 44px;
+          padding: 10px 12px 10px 38px;
           border: 2px solid #e9ecef;
-          border-radius: 12px;
+          border-radius: 10px;
           font-size: 14px;
           transition: all 0.3s ease;
         }
 
-        .search-input:focus {
+        .filter-input:focus {
           outline: none;
           border-color: #4f46e5;
           box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
         }
 
-        .clear-search {
+        .clear-btn {
           position: absolute;
-          right: 12px;
+          right: 10px;
           top: 50%;
           transform: translateY(-50%);
           background: none;
@@ -893,28 +794,15 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           cursor: pointer;
         }
 
-        .filter-group {
-          flex: 1;
-          min-width: 150px;
-        }
-
-        .filter-label {
-          display: block;
-          font-size: 12px;
-          font-weight: 600;
-          color: #6c757d;
-          margin-bottom: 6px;
-        }
-
         .filter-select {
           width: 100%;
           padding: 10px 12px;
-          border: 1px solid #e9ecef;
+          border: 2px solid #e9ecef;
           border-radius: 10px;
           font-size: 14px;
         }
 
-        .reset-filters {
+        .reset-btn {
           padding: 10px 16px;
           background: #f8f9fa;
           border: 1px solid #e9ecef;
@@ -925,7 +813,7 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           transition: all 0.3s ease;
         }
 
-        .reset-filters:hover {
+        .reset-btn:hover {
           background: #e9ecef;
         }
 
@@ -936,14 +824,14 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           margin-bottom: 24px;
         }
 
-        .distribution-card h5 {
+        .distribution-header h5 {
           margin: 0 0 16px 0;
           font-size: 16px;
           font-weight: 600;
           color: #1f2937;
         }
 
-        .distribution-card h5 i {
+        .distribution-header h5 i {
           margin-right: 8px;
           color: #4f46e5;
         }
@@ -962,6 +850,8 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           border-radius: 30px;
           font-size: 13px;
           font-weight: 500;
+          border: none;
+          cursor: pointer;
           transition: all 0.3s ease;
         }
 
@@ -992,7 +882,10 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
 
-        .table-header-info {
+        .table-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           padding: 16px 20px;
           border-bottom: 1px solid #e9ecef;
           background: #fafbfc;
@@ -1005,6 +898,24 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
 
         .result-count i {
           margin-right: 6px;
+        }
+
+        .refresh-table-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 8px;
+          font-size: 12px;
+          color: #495057;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .refresh-table-btn:hover {
+          background: #e9ecef;
         }
 
         .logs-table {
@@ -1234,44 +1145,34 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           padding: 20px 24px;
         }
 
-        .detail-section {
-          margin-bottom: 16px;
-        }
-
-        .detail-section label {
-          display: block;
-          font-size: 11px;
-          font-weight: 600;
-          color: #6c757d;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin-bottom: 6px;
-        }
-
-        .detail-value {
-          font-size: 14px;
-          color: #1f2937;
-        }
-
-        .badge-large {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 6px 14px;
-          border-radius: 20px;
-          font-size: 13px;
+        .details-section {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
         }
 
         .detail-row {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
-          margin-bottom: 16px;
+          display: flex;
+          padding: 8px 0;
+          border-bottom: 1px solid #f1f3f5;
+        }
+
+        .detail-label {
+          width: 110px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6c757d;
+        }
+
+        .detail-value {
+          flex: 1;
+          font-size: 13px;
+          color: #1f2937;
         }
 
         .detail-sub {
-          font-size: 12px;
-          color: #6c757d;
+          font-size: 11px;
+          color: #9ca3af;
           margin-top: 2px;
         }
 
@@ -1311,12 +1212,18 @@ WHERE EXISTS (SELECT 1 FROM admin_users LIMIT 1);`}</pre>
           .stats-grid {
             grid-template-columns: repeat(2, 1fr);
           }
-          .filters-body {
+          .filters-row {
             flex-direction: column;
-            align-items: stretch;
+          }
+          .filter-group {
+            width: 100%;
           }
           .detail-row {
-            grid-template-columns: 1fr;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .detail-label {
+            width: auto;
           }
         }
 
