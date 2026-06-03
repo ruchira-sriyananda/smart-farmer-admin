@@ -89,7 +89,6 @@ export default function BarterTransactions() {
     try {
       setLoading(true)
       
-      // Fetch barter listings
       const { data: listingsData, error: listingsError } = await supabase
         .from('barter_listings')
         .select(`
@@ -108,7 +107,6 @@ export default function BarterTransactions() {
       if (!listingsError && listingsData) {
         setBarterListings(listingsData)
         
-        // Apply filter
         let filtered = [...listingsData]
         if (listingFilter === 'active') {
           filtered = filtered.filter(l => l.status === 'ACTIVE')
@@ -120,7 +118,6 @@ export default function BarterTransactions() {
         setFilteredListings(filtered)
       }
 
-      // Fetch barter requests with full details
       const { data: requestsData, error: requestsError } = await supabase
         .from('barter_requests')
         .select(`
@@ -153,10 +150,7 @@ export default function BarterTransactions() {
         setBarterRequests(requestsData)
       }
 
-      // Calculate stats from actual data
       calculateStatsFromData(listingsData || [], requestsData || [])
-      
-      // Generate trend data
       calculateTrendsFromListings(listingsData || [])
       
     } catch (err) {
@@ -174,7 +168,6 @@ export default function BarterTransactions() {
     const approvedRequests = requestsData.filter(r => r.request_status === 'APPROVED').length
     const rejectedRequests = requestsData.filter(r => r.request_status === 'REJECTED').length
     
-    // Calculate completed vs pending vs cancelled from requests
     const completed = requestsData.filter(r => r.request_status === 'COMPLETED').length
     const pending = requestsData.filter(r => r.request_status === 'PENDING').length
     const cancelled = requestsData.filter(r => r.request_status === 'CANCELLED' || r.request_status === 'REJECTED').length
@@ -182,7 +175,6 @@ export default function BarterTransactions() {
     
     const successRate = total > 0 ? Math.round((completed / total) * 100) : 0
     
-    // Calculate monthly growth
     const now = new Date()
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
@@ -256,7 +248,6 @@ export default function BarterTransactions() {
   const viewRequests = async (listingId) => {
     setSelectedListingId(listingId)
     
-    // Fetch complete request details for this listing
     const { data: requests, error } = await supabase
       .from('barter_requests')
       .select(`
@@ -335,6 +326,16 @@ export default function BarterTransactions() {
     }]
   }
 
+  const distributionChart = {
+    labels: ['Active Listings', 'Completed', 'Pending', 'Cancelled'],
+    datasets: [{
+      data: [stats.activeListings, stats.completed, stats.pending, stats.cancelled],
+      backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'],
+      borderWidth: 0,
+      borderRadius: 8
+    }]
+  }
+
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -359,6 +360,24 @@ export default function BarterTransactions() {
       },
       x: {
         grid: { display: false }
+      }
+    }
+  }
+
+  const doughnutOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { usePointStyle: true, boxWidth: 10, font: { size: 11 } }
+      },
+      tooltip: {
+        backgroundColor: '#1f2937',
+        titleColor: '#fff',
+        bodyColor: '#9ca3af',
+        padding: 10,
+        cornerRadius: 8
       }
     }
   }
@@ -512,6 +531,15 @@ export default function BarterTransactions() {
               <Line data={completionChart} options={chartOptions} />
             </div>
           </div>
+          <div className="chart-card">
+            <div className="chart-header">
+              <h5>🥧 Distribution</h5>
+              <p>Overview of barter activity</p>
+            </div>
+            <div className="chart-body">
+              <Doughnut data={distributionChart} options={doughnutOptions} />
+            </div>
+          </div>
         </div>
 
         {/* Active Barter Listings with Filter */}
@@ -655,7 +683,6 @@ export default function BarterTransactions() {
               </button>
             </div>
             <div className="modal-body">
-              {/* Listing Image */}
               {selectedTransaction.image_url && (
                 <div className="image-section">
                   <div className="image-container" onClick={() => viewImage(selectedTransaction.image_url)}>
@@ -668,7 +695,6 @@ export default function BarterTransactions() {
                 </div>
               )}
 
-              {/* Listing Information */}
               <div className="details-card">
                 <h4><i className="bi bi-box-seam"></i> Listing Information</h4>
                 <div className="details-grid">
@@ -695,7 +721,6 @@ export default function BarterTransactions() {
                 </div>
               </div>
 
-              {/* Seller Information */}
               <div className="details-card">
                 <h4><i className="bi bi-person-badge"></i> Seller Information</h4>
                 <div className="seller-info">
@@ -715,7 +740,6 @@ export default function BarterTransactions() {
                 </div>
               </div>
 
-              {/* Request Statistics */}
               <div className="details-card">
                 <h4><i className="bi bi-chat-dots"></i> Request Statistics</h4>
                 <div className="stats-mini-grid">
@@ -777,7 +801,7 @@ export default function BarterTransactions() {
         </div>
       )}
 
-      {/* Requests Modal - No Approve/Reject buttons */}
+      {/* Requests Modal */}
       {showRequestModal && (
         <div className="modal-overlay" onClick={() => setShowRequestModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -1029,7 +1053,7 @@ export default function BarterTransactions() {
 
         .charts-section {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: repeat(3, 1fr);
           gap: 24px;
           margin-bottom: 28px;
         }
@@ -1064,7 +1088,7 @@ export default function BarterTransactions() {
         }
 
         .chart-body {
-          height: 280px;
+          height: 250px;
         }
 
         .listings-section {
@@ -1086,10 +1110,11 @@ export default function BarterTransactions() {
         .filter-buttons {
           display: flex;
           gap: 8px;
+          flex-wrap: wrap;
         }
 
         .filter-btn {
-          padding: 4px 12px;
+          padding: 6px 16px;
           background: #f8f9fa;
           border: 1px solid #e9ecef;
           border-radius: 20px;
@@ -1223,10 +1248,10 @@ export default function BarterTransactions() {
 
         .btn-view-listing, .btn-view-requests {
           flex: 1;
-          padding: 6px 12px;
+          padding: 8px 12px;
           border: none;
           border-radius: 8px;
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -1714,6 +1739,9 @@ export default function BarterTransactions() {
           .secondary-stats {
             grid-template-columns: 1fr;
           }
+          .charts-section {
+            grid-template-columns: 1fr;
+          }
           .page-header {
             flex-direction: column;
             align-items: flex-start;
@@ -1733,6 +1761,13 @@ export default function BarterTransactions() {
           }
           .stats-mini-grid {
             grid-template-columns: 1fr;
+          }
+          .filter-buttons {
+            width: 100%;
+          }
+          .filter-btn {
+            flex: 1;
+            text-align: center;
           }
         }
       `}</style>
