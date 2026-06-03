@@ -1,31 +1,196 @@
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+  Filler,
+  RadialLinearScale
+} from 'chart.js'
+import { Line, Bar, Doughnut, PolarArea } from 'react-chartjs-2'
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+  Filler,
+  RadialLinearScale
+)
 
 export default function AnalyticsDashboard() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [dateRange, setDateRange] = useState('month')
   const [analytics, setAnalytics] = useState({
     userGrowth: [],
+    userStats: {
+      total: 0,
+      active: 0,
+      newToday: 0,
+      newThisWeek: 0,
+      newThisMonth: 0,
+      verified: 0,
+      pending: 0,
+      farmers: 0,
+      vendors: 0,
+      admins: 0
+    },
+    contentStats: {
+      posts: 0,
+      comments: 0,
+      reports: 0,
+      pendingReports: 0,
+      resolvedReports: 0,
+      barterListings: 0,
+      activeBarter: 0,
+      messages: 0,
+      ads: 0
+    },
     postActivity: [],
-    userStats: { total: 0, active: 0, new: 0 },
-    contentStats: { posts: 0, comments: 0, reports: 0 }
+    reportTrends: [],
+    userActivity: [],
+    topContributors: [],
+    popularCategories: []
   })
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchAnalytics()
-  }, [])
+  }, [dateRange])
 
   const fetchAnalytics = async () => {
     try {
-      const { data, error } = await supabase
-        .from('system_analytics')
-        .select('*')
-        .order('generated_at', { ascending: false })
-        .limit(30)
+      setLoading(true)
+      
+      // Calculate date ranges
+      const now = new Date()
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      
+      const weekAgo = new Date()
+      weekAgo.setDate(weekAgo.getDate() - 7)
+      
+      const monthAgo = new Date()
+      monthAgo.setMonth(monthAgo.getMonth() - 1)
+      
+      let startDate = monthAgo
+      if (dateRange === 'week') startDate = weekAgo
+      if (dateRange === 'today') startDate = today
 
-      if (!error && data) {
-        setAnalytics(prev => ({ ...prev, userGrowth: data.reverse() }))
+      // Fetch all data in parallel
+      const [
+        totalUsers,
+        activeUsers,
+        newToday,
+        newThisWeek,
+        newThisMonth,
+        verifiedUsers,
+        pendingUsers,
+        farmers,
+        vendors,
+        admins,
+        posts,
+        comments,
+        reports,
+        pendingReports,
+        resolvedReports,
+        barterListings,
+        activeBarter,
+        messages,
+        ads,
+        userGrowthData,
+        weeklyActivity,
+        reportTrendsData,
+        topContributorsData,
+        popularCategoriesData
+      ] = await Promise.all([
+        supabase.from('users').select('*', { count: 'exact', head: true }),
+        supabase.from('user_sessions').select('*', { count: 'exact', head: true }).eq('session_status', 'ACTIVE'),
+        supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
+        supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', weekAgo.toISOString()),
+        supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', monthAgo.toISOString()),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', true),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', 'farmer-role-id'),
+        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', 'vendor-role-id'),
+        supabase.from('admin_users').select('*', { count: 'exact', head: true }),
+        supabase.from('posts').select('*', { count: 'exact', head: true }),
+        supabase.from('comments').select('*', { count: 'exact', head: true }),
+        supabase.from('system_reports').select('*', { count: 'exact', head: true }),
+        supabase.from('system_reports').select('*', { count: 'exact', head: true }).eq('report_status', 'PENDING'),
+        supabase.from('system_reports').select('*', { count: 'exact', head: true }).eq('report_status', 'RESOLVED'),
+        supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
+        supabase.from('barter_listings').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+        supabase.from('messages').select('*', { count: 'exact', head: true }),
+        supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+        fetchUserGrowth(startDate),
+        fetchWeeklyActivity(startDate),
+        fetchReportTrends(startDate),
+        fetchTopContributors(),
+        fetchPopularCategories()
+      ])
+
+      // Get role IDs properly
+      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
+      const roleMap = {}
+      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+
+      // Update farmers and vendors with proper role IDs
+      let farmersCount = 0
+      let vendorsCount = 0
+      if (roleMap['FARMER']) {
+        const { count } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['FARMER'])
+        farmersCount = count || 0
       }
+      if (roleMap['VENDOR']) {
+        const { count } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', roleMap['VENDOR'])
+        vendorsCount = count || 0
+      }
+
+      setAnalytics({
+        userStats: {
+          total: totalUsers.count || 0,
+          active: activeUsers.count || 0,
+          newToday: newToday.count || 0,
+          newThisWeek: newThisWeek.count || 0,
+          newThisMonth: newThisMonth.count || 0,
+          verified: verifiedUsers.count || 0,
+          pending: pendingUsers.count || 0,
+          farmers: farmersCount,
+          vendors: vendorsCount,
+          admins: admins.count || 0
+        },
+        contentStats: {
+          posts: posts.count || 0,
+          comments: comments.count || 0,
+          reports: reports.count || 0,
+          pendingReports: pendingReports.count || 0,
+          resolvedReports: resolvedReports.count || 0,
+          barterListings: barterListings.count || 0,
+          activeBarter: activeBarter.count || 0,
+          messages: messages.count || 0,
+          ads: ads.count || 0
+        },
+        userGrowth: userGrowthData,
+        postActivity: weeklyActivity,
+        reportTrends: reportTrendsData,
+        topContributors: topContributorsData,
+        popularCategories: popularCategoriesData
+      })
     } catch (err) {
       console.error('Error fetching analytics:', err)
     } finally {
@@ -33,63 +198,1008 @@ export default function AnalyticsDashboard() {
     }
   }
 
+  const fetchUserGrowth = async (startDate) => {
+    const { data } = await supabase
+      .from('users')
+      .select('created_at')
+      .gte('created_at', startDate.toISOString())
+      .order('created_at', { ascending: true })
+
+    const dailyCounts = {}
+    data?.forEach(user => {
+      const date = new Date(user.created_at).toLocaleDateString()
+      dailyCounts[date] = (dailyCounts[date] || 0) + 1
+    })
+
+    return {
+      labels: Object.keys(dailyCounts).slice(-14),
+      values: Object.values(dailyCounts).slice(-14)
+    }
+  }
+
+  const fetchWeeklyActivity = async (startDate) => {
+    const { data } = await supabase
+      .from('posts')
+      .select('created_at')
+      .gte('created_at', startDate.toISOString())
+
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const activityByDay = [0, 0, 0, 0, 0, 0, 0]
+    
+    data?.forEach(post => {
+      const dayIndex = new Date(post.created_at).getDay()
+      activityByDay[dayIndex]++
+    })
+
+    return { labels: days, values: activityByDay }
+  }
+
+  const fetchReportTrends = async (startDate) => {
+    const { data } = await supabase
+      .from('system_reports')
+      .select('created_at, report_status')
+      .gte('created_at', startDate.toISOString())
+
+    const pendingByDay = {}
+    const resolvedByDay = {}
+    
+    data?.forEach(report => {
+      const date = new Date(report.created_at).toLocaleDateString()
+      if (report.report_status === 'PENDING') {
+        pendingByDay[date] = (pendingByDay[date] || 0) + 1
+      } else if (report.report_status === 'RESOLVED') {
+        resolvedByDay[date] = (resolvedByDay[date] || 0) + 1
+      }
+    })
+
+    const labels = Object.keys(pendingByDay).slice(-14)
+    return {
+      labels,
+      pending: labels.map(d => pendingByDay[d] || 0),
+      resolved: labels.map(d => resolvedByDay[d] || 0)
+    }
+  }
+
+  const fetchTopContributors = async () => {
+    const { data } = await supabase
+      .from('posts')
+      .select('user_id, users(full_name)')
+      .limit(100)
+
+    const userCounts = {}
+    data?.forEach(post => {
+      if (post.user_id) {
+        userCounts[post.user_id] = (userCounts[post.user_id] || 0) + 1
+      }
+    })
+
+    const sorted = Object.entries(userCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([id, count]) => ({
+        user_id: id,
+        name: data.find(p => p.user_id === id)?.users?.full_name || 'Unknown',
+        count
+      }))
+
+    return sorted
+  }
+
+  const fetchPopularCategories = async () => {
+    const { data } = await supabase
+      .from('posts')
+      .select('category_id, post_categories(category_name)')
+      .not('category_id', 'is', null)
+
+    const categoryCounts = {}
+    data?.forEach(post => {
+      const categoryName = post.post_categories?.category_name || 'Uncategorized'
+      categoryCounts[categoryName] = (categoryCounts[categoryName] || 0) + 1
+    })
+
+    return Object.entries(categoryCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }))
+  }
+
+  // Chart configurations
+  const userGrowthChart = {
+    labels: analytics.userGrowth.labels || [],
+    datasets: [{
+      label: 'New Users',
+      data: analytics.userGrowth.values || [],
+      borderColor: '#4f46e5',
+      backgroundColor: 'rgba(79, 70, 229, 0.1)',
+      fill: true,
+      tension: 0.4,
+      pointBackgroundColor: '#4f46e5',
+      pointBorderColor: '#fff',
+      pointBorderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 6
+    }]
+  }
+
+  const activityChart = {
+    labels: analytics.postActivity.labels || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    datasets: [{
+      label: 'Posts Created',
+      data: analytics.postActivity.values || [0, 0, 0, 0, 0, 0, 0],
+      backgroundColor: 'rgba(79, 70, 229, 0.8)',
+      borderRadius: 8,
+      barPercentage: 0.65
+    }]
+  }
+
+  const reportTrendsChart = {
+    labels: analytics.reportTrends.labels || [],
+    datasets: [
+      {
+        label: 'Pending Reports',
+        data: analytics.reportTrends.pending || [],
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+        fill: true,
+        tension: 0.4
+      },
+      {
+        label: 'Resolved Reports',
+        data: analytics.reportTrends.resolved || [],
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        fill: true,
+        tension: 0.4
+      }
+    ]
+  }
+
+  const categoryChart = {
+    labels: analytics.popularCategories.map(c => c.name),
+    datasets: [{
+      data: analytics.popularCategories.map(c => c.count),
+      backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+      borderWidth: 0,
+      borderRadius: 8
+    }]
+  }
+
+  const contributorChart = {
+    labels: analytics.topContributors.map(c => c.name.substring(0, 15)),
+    datasets: [{
+      data: analytics.topContributors.map(c => c.count),
+      backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+      borderWidth: 0,
+      borderRadius: 8
+    }]
+  }
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { usePointStyle: true, boxWidth: 10, font: { size: 11 } }
+      },
+      tooltip: {
+        backgroundColor: '#1f2937',
+        titleColor: '#fff',
+        bodyColor: '#9ca3af',
+        padding: 10,
+        cornerRadius: 8
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        grid: { color: '#e5e7eb' },
+        ticks: { stepSize: 1 }
+      },
+      x: {
+        grid: { display: false }
+      }
+    }
+  }
+
   if (loading) {
     return (
-      <AdminLayout title="Analytics">
-        <div className="d-flex justify-content-center py-5">
-          <div className="spinner-border text-primary"></div>
+      <AdminLayout title="Analytics Dashboard">
+        <div className="loading-container">
+          <div className="loading-spinner"></div>
+          <p>Loading analytics data...</p>
         </div>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+          }
+          .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e9ecef;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
 
   return (
     <AdminLayout title="Analytics Dashboard">
-      <div className="row g-4">
-        <div className="col-md-6 col-lg-3">
-          <div className="card border-0 bg-primary bg-opacity-10">
-            <div className="card-body">
-              <h6 className="text-muted">Total Users</h6>
-              <h2 className="fw-bold">{analytics.userStats.total}</h2>
-              <small className="text-success">+12% this month</small>
+      <div className="analytics-container">
+        {/* Header */}
+        <div className="page-header">
+          <div className="header-content">
+            <div className="header-icon">
+              <i className="bi bi-graph-up"></i>
+            </div>
+            <div>
+              <h1 className="header-title">Analytics Dashboard</h1>
+              <p className="header-subtitle">Platform insights and decision-making metrics</p>
+            </div>
+          </div>
+          <div className="date-range-selector">
+            <button 
+              className={`range-btn ${dateRange === 'today' ? 'active' : ''}`}
+              onClick={() => setDateRange('today')}
+            >
+              Today
+            </button>
+            <button 
+              className={`range-btn ${dateRange === 'week' ? 'active' : ''}`}
+              onClick={() => setDateRange('week')}
+            >
+              This Week
+            </button>
+            <button 
+              className={`range-btn ${dateRange === 'month' ? 'active' : ''}`}
+              onClick={() => setDateRange('month')}
+            >
+              This Month
+            </button>
+          </div>
+        </div>
+
+        {/* Key Metrics Cards */}
+        <div className="metrics-grid">
+          <div className="metric-card">
+            <div className="metric-icon primary">
+              <i className="bi bi-people-fill"></i>
+            </div>
+            <div className="metric-info">
+              <span className="metric-label">Total Users</span>
+              <h2 className="metric-value">{analytics.userStats.total.toLocaleString()}</h2>
+              <span className="metric-trend positive">
+                <i className="bi bi-arrow-up"></i> +{analytics.userStats.newThisMonth} this month
+              </span>
+            </div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-icon success">
+              <i className="bi bi-person-check-fill"></i>
+            </div>
+            <div className="metric-info">
+              <span className="metric-label">Active Users</span>
+              <h2 className="metric-value">{analytics.userStats.active.toLocaleString()}</h2>
+              <span className="metric-trend positive">Currently online</span>
+            </div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-icon info">
+              <i className="bi bi-file-post-fill"></i>
+            </div>
+            <div className="metric-info">
+              <span className="metric-label">Total Posts</span>
+              <h2 className="metric-value">{analytics.contentStats.posts.toLocaleString()}</h2>
+              <span className="metric-trend">Community content</span>
+            </div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-icon warning">
+              <i className="bi bi-flag-fill"></i>
+            </div>
+            <div className="metric-info">
+              <span className="metric-label">Active Reports</span>
+              <h2 className="metric-value">{analytics.contentStats.pendingReports}</h2>
+              <span className="metric-trend negative">Needs attention</span>
             </div>
           </div>
         </div>
-        <div className="col-md-6 col-lg-3">
-          <div className="card border-0 bg-success bg-opacity-10">
-            <div className="card-body">
-              <h6 className="text-muted">Active Users</h6>
-              <h2 className="fw-bold">{analytics.userStats.active}</h2>
-              <small className="text-success">Currently online</small>
+
+        {/* Secondary Metrics */}
+        <div className="secondary-metrics">
+          <div className="secondary-card">
+            <div className="secondary-icon">
+              <i className="bi bi-tree-fill"></i>
+            </div>
+            <div className="secondary-info">
+              <span className="secondary-label">Farmers</span>
+              <strong className="secondary-value">{analytics.userStats.farmers.toLocaleString()}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon">
+              <i className="bi bi-shop"></i>
+            </div>
+            <div className="secondary-info">
+              <span className="secondary-label">Vendors</span>
+              <strong className="secondary-value">{analytics.userStats.vendors.toLocaleString()}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon">
+              <i className="bi bi-chat-dots"></i>
+            </div>
+            <div className="secondary-info">
+              <span className="secondary-label">Messages</span>
+              <strong className="secondary-value">{analytics.contentStats.messages.toLocaleString()}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon">
+              <i className="bi bi-arrow-left-right"></i>
+            </div>
+            <div className="secondary-info">
+              <span className="secondary-label">Active Barter</span>
+              <strong className="secondary-value">{analytics.contentStats.activeBarter}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon">
+              <i className="bi bi-megaphone"></i>
+            </div>
+            <div className="secondary-info">
+              <span className="secondary-label">Active Ads</span>
+              <strong className="secondary-value">{analytics.contentStats.ads}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon">
+              <i className="bi bi-check-circle"></i>
+            </div>
+            <div className="secondary-info">
+              <span className="secondary-label">Verified Users</span>
+              <strong className="secondary-value">{Math.round((analytics.userStats.verified / analytics.userStats.total) * 100)}%</strong>
             </div>
           </div>
         </div>
-        <div className="col-md-6 col-lg-3">
-          <div className="card border-0 bg-info bg-opacity-10">
-            <div className="card-body">
-              <h6 className="text-muted">Total Posts</h6>
-              <h2 className="fw-bold">{analytics.contentStats.posts}</h2>
-              <small className="text-info">All time</small>
+
+        {/* Charts Section */}
+        <div className="charts-section">
+          <div className="chart-card full-width">
+            <div className="chart-header">
+              <div>
+                <h5>📈 User Growth Trend</h5>
+                <p>New user registrations over time</p>
+              </div>
+            </div>
+            <div className="chart-body">
+              <Line data={userGrowthChart} options={chartOptions} />
+            </div>
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-header">
+              <div>
+                <h5>📊 Platform Activity</h5>
+                <p>Posts created per day</p>
+              </div>
+            </div>
+            <div className="chart-body">
+              <Bar data={activityChart} options={chartOptions} />
+            </div>
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-header">
+              <div>
+                <h5>📋 Report Trends</h5>
+                <p>Pending vs Resolved reports</p>
+              </div>
+            </div>
+            <div className="chart-body">
+              <Line data={reportTrendsChart} options={chartOptions} />
             </div>
           </div>
         </div>
-        <div className="col-md-6 col-lg-3">
-          <div className="card border-0 bg-warning bg-opacity-10">
-            <div className="card-body">
-              <h6 className="text-muted">Active Reports</h6>
-              <h2 className="fw-bold">{analytics.contentStats.reports}</h2>
-              <small className="text-warning">Pending review</small>
+
+        {/* Distribution Section */}
+        <div className="distribution-section">
+          <div className="dist-card">
+            <div className="dist-header">
+              <h5><i className="bi bi-pie-chart"></i> Popular Categories</h5>
+              <p>Most discussed topics</p>
+            </div>
+            <div className="dist-body">
+              <div className="dist-chart">
+                {analytics.popularCategories.length > 0 ? (
+                  <Doughnut data={categoryChart} options={chartOptions} />
+                ) : (
+                  <div className="no-data">No category data available</div>
+                )}
+              </div>
+              <div className="dist-list">
+                {analytics.popularCategories.map((cat, idx) => (
+                  <div key={idx} className="dist-item">
+                    <span className="dist-color" style={{ background: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][idx] }}></span>
+                    <span className="dist-name">{cat.name}</span>
+                    <span className="dist-value">{cat.count} posts</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="dist-card">
+            <div className="dist-header">
+              <h5><i className="bi bi-trophy"></i> Top Contributors</h5>
+              <p>Most active community members</p>
+            </div>
+            <div className="dist-body">
+              <div className="dist-chart">
+                {analytics.topContributors.length > 0 ? (
+                  <PolarArea data={contributorChart} options={chartOptions} />
+                ) : (
+                  <div className="no-data">No contributor data available</div>
+                )}
+              </div>
+              <div className="contributor-list">
+                {analytics.topContributors.map((contributor, idx) => (
+                  <div key={idx} className="contributor-item">
+                    <div className="contributor-rank">#{idx + 1}</div>
+                    <div className="contributor-info">
+                      <div className="contributor-name">{contributor.name}</div>
+                      <div className="contributor-stats">{contributor.count} posts</div>
+                    </div>
+                    <i className="bi bi-award-fill"></i>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* User Stats Summary */}
+        <div className="stats-summary">
+          <div className="summary-card">
+            <h5>User Statistics</h5>
+            <div className="summary-grid">
+              <div className="summary-item">
+                <span>Verified Users</span>
+                <strong>{analytics.userStats.verified.toLocaleString()}</strong>
+                <small>{Math.round((analytics.userStats.verified / analytics.userStats.total) * 100)}% of total</small>
+              </div>
+              <div className="summary-item">
+                <span>Pending Verification</span>
+                <strong>{analytics.userStats.pending.toLocaleString()}</strong>
+                <small>Awaiting approval</small>
+              </div>
+              <div className="summary-item">
+                <span>New Today</span>
+                <strong>+{analytics.userStats.newToday}</strong>
+                <small>New registrations</small>
+              </div>
+              <div className="summary-item">
+                <span>This Week</span>
+                <strong>+{analytics.userStats.newThisWeek}</strong>
+                <small>New users</small>
+              </div>
+            </div>
+          </div>
+
+          <div className="summary-card">
+            <h5>Content Statistics</h5>
+            <div className="summary-grid">
+              <div className="summary-item">
+                <span>Total Comments</span>
+                <strong>{analytics.contentStats.comments.toLocaleString()}</strong>
+                <small>Community engagement</small>
+              </div>
+              <div className="summary-item">
+                <span>Barter Listings</span>
+                <strong>{analytics.contentStats.barterListings}</strong>
+                <small>Available trades</small>
+              </div>
+              <div className="summary-item">
+                <span>Pending Reports</span>
+                <strong className="text-warning">{analytics.contentStats.pendingReports}</strong>
+                <small>Needs review</small>
+              </div>
+              <div className="summary-item">
+                <span>Resolved Reports</span>
+                <strong className="text-success">{analytics.contentStats.resolvedReports}</strong>
+                <small>Completed</small>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="card border-0 shadow-sm mt-4">
-        <div className="card-body text-center py-5">
-          <i className="bi bi-graph-up fs-1 text-muted"></i>
-          <p className="text-muted mt-3">Detailed analytics charts coming soon</p>
-        </div>
-      </div>
+      <style jsx>{`
+        .analytics-container {
+          max-width: 1400px;
+          margin: 0 auto;
+        }
+
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 28px;
+          flex-wrap: wrap;
+          gap: 16px;
+        }
+
+        .header-content {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .header-icon {
+          width: 60px;
+          height: 60px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .header-icon i {
+          font-size: 28px;
+          color: white;
+        }
+
+        .header-title {
+          font-size: 24px;
+          font-weight: 700;
+          color: #1f2937;
+          margin: 0 0 4px 0;
+        }
+
+        .header-subtitle {
+          color: #6c757d;
+          margin: 0;
+          font-size: 14px;
+        }
+
+        .date-range-selector {
+          display: flex;
+          gap: 8px;
+          background: white;
+          padding: 4px;
+          border-radius: 12px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .range-btn {
+          padding: 8px 16px;
+          border: none;
+          border-radius: 8px;
+          background: transparent;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .range-btn:hover {
+          background: #f8f9fa;
+        }
+
+        .range-btn.active {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+        }
+
+        .metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+          margin-bottom: 24px;
+        }
+
+        .metric-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          transition: all 0.3s ease;
+        }
+
+        .metric-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+        }
+
+        .metric-icon {
+          width: 52px;
+          height: 52px;
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .metric-icon.primary { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
+        .metric-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .metric-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .metric-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+
+        .metric-icon i {
+          font-size: 24px;
+        }
+
+        .metric-info {
+          flex: 1;
+        }
+
+        .metric-label {
+          font-size: 13px;
+          color: #6c757d;
+          margin-bottom: 4px;
+          display: block;
+        }
+
+        .metric-value {
+          font-size: 28px;
+          font-weight: 700;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .metric-trend {
+          font-size: 11px;
+        }
+
+        .metric-trend.positive {
+          color: #10b981;
+        }
+
+        .metric-trend.negative {
+          color: #ef4444;
+        }
+
+        .secondary-metrics {
+          display: grid;
+          grid-template-columns: repeat(6, 1fr);
+          gap: 16px;
+          margin-bottom: 28px;
+        }
+
+        .secondary-card {
+          background: white;
+          border-radius: 16px;
+          padding: 14px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          transition: all 0.3s ease;
+        }
+
+        .secondary-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .secondary-icon {
+          width: 40px;
+          height: 40px;
+          background: #f8f9fa;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #4f46e5;
+        }
+
+        .secondary-icon i {
+          font-size: 20px;
+        }
+
+        .secondary-info {
+          flex: 1;
+        }
+
+        .secondary-label {
+          font-size: 11px;
+          color: #6c757d;
+          display: block;
+        }
+
+        .secondary-value {
+          font-size: 16px;
+          font-weight: 700;
+          color: #1f2937;
+        }
+
+        .charts-section {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-bottom: 28px;
+        }
+
+        .chart-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+          transition: all 0.3s ease;
+        }
+
+        .chart-card.full-width {
+          grid-column: span 2;
+        }
+
+        .chart-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+
+        .chart-header {
+          margin-bottom: 20px;
+        }
+
+        .chart-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .chart-header p {
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0;
+        }
+
+        .chart-body {
+          height: 300px;
+        }
+
+        .distribution-section {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-bottom: 28px;
+        }
+
+        .dist-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+        }
+
+        .dist-header {
+          margin-bottom: 20px;
+        }
+
+        .dist-header h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          color: #1f2937;
+        }
+
+        .dist-header p {
+          font-size: 12px;
+          color: #6c757d;
+          margin: 0;
+        }
+
+        .dist-body {
+          display: flex;
+          gap: 20px;
+          flex-wrap: wrap;
+        }
+
+        .dist-chart {
+          flex: 1;
+          min-width: 200px;
+          height: 200px;
+        }
+
+        .dist-list {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          justify-content: center;
+        }
+
+        .dist-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .dist-color {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+        }
+
+        .dist-name {
+          flex: 1;
+          font-size: 13px;
+          color: #4b5563;
+        }
+
+        .dist-value {
+          font-size: 13px;
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .contributor-list {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .contributor-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px;
+          background: #f8f9fa;
+          border-radius: 12px;
+          transition: all 0.3s ease;
+        }
+
+        .contributor-item:hover {
+          background: #e9ecef;
+        }
+
+        .contributor-rank {
+          width: 35px;
+          font-weight: 700;
+          color: #4f46e5;
+          font-size: 16px;
+        }
+
+        .contributor-info {
+          flex: 1;
+        }
+
+        .contributor-name {
+          font-weight: 600;
+          color: #1f2937;
+          font-size: 13px;
+        }
+
+        .contributor-stats {
+          font-size: 11px;
+          color: #6c757d;
+        }
+
+        .contributor-item i {
+          color: #f59e0b;
+          font-size: 18px;
+        }
+
+        .no-data {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100%;
+          color: #9ca3af;
+          font-size: 13px;
+        }
+
+        .stats-summary {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+        }
+
+        .summary-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+        }
+
+        .summary-card h5 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 16px 0;
+          color: #1f2937;
+        }
+
+        .summary-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+
+        .summary-item {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .summary-item span {
+          font-size: 11px;
+          color: #6c757d;
+          margin-bottom: 2px;
+        }
+
+        .summary-item strong {
+          font-size: 20px;
+          font-weight: 700;
+          color: #1f2937;
+        }
+
+        .summary-item small {
+          font-size: 10px;
+          color: #9ca3af;
+          margin-top: 2px;
+        }
+
+        .text-warning {
+          color: #f59e0b;
+        }
+
+        .text-success {
+          color: #10b981;
+        }
+
+        @media (max-width: 1200px) {
+          .metrics-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .secondary-metrics {
+            grid-template-columns: repeat(3, 1fr);
+          }
+          .charts-section {
+            grid-template-columns: 1fr;
+          }
+          .chart-card.full-width {
+            grid-column: span 1;
+          }
+          .distribution-section {
+            grid-template-columns: 1fr;
+          }
+          .stats-summary {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .metrics-grid {
+            grid-template-columns: 1fr;
+          }
+          .secondary-metrics {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .dist-body {
+            flex-direction: column;
+          }
+          .dist-chart {
+            height: 250px;
+          }
+          .summary-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
     </AdminLayout>
   )
 }
