@@ -32,20 +32,23 @@ ChartJS.register(
 
 export default function BarterTransactions() {
   const router = useRouter()
-  const [transactions, setTransactions] = useState([])
   const [barterListings, setBarterListings] = useState([])
   const [barterRequests, setBarterRequests] = useState([])
   const [filteredListings, setFilteredListings] = useState([])
   const [loading, setLoading] = useState(true)
-  const [dateRange, setDateRange] = useState('month')
   const [listingFilter, setListingFilter] = useState('all')
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState(null)
+  const [showApproveModal, setShowApproveModal] = useState(false)
+  const [showRejectModal, setShowRejectModal] = useState(false)
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [selectedRequests, setSelectedRequests] = useState([])
   const [selectedListingId, setSelectedListingId] = useState(null)
   const [showImageModal, setShowImageModal] = useState(false)
   const [selectedImage, setSelectedImage] = useState('')
+  const [rejectReason, setRejectReason] = useState('')
+  const [customReason, setCustomReason] = useState('')
+  const [actionLoading, setActionLoading] = useState(false)
   const [stats, setStats] = useState({
     total: 0,
     completed: 0,
@@ -53,6 +56,7 @@ export default function BarterTransactions() {
     cancelled: 0,
     activeListings: 0,
     totalListings: 0,
+    pendingApproval: 0,
     totalRequests: 0,
     pendingRequests: 0,
     approvedRequests: 0,
@@ -65,6 +69,18 @@ export default function BarterTransactions() {
     transactions: [0, 0, 0, 0],
     completion: [0, 0, 0, 0]
   })
+
+  // Quick rejection reasons
+  const quickReasons = [
+    { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
+    { id: 2, reason: 'Spam or promotional', icon: 'bi-megaphone', color: '#f59e0b' },
+    { id: 3, reason: 'Misleading information', icon: 'bi-info-circle', color: '#f59e0b' },
+    { id: 4, reason: 'Duplicate listing', icon: 'bi-files', color: '#6c757d' },
+    { id: 5, reason: 'Invalid contact details', icon: 'bi-telephone-x', color: '#ef4444' },
+    { id: 6, reason: 'Prohibited item', icon: 'bi-shield-exclamation', color: '#dc2626' },
+    { id: 7, reason: 'Price mismatch', icon: 'bi-cash-stack', color: '#f59e0b' },
+    { id: 8, reason: 'Quality issues', icon: 'bi-star', color: '#f59e0b' }
+  ]
 
   useEffect(() => {
     fetchData()
@@ -82,7 +98,7 @@ export default function BarterTransactions() {
       .subscribe()
 
     return () => subscription.unsubscribe()
-  }, [dateRange, listingFilter])
+  }, [listingFilter])
 
   const fetchData = async () => {
     try {
@@ -107,12 +123,14 @@ export default function BarterTransactions() {
         setBarterListings(listingsData)
         
         let filtered = [...listingsData]
-        if (listingFilter === 'active') {
+        if (listingFilter === 'pending_approval') {
+          filtered = filtered.filter(l => l.status === 'PENDING_APPROVAL')
+        } else if (listingFilter === 'active') {
           filtered = filtered.filter(l => l.status === 'ACTIVE')
         } else if (listingFilter === 'completed') {
           filtered = filtered.filter(l => l.status === 'COMPLETED')
-        } else if (listingFilter === 'cancelled') {
-          filtered = filtered.filter(l => l.status === 'CANCELLED')
+        } else if (listingFilter === 'rejected') {
+          filtered = filtered.filter(l => l.status === 'REJECTED')
         }
         setFilteredListings(filtered)
       }
@@ -137,6 +155,7 @@ export default function BarterTransactions() {
             status,
             image_url,
             user_id,
+            rejection_reason,
             owner:users!barter_listings_user_id_fkey (
               full_name,
               email
@@ -162,6 +181,7 @@ export default function BarterTransactions() {
   const calculateStatsFromData = (listingsData, requestsData) => {
     const activeListings = listingsData.filter(l => l.status === 'ACTIVE').length
     const totalListings = listingsData.length
+    const pendingApproval = listingsData.filter(l => l.status === 'PENDING_APPROVAL').length
     const totalRequests = requestsData.length
     const pendingRequests = requestsData.filter(r => r.request_status === 'PENDING').length
     const approvedRequests = requestsData.filter(r => r.request_status === 'APPROVED').length
@@ -196,6 +216,7 @@ export default function BarterTransactions() {
       cancelled,
       activeListings,
       totalListings,
+      pendingApproval,
       totalRequests,
       pendingRequests,
       approvedRequests,
@@ -234,9 +255,93 @@ export default function BarterTransactions() {
     })
   }
 
+  const approveListing = async (listingId) => {
+    setActionLoading(true)
+    const session = JSON.parse(localStorage.getItem('adminSession'))
+    
+    const { error } = await supabase
+      .from('barter_listings')
+      .update({
+        status: 'ACTIVE',
+        reviewed_by: session?.admin?.admin_id,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq('listing_id', listingId)
+
+    if (!error) {
+      fetchData()
+      setShowApproveModal(false)
+      setSelectedTransaction(null)
+      alert('Listing approved successfully!')
+    } else {
+      alert('Error approving listing: ' + error.message)
+    }
+    setActionLoading(false)
+  }
+
+  const rejectListing = async () => {
+    const finalReason = customReason || rejectReason
+    if (!finalReason.trim()) {
+      alert('Please select or provide a reason for rejection')
+      return
+    }
+
+    setActionLoading(true)
+    const session = JSON.parse(localStorage.getItem('adminSession'))
+    
+    const { error } = await supabase
+      .from('barter_listings')
+      .update({
+        status: 'REJECTED',
+        rejection_reason: finalReason,
+        reviewed_by: session?.admin?.admin_id,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq('listing_id', selectedTransaction?.listing_id)
+
+    if (!error) {
+      fetchData()
+      setShowRejectModal(false)
+      setSelectedTransaction(null)
+      setRejectReason('')
+      setCustomReason('')
+      alert('Listing rejected successfully!')
+    } else {
+      alert('Error rejecting listing: ' + error.message)
+    }
+    setActionLoading(false)
+  }
+
+  const updateRequestStatus = async (requestId, status) => {
+    setActionLoading(true)
+    
+    const { error } = await supabase
+      .from('barter_requests')
+      .update({ request_status: status })
+      .eq('request_id', requestId)
+
+    if (!error) {
+      fetchData()
+      alert(`Request ${status.toLowerCase()} successfully!`)
+    } else {
+      alert('Error updating request: ' + error.message)
+    }
+    setActionLoading(false)
+  }
+
   const viewFullDetails = (listing) => {
     setSelectedTransaction(listing)
     setShowDetailsModal(true)
+  }
+
+  const openApproveModal = (listing) => {
+    setSelectedTransaction(listing)
+    setShowApproveModal(true)
+  }
+
+  const openRejectModal = (listing) => {
+    setSelectedTransaction(listing)
+    setShowRejectModal(true)
   }
 
   const viewImage = (imageUrl) => {
@@ -271,10 +376,10 @@ export default function BarterTransactions() {
 
   const getStatusBadge = (status) => {
     const badges = {
+      'PENDING_APPROVAL': <span className="status-badge pending-approval"><i className="bi bi-clock-history"></i> Pending Approval</span>,
       'ACTIVE': <span className="status-badge active"><i className="bi bi-check-circle-fill"></i> Active</span>,
-      'INACTIVE': <span className="status-badge inactive"><i className="bi bi-x-circle-fill"></i> Inactive</span>,
-      'PENDING': <span className="status-badge pending"><i className="bi bi-clock-fill"></i> Pending</span>,
       'COMPLETED': <span className="status-badge completed"><i className="bi bi-check-circle-fill"></i> Completed</span>,
+      'REJECTED': <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>,
       'CANCELLED': <span className="status-badge cancelled"><i className="bi bi-x-circle-fill"></i> Cancelled</span>
     }
     return badges[status] || <span className="status-badge default">{status}</span>
@@ -289,6 +394,11 @@ export default function BarterTransactions() {
       'CANCELLED': <span className="status-badge cancelled"><i className="bi bi-x-circle-fill"></i> Cancelled</span>
     }
     return badges[status] || <span className="status-badge default">{status}</span>
+  }
+
+  const handleQuickReject = (reason) => {
+    setRejectReason(reason)
+    setCustomReason('')
   }
 
   const transactionsChart = {
@@ -326,10 +436,10 @@ export default function BarterTransactions() {
   }
 
   const distributionChart = {
-    labels: ['Active Listings', 'Completed', 'Pending', 'Cancelled'],
+    labels: ['Active Listings', 'Completed', 'Pending', 'Cancelled', 'Pending Approval'],
     datasets: [{
-      data: [stats.activeListings, stats.completed, stats.pending, stats.cancelled],
-      backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'],
+      data: [stats.activeListings, stats.completed, stats.pending, stats.cancelled, stats.pendingApproval],
+      backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
       borderWidth: 0,
       borderRadius: 8
     }]
@@ -424,7 +534,7 @@ export default function BarterTransactions() {
             </div>
             <div>
               <h1 className="header-title">Barter System</h1>
-              <p className="header-subtitle">Track and manage barter transactions and listings</p>
+              <p className="header-subtitle">Manage barter listings with approval workflow</p>
             </div>
           </div>
           <button className="refresh-btn" onClick={fetchData}>
@@ -452,23 +562,15 @@ export default function BarterTransactions() {
               <span className="stat-change">{stats.successRate}% success rate</span>
             </div>
           </div>
-          <div className="stat-card pending">
-            <div className="stat-icon"><i className="bi bi-clock"></i></div>
+          <div className="stat-card pending-approval-stat">
+            <div className="stat-icon"><i className="bi bi-hourglass-split"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Pending</span>
-              <h2 className="stat-value text-warning">{stats.pending.toLocaleString()}</h2>
-              <span className="stat-change">Awaiting action</span>
+              <span className="stat-label">Pending Approval</span>
+              <h2 className="stat-value text-purple">{stats.pendingApproval}</h2>
+              <span className="stat-change">Awaiting review</span>
             </div>
           </div>
-          <div className="stat-card cancelled">
-            <div className="stat-icon"><i className="bi bi-x-circle"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Cancelled/Rejected</span>
-              <h2 className="stat-value text-danger">{stats.cancelled.toLocaleString()}</h2>
-              <span className="stat-change">Failed trades</span>
-            </div>
-          </div>
-          <div className="stat-card listings">
+          <div className="stat-card active-listings">
             <div className="stat-icon"><i className="bi bi-box-seam"></i></div>
             <div className="stat-info">
               <span className="stat-label">Active Listings</span>
@@ -541,40 +643,31 @@ export default function BarterTransactions() {
           </div>
         </div>
 
-        {/* Active Barter Listings with Filter */}
+        {/* Barter Listings with Filter */}
         <div className="listings-section">
           <div className="section-header">
             <h5><i className="bi bi-box-seam me-2"></i> Barter Listings</h5>
             <div className="filter-buttons">
-              <button 
-                className={`filter-btn ${listingFilter === 'all' ? 'active' : ''}`}
-                onClick={() => setListingFilter('all')}
-              >
+              <button className={`filter-btn ${listingFilter === 'all' ? 'active' : ''}`} onClick={() => setListingFilter('all')}>
                 All ({barterListings.length})
               </button>
-              <button 
-                className={`filter-btn ${listingFilter === 'active' ? 'active' : ''}`}
-                onClick={() => setListingFilter('active')}
-              >
-                Active ({barterListings.filter(l => l.status === 'ACTIVE').length})
+              <button className={`filter-btn ${listingFilter === 'pending_approval' ? 'active' : ''}`} onClick={() => setListingFilter('pending_approval')}>
+                Pending ({stats.pendingApproval})
               </button>
-              <button 
-                className={`filter-btn ${listingFilter === 'completed' ? 'active' : ''}`}
-                onClick={() => setListingFilter('completed')}
-              >
-                Completed ({barterListings.filter(l => l.status === 'COMPLETED').length})
+              <button className={`filter-btn ${listingFilter === 'active' ? 'active' : ''}`} onClick={() => setListingFilter('active')}>
+                Active ({stats.activeListings})
               </button>
-              <button 
-                className={`filter-btn ${listingFilter === 'cancelled' ? 'active' : ''}`}
-                onClick={() => setListingFilter('cancelled')}
-              >
-                Cancelled ({barterListings.filter(l => l.status === 'CANCELLED').length})
+              <button className={`filter-btn ${listingFilter === 'completed' ? 'active' : ''}`} onClick={() => setListingFilter('completed')}>
+                Completed ({stats.completed})
+              </button>
+              <button className={`filter-btn ${listingFilter === 'rejected' ? 'active' : ''}`} onClick={() => setListingFilter('rejected')}>
+                Rejected
               </button>
             </div>
           </div>
           <div className="listings-grid">
             {filteredListings.length > 0 ? (
-              filteredListings.slice(0, 6).map((listing) => (
+              filteredListings.map((listing) => (
                 <div key={listing.listing_id} className="listing-card">
                   <div className="listing-header">
                     <div className="listing-user">
@@ -605,14 +698,33 @@ export default function BarterTransactions() {
                         {listing.users?.district || 'Location not specified'}
                       </span>
                     </div>
+                    {listing.rejection_reason && listing.status === 'REJECTED' && (
+                      <div className="rejection-reason">
+                        <i className="bi bi-exclamation-triangle-fill"></i>
+                        Rejected: {listing.rejection_reason}
+                      </div>
+                    )}
                   </div>
                   <div className="listing-footer">
-                    <button className="btn-view-listing" onClick={() => viewFullDetails(listing)}>
-                      <i className="bi bi-eye"></i> Full Details
-                    </button>
-                    <button className="btn-view-requests" onClick={() => viewRequests(listing.listing_id)}>
-                      <i className="bi bi-chat-dots"></i> Requests ({barterRequests.filter(r => r.listing_id === listing.listing_id).length})
-                    </button>
+                    {listing.status === 'PENDING_APPROVAL' ? (
+                      <div className="admin-actions">
+                        <button className="btn-approve" onClick={() => openApproveModal(listing)}>
+                          <i className="bi bi-check-circle"></i> Approve
+                        </button>
+                        <button className="btn-reject" onClick={() => openRejectModal(listing)}>
+                          <i className="bi bi-x-circle"></i> Reject
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button className="btn-view-listing" onClick={() => viewFullDetails(listing)}>
+                          <i className="bi bi-eye"></i> Details
+                        </button>
+                        <button className="btn-view-requests" onClick={() => viewRequests(listing.listing_id)}>
+                          <i className="bi bi-chat-dots"></i> Requests ({barterRequests.filter(r => r.listing_id === listing.listing_id).length})
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))
@@ -655,7 +767,19 @@ export default function BarterTransactions() {
                     {new Date(request.created_at).toLocaleString()}
                   </div>
                 </div>
-                {getRequestStatusBadge(request.request_status)}
+                <div className="request-actions">
+                  {getRequestStatusBadge(request.request_status)}
+                  {request.request_status === 'PENDING' && (
+                    <div className="request-buttons">
+                      <button className="btn-approve-request" onClick={() => updateRequestStatus(request.request_id, 'APPROVED')}>
+                        <i className="bi bi-check"></i>
+                      </button>
+                      <button className="btn-reject-request" onClick={() => updateRequestStatus(request.request_id, 'REJECTED')}>
+                        <i className="bi bi-x"></i>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
             {barterRequests.length === 0 && (
@@ -668,61 +792,39 @@ export default function BarterTransactions() {
         </div>
       </div>
 
-      {/* Full Details Modal with Image View - FIXED */}
+      {/* Full Details Modal */}
       {showDetailsModal && selectedTransaction && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header info">
-              <div className="modal-icon">
-                <i className="bi bi-info-circle-fill"></i>
-              </div>
+              <div className="modal-icon"><i className="bi bi-info-circle-fill"></i></div>
               <h3>Complete Barter Details</h3>
-              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
+              <button className="modal-close" onClick={() => setShowDetailsModal(false)}><i className="bi bi-x-lg"></i></button>
             </div>
             <div className="modal-body">
-              {/* Image Section - Click to enlarge */}
               {selectedTransaction.image_url && (
                 <div className="image-section">
                   <div className="image-container" onClick={() => viewImage(selectedTransaction.image_url)}>
                     <img src={selectedTransaction.image_url} alt={selectedTransaction.title} />
-                    <div className="image-overlay">
-                      <i className="bi bi-zoom-in"></i>
-                      <span>Click to enlarge</span>
-                    </div>
+                    <div className="image-overlay"><i className="bi bi-zoom-in"></i><span>Click to enlarge</span></div>
                   </div>
                 </div>
               )}
 
-              {/* Listing Information */}
               <div className="details-card">
                 <h4><i className="bi bi-box-seam"></i> Listing Information</h4>
                 <div className="details-grid">
-                  <div className="detail-item">
-                    <label>Title</label>
-                    <div className="value">{selectedTransaction.title}</div>
-                  </div>
-                  <div className="detail-item">
-                    <label>Status</label>
-                    <div className="value">{getStatusBadge(selectedTransaction.status)}</div>
-                  </div>
-                  <div className="detail-item">
-                    <label>Quantity</label>
-                    <div className="value">{selectedTransaction.quantity} {selectedTransaction.unit}</div>
-                  </div>
-                  <div className="detail-item">
-                    <label>Created Date</label>
-                    <div className="value">{new Date(selectedTransaction.created_at).toLocaleString()}</div>
-                  </div>
-                  <div className="detail-item full-width">
-                    <label>Description</label>
-                    <div className="value description">{selectedTransaction.description || 'No description provided'}</div>
-                  </div>
+                  <div className="detail-item"><label>Title</label><div className="value">{selectedTransaction.title}</div></div>
+                  <div className="detail-item"><label>Status</label><div className="value">{getStatusBadge(selectedTransaction.status)}</div></div>
+                  <div className="detail-item"><label>Quantity</label><div className="value">{selectedTransaction.quantity} {selectedTransaction.unit}</div></div>
+                  <div className="detail-item"><label>Created Date</label><div className="value">{new Date(selectedTransaction.created_at).toLocaleString()}</div></div>
+                  <div className="detail-item full-width"><label>Description</label><div className="value description">{selectedTransaction.description || 'No description provided'}</div></div>
+                  {selectedTransaction.rejection_reason && (
+                    <div className="detail-item full-width"><label>Rejection Reason</label><div className="value rejection-box">{selectedTransaction.rejection_reason}</div></div>
+                  )}
                 </div>
               </div>
 
-              {/* Seller Information */}
               <div className="details-card">
                 <h4><i className="bi bi-person-badge"></i> Seller Information</h4>
                 <div className="seller-info">
@@ -741,37 +843,108 @@ export default function BarterTransactions() {
                   </div>
                 </div>
               </div>
-
-              {/* Request Statistics */}
-              <div className="details-card">
-                <h4><i className="bi bi-chat-dots"></i> Request Statistics</h4>
-                <div className="stats-mini-grid">
-                  <div className="stat-mini">
-                    <div className="stat-mini-value">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id).length}</div>
-                    <div className="stat-mini-label">Total Requests</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="stat-mini-value text-warning">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id && r.request_status === 'PENDING').length}</div>
-                    <div className="stat-mini-label">Pending</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="stat-mini-value text-success">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id && r.request_status === 'APPROVED').length}</div>
-                    <div className="stat-mini-label">Approved</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="stat-mini-value text-danger">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id && (r.request_status === 'REJECTED' || r.request_status === 'CANCELLED')).length}</div>
-                    <div className="stat-mini-label">Rejected/Cancelled</div>
-                  </div>
+            </div>
+            <div className="modal-footer">
+              {selectedTransaction.status === 'PENDING_APPROVAL' && (
+                <div className="admin-actions-modal">
+                  <button className="btn-approve-modal" onClick={() => {
+                    setShowDetailsModal(false)
+                    openApproveModal(selectedTransaction)
+                  }}><i className="bi bi-check-circle"></i> Approve</button>
+                  <button className="btn-reject-modal" onClick={() => {
+                    setShowDetailsModal(false)
+                    openRejectModal(selectedTransaction)
+                  }}><i className="bi bi-x-circle"></i> Reject</button>
                 </div>
+              )}
+              <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Modal */}
+      {showApproveModal && selectedTransaction && (
+        <div className="modal-overlay" onClick={() => setShowApproveModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header success">
+              <div className="modal-icon"><i className="bi bi-check-circle-fill"></i></div>
+              <h3>Approve Listing</h3>
+              <button className="modal-close" onClick={() => setShowApproveModal(false)}><i className="bi bi-x-lg"></i></button>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to approve this barter listing?</p>
+              <div className="listing-summary">
+                <div><strong>Title:</strong> {selectedTransaction.title}</div>
+                <div><strong>Seller:</strong> {selectedTransaction.users?.full_name}</div>
+              </div>
+              <div className="warning-message success">
+                <i className="bi bi-info-circle-fill"></i>
+                Approved listings will be visible to all users.
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
-              <button className="btn-primary" onClick={() => {
-                setShowDetailsModal(false)
-                viewRequests(selectedTransaction.listing_id)
-              }}>
-                View All Requests <i className="bi bi-arrow-right"></i>
+              <button className="btn-secondary" onClick={() => setShowApproveModal(false)}>Cancel</button>
+              <button className="btn-primary success" onClick={() => approveListing(selectedTransaction.listing_id)} disabled={actionLoading}>
+                {actionLoading ? <><span className="spinner-border spinner-border-sm me-2"></span>Processing...</> : 'Confirm Approval'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Modal with Quick Reasons */}
+      {showRejectModal && selectedTransaction && (
+        <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
+          <div className="modal-container modal-reject" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header danger">
+              <div className="modal-icon"><i className="bi bi-x-circle-fill"></i></div>
+              <h3>Reject Listing</h3>
+              <button className="modal-close" onClick={() => setShowRejectModal(false)}><i className="bi bi-x-lg"></i></button>
+            </div>
+            <div className="modal-body">
+              <p>Select a reason for rejecting this listing:</p>
+              
+              <div className="quick-reasons">
+                {quickReasons.map((reason) => (
+                  <button
+                    key={reason.id}
+                    className={`quick-reason-btn ${rejectReason === reason.reason ? 'selected' : ''}`}
+                    onClick={() => handleQuickReject(reason.reason)}
+                    style={{ '--reason-color': reason.color }}
+                  >
+                    <i className={`bi ${reason.icon}`}></i>
+                    <span>{reason.reason}</span>
+                    {rejectReason === reason.reason && <i className="bi bi-check-circle-fill check-icon"></i>}
+                  </button>
+                ))}
+              </div>
+
+              <div className="custom-reason">
+                <label className="form-label">Or provide a custom reason:</label>
+                <textarea
+                  className="form-textarea"
+                  rows="3"
+                  placeholder="Enter custom rejection reason..."
+                  value={customReason}
+                  onChange={(e) => {
+                    setCustomReason(e.target.value)
+                    setRejectReason('')
+                  }}
+                />
+              </div>
+
+              {!rejectReason && !customReason && (
+                <div className="warning-message">
+                  <i className="bi bi-info-circle"></i>
+                  Please select a reason or provide a custom reason before rejecting.
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
+              <button className="btn-primary danger" onClick={rejectListing} disabled={actionLoading || (!rejectReason && !customReason)}>
+                {actionLoading ? <><span className="spinner-border spinner-border-sm me-2"></span>Processing...</> : 'Confirm Rejection'}
               </button>
             </div>
           </div>
@@ -782,24 +955,9 @@ export default function BarterTransactions() {
       {showImageModal && (
         <div className="modal-overlay" onClick={() => setShowImageModal(false)}>
           <div className="modal-container modal-image" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-icon">
-                <i className="bi bi-image-fill"></i>
-              </div>
-              <h3>Product Image</h3>
-              <button className="modal-close" onClick={() => setShowImageModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-            <div className="modal-body image-modal-body">
-              <img src={selectedImage} alt="Barter Listing" />
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowImageModal(false)}>Close</button>
-              <a href={selectedImage} download className="btn-primary" target="_blank" rel="noopener noreferrer">
-                <i className="bi bi-download"></i> Download
-              </a>
-            </div>
+            <div className="modal-header"><div className="modal-icon"><i className="bi bi-image-fill"></i></div><h3>Product Image</h3><button className="modal-close" onClick={() => setShowImageModal(false)}><i className="bi bi-x-lg"></i></button></div>
+            <div className="modal-body image-modal-body"><img src={selectedImage} alt="Barter Listing" /></div>
+            <div className="modal-footer"><button className="btn-secondary" onClick={() => setShowImageModal(false)}>Close</button><a href={selectedImage} download className="btn-primary"><i className="bi bi-download"></i> Download</a></div>
           </div>
         </div>
       )}
@@ -808,983 +966,228 @@ export default function BarterTransactions() {
       {showRequestModal && (
         <div className="modal-overlay" onClick={() => setShowRequestModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header info">
-              <div className="modal-icon">
-                <i className="bi bi-chat-dots-fill"></i>
-              </div>
-              <h3>Barter Requests</h3>
-              <button className="modal-close" onClick={() => setShowRequestModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
+            <div className="modal-header info"><div className="modal-icon"><i className="bi bi-chat-dots-fill"></i></div><h3>Barter Requests</h3><button className="modal-close" onClick={() => setShowRequestModal(false)}><i className="bi bi-x-lg"></i></button></div>
             <div className="modal-body">
-              {selectedRequests.length > 0 ? (
-                selectedRequests.map((request) => (
-                  <div key={request.request_id} className="request-detail-card">
-                    <div className="request-header">
-                      <div className="requester-info">
-                        <div className="requester-avatar">
-                          {request.requester?.profile_image ? (
-                            <img src={request.requester.profile_image} alt={request.requester.full_name} />
-                          ) : (
-                            <span>{request.requester?.full_name?.charAt(0) || 'U'}</span>
-                          )}
-                        </div>
-                        <div>
-                          <div className="requester-name">{request.requester?.full_name || 'Anonymous'}</div>
-                          <div className="requester-contact">{request.requester?.email} | {request.requester?.phone_number || 'No phone'}</div>
-                        </div>
-                      </div>
-                      {getRequestStatusBadge(request.request_status)}
+              {selectedRequests.length > 0 ? selectedRequests.map((request) => (
+                <div key={request.request_id} className="request-detail-card">
+                  <div className="request-header">
+                    <div className="requester-info">
+                      <div className="requester-avatar">{request.requester?.profile_image ? <img src={request.requester.profile_image} alt={request.requester.full_name} /> : <span>{request.requester?.full_name?.charAt(0) || 'U'}</span>}</div>
+                      <div><div className="requester-name">{request.requester?.full_name || 'Anonymous'}</div><div className="requester-contact">{request.requester?.email} | {request.requester?.phone_number || 'No phone'}</div></div>
                     </div>
-                    <div className="offered-section">
-                      <strong>Offered Item:</strong> {request.offered_item}
-                    </div>
-                    <div className="request-footer">
-                      <div className="request-date">
-                        <i className="bi bi-calendar3"></i>
-                        {new Date(request.created_at).toLocaleString()}
-                      </div>
-                    </div>
+                    {getRequestStatusBadge(request.request_status)}
                   </div>
-                ))
-              ) : (
-                <div className="empty-state-small">No requests for this listing</div>
-              )}
+                  <div className="offered-section"><strong>Offered Item:</strong> {request.offered_item}</div>
+                  <div className="request-footer"><div className="request-date"><i className="bi bi-calendar3"></i>{new Date(request.created_at).toLocaleString()}</div></div>
+                </div>
+              )) : <div className="empty-state-small">No requests for this listing</div>}
             </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowRequestModal(false)}>Close</button>
-            </div>
+            <div className="modal-footer"><button className="btn-secondary" onClick={() => setShowRequestModal(false)}>Close</button></div>
           </div>
         </div>
       )}
 
       <style jsx>{`
-        .barter-container {
-          max-width: 1400px;
-          margin: 0 auto;
-        }
-
-        .page-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 28px;
-          flex-wrap: wrap;
-          gap: 16px;
-        }
-
-        .header-content {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-        }
-
-        .header-icon {
-          width: 60px;
-          height: 60px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .header-icon i {
-          font-size: 28px;
-          color: white;
-        }
-
-        .header-title {
-          font-size: 24px;
-          font-weight: 700;
-          color: #1f2937;
-          margin: 0 0 4px 0;
-        }
-
-        .header-subtitle {
-          color: #6c757d;
-          margin: 0;
-          font-size: 14px;
-        }
-
-        .refresh-btn {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 20px;
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          border-radius: 12px;
-          color: #495057;
-          font-weight: 500;
-          transition: all 0.3s ease;
-        }
-
-        .refresh-btn:hover {
-          background: #e9ecef;
-          transform: translateY(-1px);
-        }
-
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 20px;
-          margin-bottom: 20px;
-        }
-
-        .stat-card {
-          background: white;
-          border-radius: 20px;
-          padding: 20px;
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          transition: all 0.3s ease;
-        }
-
-        .stat-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
-        }
-
+        .barter-container { max-width: 1400px; margin: 0 auto; }
+        .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; flex-wrap: wrap; gap: 16px; }
+        .header-content { display: flex; align-items: center; gap: 20px; }
+        .header-icon { width: 60px; height: 60px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 20px; display: flex; align-items: center; justify-content: center; }
+        .header-icon i { font-size: 28px; color: white; }
+        .header-title { font-size: 24px; font-weight: 700; color: #1f2937; margin: 0 0 4px 0; }
+        .header-subtitle { color: #6c757d; margin: 0; font-size: 14px; }
+        .refresh-btn { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; color: #495057; font-weight: 500; transition: all 0.3s ease; }
+        .refresh-btn:hover { background: #e9ecef; transform: translateY(-1px); }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 20px; }
+        .stat-card { background: white; border-radius: 20px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: all 0.3s ease; }
+        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1); }
         .stat-card.total .stat-icon { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
         .stat-card.completed .stat-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .stat-card.pending .stat-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .stat-card.cancelled .stat-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .stat-card.listings .stat-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-
-        .stat-icon {
-          width: 52px;
-          height: 52px;
-          border-radius: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .stat-icon i {
-          font-size: 24px;
-        }
-
-        .stat-info {
-          flex: 1;
-        }
-
-        .stat-label {
-          font-size: 13px;
-          color: #6c757d;
-          margin-bottom: 4px;
-          display: block;
-        }
-
-        .stat-value {
-          font-size: 28px;
-          font-weight: 700;
-          margin: 0;
-          color: #1f2937;
-        }
-
-        .stat-change {
-          font-size: 11px;
-        }
-
-        .stat-change.positive {
-          color: #10b981;
-        }
-
-        .stat-change.negative {
-          color: #ef4444;
-        }
-
-        .text-success { color: #10b981; }
-        .text-warning { color: #f59e0b; }
-        .text-danger { color: #ef4444; }
-
-        .secondary-stats {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 20px;
-          margin-bottom: 28px;
-        }
-
-        .secondary-card {
-          background: white;
-          border-radius: 16px;
-          padding: 16px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          transition: all 0.3s ease;
-        }
-
-        .secondary-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-        }
-
-        .secondary-icon {
-          width: 44px;
-          height: 44px;
-          background: #f8f9fa;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #4f46e5;
-        }
-
-        .secondary-icon i {
-          font-size: 22px;
-        }
-
-        .secondary-info {
-          flex: 1;
-        }
-
-        .secondary-label {
-          font-size: 11px;
-          color: #6c757d;
-          display: block;
-        }
-
-        .secondary-value {
-          font-size: 18px;
-          font-weight: 700;
-          color: #1f2937;
-        }
-
-        .charts-section {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 24px;
-          margin-bottom: 28px;
-        }
-
-        .chart-card {
-          background: white;
-          border-radius: 20px;
-          padding: 20px;
-          transition: all 0.3s ease;
-        }
-
-        .chart-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-        }
-
-        .chart-header {
-          margin-bottom: 20px;
-        }
-
-        .chart-header h5 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0 0 4px 0;
-          color: #1f2937;
-        }
-
-        .chart-header p {
-          font-size: 12px;
-          color: #6c757d;
-          margin: 0;
-        }
-
-        .chart-body {
-          height: 250px;
-        }
-
-        .listings-section {
-          background: white;
-          border-radius: 24px;
-          padding: 20px;
-          margin-bottom: 28px;
-        }
-
-        .section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-          flex-wrap: wrap;
-          gap: 16px;
-        }
-
-        .filter-buttons {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .filter-btn {
-          padding: 6px 16px;
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          border-radius: 20px;
-          font-size: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .filter-btn.active {
-          background: #4f46e5;
-          color: white;
-          border-color: #4f46e5;
-        }
-
-        .filter-btn:hover:not(.active) {
-          background: #e9ecef;
-        }
-
-        .listings-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-          gap: 20px;
-        }
-
-        .listing-card {
-          background: #f8f9fa;
-          border-radius: 16px;
-          overflow: hidden;
-          transition: all 0.3s ease;
-        }
-
-        .listing-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-        }
-
-        .listing-header {
-          padding: 16px;
-          background: white;
-          border-bottom: 1px solid #e9ecef;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .listing-user {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .user-avatar {
-          width: 40px;
-          height: 40px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-weight: 600;
-          overflow: hidden;
-        }
-
-        .user-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .user-name {
-          font-weight: 600;
-          color: #1f2937;
-          font-size: 14px;
-        }
-
-        .listing-date {
-          font-size: 10px;
-          color: #9ca3af;
-        }
-
-        .status-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 10px;
-          border-radius: 20px;
-          font-size: 11px;
-          font-weight: 500;
-        }
-
+        .stat-card.pending-approval-stat .stat-icon { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
+        .stat-card.active-listings .stat-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .stat-icon { width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; }
+        .stat-icon i { font-size: 24px; }
+        .stat-info { flex: 1; }
+        .stat-label { font-size: 13px; color: #6c757d; margin-bottom: 4px; display: block; }
+        .stat-value { font-size: 28px; font-weight: 700; margin: 0; color: #1f2937; }
+        .stat-change { font-size: 11px; }
+        .stat-change.positive { color: #10b981; }
+        .stat-change.negative { color: #ef4444; }
+        .text-purple { color: #8b5cf6; }
+        
+        .secondary-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 28px; }
+        .secondary-card { background: white; border-radius: 16px; padding: 16px; display: flex; align-items: center; gap: 12px; transition: all 0.3s ease; }
+        .secondary-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08); }
+        .secondary-icon { width: 44px; height: 44px; background: #f8f9fa; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #4f46e5; }
+        .secondary-icon i { font-size: 22px; }
+        .secondary-info { flex: 1; }
+        .secondary-label { font-size: 11px; color: #6c757d; display: block; }
+        .secondary-value { font-size: 18px; font-weight: 700; color: #1f2937; }
+        
+        .charts-section { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 28px; }
+        .chart-card { background: white; border-radius: 20px; padding: 20px; transition: all 0.3s ease; }
+        .chart-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
+        .chart-header { margin-bottom: 20px; }
+        .chart-header h5 { font-size: 16px; font-weight: 600; margin: 0 0 4px 0; color: #1f2937; }
+        .chart-header p { font-size: 12px; color: #6c757d; margin: 0; }
+        .chart-body { height: 250px; }
+        
+        .listings-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 16px; }
+        .filter-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+        .filter-btn { padding: 6px 16px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 20px; font-size: 12px; cursor: pointer; transition: all 0.3s ease; }
+        .filter-btn.active { background: #4f46e5; color: white; border-color: #4f46e5; }
+        .filter-btn:hover:not(.active) { background: #e9ecef; }
+        
+        .listings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
+        .listing-card { background: #f8f9fa; border-radius: 16px; overflow: hidden; transition: all 0.3s ease; }
+        .listing-card:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1); }
+        .listing-header { padding: 16px; background: white; border-bottom: 1px solid #e9ecef; display: flex; justify-content: space-between; align-items: center; }
+        .listing-user { display: flex; align-items: center; gap: 12px; }
+        .user-avatar { width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; overflow: hidden; }
+        .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .user-name { font-weight: 600; color: #1f2937; font-size: 14px; }
+        .listing-date { font-size: 10px; color: #9ca3af; }
+        
+        .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+        .status-badge.pending-approval { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
         .status-badge.active { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .status-badge.inactive { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
-        .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .status-badge.completed { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .status-badge.cancelled { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .status-badge.approved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .status-badge.rejected { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-
-        .listing-body {
-          padding: 16px;
-        }
-
-        .listing-title {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0 0 8px 0;
-          color: #1f2937;
-        }
-
-        .listing-description {
-          font-size: 12px;
-          color: #6c757d;
-          margin: 0 0 12px 0;
-          line-height: 1.4;
-        }
-
-        .listing-details {
-          display: flex;
-          gap: 16px;
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .listing-footer {
-          padding: 12px 16px;
-          border-top: 1px solid #e9ecef;
-          display: flex;
-          gap: 8px;
-        }
-
-        .btn-view-listing, .btn-view-requests {
-          flex: 1;
-          padding: 8px 12px;
-          border: none;
-          border-radius: 8px;
-          font-size: 12px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-view-listing {
-          background: rgba(79, 70, 229, 0.1);
-          color: #4f46e5;
-        }
-
-        .btn-view-listing:hover {
-          background: #4f46e5;
-          color: white;
-        }
-
-        .btn-view-requests {
-          background: rgba(16, 185, 129, 0.1);
-          color: #10b981;
-        }
-
-        .btn-view-requests:hover {
-          background: #10b981;
-          color: white;
-        }
-
-        .requests-section {
-          background: white;
-          border-radius: 24px;
-          padding: 20px;
-          margin-bottom: 28px;
-        }
-
-        .requests-list {
-          max-height: 400px;
-          overflow-y: auto;
-        }
-
-        .request-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 16px;
-          border-bottom: 1px solid #e9ecef;
-          transition: all 0.3s ease;
-        }
-
-        .request-item:hover {
-          background: #f8f9fa;
-        }
-
-        .request-info {
-          flex: 1;
-        }
-
-        .requester {
-          font-size: 13px;
-          font-weight: 600;
-          color: #1f2937;
-          margin-bottom: 4px;
-        }
-
-        .request-details {
-          display: flex;
-          gap: 16px;
-          font-size: 11px;
-          color: #6c757d;
-          margin-bottom: 4px;
-          flex-wrap: wrap;
-        }
-
-        .request-time {
-          font-size: 10px;
-          color: #9ca3af;
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 60px 20px;
-          grid-column: span 3;
-        }
-
-        .empty-state i {
-          font-size: 48px;
-          color: #cbd5e1;
-          margin-bottom: 16px;
-          display: block;
-        }
-
-        .empty-state-small {
-          text-align: center;
-          padding: 40px 20px;
-          color: #9ca3af;
-        }
-
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1100;
-          animation: fadeIn 0.2s ease;
-        }
-
-        .modal-container {
-          background: white;
-          border-radius: 24px;
-          width: 90%;
-          max-width: 550px;
-          animation: slideUp 0.3s ease;
-          overflow: hidden;
-        }
-
-        .modal-container.modal-lg {
-          max-width: 800px;
-        }
-
-        .modal-container.modal-image {
-          max-width: 800px;
-        }
-
-        .modal-header {
-          padding: 24px 24px 16px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          position: relative;
-          border-bottom: 1px solid #e9ecef;
-        }
-
+        .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .status-badge.approved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        
+        .listing-body { padding: 16px; }
+        .listing-title { font-size: 16px; font-weight: 600; margin: 0 0 8px 0; color: #1f2937; }
+        .listing-description { font-size: 12px; color: #6c757d; margin: 0 0 12px 0; line-height: 1.4; }
+        .listing-details { display: flex; gap: 16px; font-size: 11px; color: #9ca3af; }
+        .rejection-reason { margin-top: 12px; padding: 8px 12px; background: #fee2e2; border-radius: 8px; font-size: 11px; color: #991b1b; display: flex; align-items: center; gap: 6px; }
+        
+        .listing-footer { padding: 12px 16px; border-top: 1px solid #e9ecef; display: flex; gap: 8px; }
+        .admin-actions { display: flex; gap: 8px; width: 100%; }
+        .btn-approve, .btn-reject, .btn-view-listing, .btn-view-requests { flex: 1; padding: 8px 12px; border: none; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; }
+        .btn-approve { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .btn-approve:hover { background: #10b981; color: white; }
+        .btn-reject { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .btn-reject:hover { background: #ef4444; color: white; }
+        .btn-view-listing { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .btn-view-listing:hover { background: #4f46e5; color: white; }
+        .btn-view-requests { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .btn-view-requests:hover { background: #10b981; color: white; }
+        
+        .requests-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
+        .requests-list { max-height: 400px; overflow-y: auto; }
+        .request-item { display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 1px solid #e9ecef; transition: all 0.3s ease; }
+        .request-item:hover { background: #f8f9fa; }
+        .request-info { flex: 1; }
+        .requester { font-size: 13px; font-weight: 600; color: #1f2937; margin-bottom: 4px; }
+        .request-details { display: flex; gap: 16px; font-size: 11px; color: #6c757d; margin-bottom: 4px; flex-wrap: wrap; }
+        .request-time { font-size: 10px; color: #9ca3af; }
+        .request-actions { display: flex; align-items: center; gap: 12px; }
+        .request-buttons { display: flex; gap: 4px; }
+        .btn-approve-request, .btn-reject-request { width: 28px; height: 28px; border-radius: 6px; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.3s ease; }
+        .btn-approve-request { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .btn-approve-request:hover { background: #10b981; color: white; }
+        .btn-reject-request { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .btn-reject-request:hover { background: #ef4444; color: white; }
+        
+        .empty-state { text-align: center; padding: 60px 20px; grid-column: span 3; }
+        .empty-state i { font-size: 48px; color: #cbd5e1; margin-bottom: 16px; display: block; }
+        .empty-state-small { text-align: center; padding: 40px 20px; color: #9ca3af; }
+        
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
+        .modal-container { background: white; border-radius: 24px; width: 90%; max-width: 550px; animation: slideUp 0.3s ease; overflow: hidden; max-height: 90vh; overflow-y: auto; }
+        .modal-container.modal-lg { max-width: 800px; }
+        .modal-container.modal-image { max-width: 800px; }
+        .modal-container.modal-reject { max-width: 600px; }
+        .modal-header { padding: 24px 24px 16px; display: flex; align-items: center; gap: 12px; position: relative; border-bottom: 1px solid #e9ecef; }
         .modal-header.info .modal-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-
-        .modal-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 24px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
+        .modal-header.success .modal-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .modal-header.danger .modal-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .modal-icon { width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; }
         .modal-icon i { font-size: 24px; }
-
-        .modal-header h3 {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 600;
-        }
-
-        .modal-close {
-          position: absolute;
-          right: 20px;
-          top: 20px;
-          background: none;
-          border: none;
-          font-size: 18px;
-          cursor: pointer;
-          color: #9ca3af;
-        }
-
-        .modal-body {
-          padding: 24px;
-          max-height: 70vh;
-          overflow-y: auto;
-        }
-
-        .image-section {
-          margin-bottom: 24px;
-          text-align: center;
-        }
-
-        .image-container {
-          position: relative;
-          display: inline-block;
-          max-width: 100%;
-          cursor: pointer;
-          border-radius: 12px;
-          overflow: hidden;
-        }
-
-        .image-container img {
-          max-width: 100%;
-          max-height: 300px;
-          border-radius: 12px;
-          transition: transform 0.3s ease;
-        }
-
-        .image-container:hover img {
-          transform: scale(1.05);
-        }
-
-        .image-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.6);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          opacity: 0;
-          transition: opacity 0.3s ease;
-          color: white;
-        }
-
-        .image-container:hover .image-overlay {
-          opacity: 1;
-        }
-
-        .image-overlay i {
-          font-size: 32px;
-          margin-bottom: 8px;
-        }
-
-        .image-overlay span {
-          font-size: 12px;
-        }
-
-        .image-modal-body {
-          text-align: center;
-          padding: 20px;
-        }
-
-        .image-modal-body img {
-          max-width: 100%;
-          max-height: 70vh;
-          border-radius: 8px;
-        }
-
-        .details-card {
-          background: #f8f9fa;
-          border-radius: 16px;
-          padding: 20px;
-          margin-bottom: 20px;
-        }
-
-        .details-card h4 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0 0 16px 0;
-          color: #1f2937;
-        }
-
-        .details-card h4 i {
-          margin-right: 8px;
-          color: #4f46e5;
-        }
-
-        .details-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 16px;
-        }
-
-        .detail-item.full-width {
-          grid-column: span 2;
-        }
-
-        .detail-item label {
-          font-size: 11px;
-          font-weight: 600;
-          color: #6c757d;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin-bottom: 4px;
-          display: block;
-        }
-
-        .detail-item .value {
-          font-size: 14px;
-          color: #1f2937;
-        }
-
-        .detail-item .value.description {
-          background: white;
-          padding: 12px;
-          border-radius: 8px;
-          line-height: 1.5;
-        }
-
-        .seller-info {
-          display: flex;
-          gap: 20px;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-
-        .seller-avatar {
-          width: 70px;
-          height: 70px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-weight: 600;
-          font-size: 24px;
-          overflow: hidden;
-        }
-
-        .seller-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .seller-details {
-          flex: 1;
-        }
-
-        .seller-details div {
-          margin-bottom: 6px;
-          font-size: 13px;
-        }
-
-        .stats-mini-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 16px;
-        }
-
-        .stat-mini {
-          text-align: center;
-          padding: 12px;
-          background: white;
-          border-radius: 12px;
-        }
-
-        .stat-mini-value {
-          font-size: 24px;
-          font-weight: 700;
-        }
-
-        .stat-mini-label {
-          font-size: 11px;
-          color: #6c757d;
-          margin-top: 4px;
-        }
-
-        .request-detail-card {
-          background: #f8f9fa;
-          border-radius: 16px;
-          padding: 16px;
-          margin-bottom: 16px;
-        }
-
-        .request-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-          flex-wrap: wrap;
-          gap: 12px;
-        }
-
-        .requester-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .requester-avatar {
-          width: 44px;
-          height: 44px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-weight: 600;
-          overflow: hidden;
-        }
-
-        .requester-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .requester-name {
-          font-weight: 600;
-          color: #1f2937;
-        }
-
-        .requester-contact {
-          font-size: 11px;
-          color: #6c757d;
-        }
-
-        .offered-section {
-          margin-bottom: 12px;
-          padding: 8px 12px;
-          background: white;
-          border-radius: 8px;
-          font-size: 13px;
-        }
-
-        .request-footer {
-          display: flex;
-          justify-content: flex-end;
-          align-items: center;
-        }
-
-        .request-date {
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .request-date i {
-          margin-right: 4px;
-        }
-
-        .modal-footer {
-          padding: 16px 24px 24px;
-          display: flex;
-          justify-content: flex-end;
-          gap: 12px;
-          border-top: 1px solid #e9ecef;
-        }
-
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-        }
-
-        .btn-primary {
-          padding: 10px 24px;
-          background: #4f46e5;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          text-decoration: none;
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
+        .modal-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+        .modal-close { position: absolute; right: 20px; top: 20px; background: none; border: none; font-size: 18px; cursor: pointer; color: #9ca3af; }
+        .modal-body { padding: 24px; max-height: 60vh; overflow-y: auto; }
+        
+        .image-section { margin-bottom: 24px; text-align: center; }
+        .image-container { position: relative; display: inline-block; max-width: 100%; cursor: pointer; border-radius: 12px; overflow: hidden; }
+        .image-container img { max-width: 100%; max-height: 300px; border-radius: 12px; transition: transform 0.3s ease; }
+        .image-container:hover img { transform: scale(1.05); }
+        .image-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s ease; color: white; }
+        .image-container:hover .image-overlay { opacity: 1; }
+        .image-overlay i { font-size: 32px; margin-bottom: 8px; }
+        
+        .details-card { background: #f8f9fa; border-radius: 16px; padding: 20px; margin-bottom: 20px; }
+        .details-card h4 { font-size: 16px; font-weight: 600; margin: 0 0 16px 0; color: #1f2937; }
+        .details-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .detail-item.full-width { grid-column: span 2; }
+        .detail-item label { font-size: 11px; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block; }
+        .detail-item .value { font-size: 14px; color: #1f2937; }
+        .detail-item .value.description { background: white; padding: 12px; border-radius: 8px; line-height: 1.5; }
+        .rejection-box { background: #fee2e2; padding: 12px; border-radius: 8px; color: #991b1b; }
+        
+        .seller-info { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+        .seller-avatar { width: 70px; height: 70px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 24px; overflow: hidden; }
+        .seller-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .seller-details { flex: 1; }
+        .seller-details div { margin-bottom: 6px; font-size: 13px; }
+        
+        .listing-summary { background: #f8f9fa; padding: 12px; border-radius: 12px; margin: 16px 0; }
+        .warning-message { padding: 12px; border-radius: 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+        .warning-message.success { background: #d1fae5; color: #065f46; }
+        .warning-message.danger { background: #fee2e2; color: #991b1b; }
+        
+        .quick-reasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
+        .quick-reason-btn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 10px; cursor: pointer; transition: all 0.3s ease; position: relative; }
+        .quick-reason-btn:hover { background: #e9ecef; transform: translateY(-2px); }
+        .quick-reason-btn.selected { background: #fef3c7; border-color: #f59e0b; }
+        .quick-reason-btn i { font-size: 16px; color: var(--reason-color); }
+        .quick-reason-btn .check-icon { position: absolute; right: 8px; top: 8px; color: #10b981; font-size: 14px; }
+        .custom-reason { margin-top: 20px; }
+        .form-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #374151; }
+        .form-textarea { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
+        
+        .modal-footer { padding: 16px 24px 24px; display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid #e9ecef; }
+        .admin-actions-modal { display: flex; gap: 12px; margin-right: auto; }
+        .btn-approve-modal { padding: 10px 20px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-reject-modal { padding: 10px 20px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; font-weight: 500; }
+        .btn-primary { padding: 10px 24px; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; }
+        .btn-primary.success { background: #10b981; color: white; }
+        .btn-primary.danger { background: #ef4444; color: white; }
+        
+        .image-modal-body { text-align: center; padding: 20px; }
+        .image-modal-body img { max-width: 100%; max-height: 70vh; border-radius: 8px; }
+        .request-detail-card { background: #f8f9fa; border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+        .request-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 12px; }
+        .requester-info { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .requester-avatar { width: 44px; height: 44px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; overflow: hidden; }
+        .requester-name { font-weight: 600; color: #1f2937; }
+        .requester-contact { font-size: 11px; color: #6c757d; }
+        .offered-section { margin-bottom: 12px; padding: 8px 12px; background: white; border-radius: 8px; font-size: 13px; }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
         @media (max-width: 1200px) {
-          .stats-grid {
-            grid-template-columns: repeat(3, 1fr);
-          }
-          .secondary-stats {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .charts-section {
-            grid-template-columns: 1fr;
-          }
-          .listings-grid {
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          }
-          .stats-mini-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
+          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .secondary-stats { grid-template-columns: repeat(2, 1fr); }
+          .charts-section { grid-template-columns: 1fr; }
+          .listings-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
         }
-
         @media (max-width: 768px) {
-          .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .secondary-stats {
-            grid-template-columns: 1fr;
-          }
-          .charts-section {
-            grid-template-columns: 1fr;
-          }
-          .page-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          .listings-grid {
-            grid-template-columns: 1fr;
-          }
-          .details-grid {
-            grid-template-columns: 1fr;
-          }
-          .detail-item.full-width {
-            grid-column: span 1;
-          }
-          .seller-info {
-            flex-direction: column;
-            text-align: center;
-          }
-          .stats-mini-grid {
-            grid-template-columns: 1fr;
-          }
-          .filter-buttons {
-            width: 100%;
-          }
-          .filter-btn {
-            flex: 1;
-            text-align: center;
-          }
-          .details-card h4 {
-            text-align: center;
-          }
-          .request-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
+          .stats-grid { grid-template-columns: 1fr; }
+          .secondary-stats { grid-template-columns: 1fr; }
+          .page-header { flex-direction: column; align-items: flex-start; }
+          .listings-grid { grid-template-columns: 1fr; }
+          .details-grid { grid-template-columns: 1fr; }
+          .detail-item.full-width { grid-column: span 1; }
+          .seller-info { flex-direction: column; text-align: center; }
+          .filter-buttons { width: 100%; }
+          .filter-btn { flex: 1; text-align: center; }
+          .quick-reasons { grid-template-columns: 1fr; }
+          .admin-actions-modal { flex-direction: column; width: 100%; }
         }
       `}</style>
     </AdminLayout>
