@@ -44,7 +44,6 @@ export default function BarterTransactions() {
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [selectedRequests, setSelectedRequests] = useState([])
   const [selectedListingId, setSelectedListingId] = useState(null)
-  const [showFullDetails, setShowFullDetails] = useState(false)
   const [showImageModal, setShowImageModal] = useState(false)
   const [selectedImage, setSelectedImage] = useState('')
   const [stats, setStats] = useState({
@@ -237,7 +236,7 @@ export default function BarterTransactions() {
 
   const viewFullDetails = (listing) => {
     setSelectedTransaction(listing)
-    setShowFullDetails(true)
+    setShowDetailsModal(true)
   }
 
   const viewImage = (imageUrl) => {
@@ -669,21 +668,21 @@ export default function BarterTransactions() {
         </div>
       </div>
 
-      {/* Full Details Modal with Image View */}
-      {showFullDetails && selectedTransaction && (
-        <div className="modal-overlay" onClick={() => setShowFullDetails(false)}>
+      {/* Full Details Modal with Image View - FIXED */}
+      {showDetailsModal && selectedTransaction && (
+        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div class="details-grid">
             <div className="modal-header info">
               <div className="modal-icon">
                 <i className="bi bi-info-circle-fill"></i>
               </div>
               <h3>Complete Barter Details</h3>
-              <button className="modal-close" onClick={() => setShowFullDetails(false)}>
+              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <div className="modal-body">
+              {/* Image Section - Click to enlarge */}
               {selectedTransaction.image_url && (
                 <div className="image-section">
                   <div className="image-container" onClick={() => viewImage(selectedTransaction.image_url)}>
@@ -696,6 +695,7 @@ export default function BarterTransactions() {
                 </div>
               )}
 
+              {/* Listing Information */}
               <div className="details-card">
                 <h4><i className="bi bi-box-seam"></i> Listing Information</h4>
                 <div className="details-grid">
@@ -721,7 +721,8 @@ export default function BarterTransactions() {
                   </div>
                 </div>
               </div>
-                </div>
+
+              {/* Seller Information */}
               <div className="details-card">
                 <h4><i className="bi bi-person-badge"></i> Seller Information</h4>
                 <div className="seller-info">
@@ -741,6 +742,7 @@ export default function BarterTransactions() {
                 </div>
               </div>
 
+              {/* Request Statistics */}
               <div className="details-card">
                 <h4><i className="bi bi-chat-dots"></i> Request Statistics</h4>
                 <div className="stats-mini-grid">
@@ -764,9 +766,9 @@ export default function BarterTransactions() {
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowFullDetails(false)}>Close</button>
+              <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
               <button className="btn-primary" onClick={() => {
-                setShowFullDetails(false)
+                setShowDetailsModal(false)
                 viewRequests(selectedTransaction.listing_id)
               }}>
                 View All Requests <i className="bi bi-arrow-right"></i>
@@ -794,7 +796,7 @@ export default function BarterTransactions() {
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setShowImageModal(false)}>Close</button>
-              <a href={selectedImage} download className="btn-primary">
+              <a href={selectedImage} download className="btn-primary" target="_blank" rel="noopener noreferrer">
                 <i className="bi bi-download"></i> Download
               </a>
             </div>
@@ -1371,7 +1373,7 @@ export default function BarterTransactions() {
         }
 
         .modal-container.modal-lg {
-          max-width: 700px;
+          max-width: 800px;
         }
 
         .modal-container.modal-image {
@@ -1419,6 +1421,8 @@ export default function BarterTransactions() {
 
         .modal-body {
           padding: 24px;
+          max-height: 70vh;
+          overflow-y: auto;
         }
 
         .image-section {
@@ -1541,6 +1545,7 @@ export default function BarterTransactions() {
           display: flex;
           gap: 20px;
           align-items: center;
+          flex-wrap: wrap;
         }
 
         .seller-avatar {
@@ -1608,12 +1613,15 @@ export default function BarterTransactions() {
           justify-content: space-between;
           align-items: center;
           margin-bottom: 12px;
+          flex-wrap: wrap;
+          gap: 12px;
         }
 
         .requester-info {
           display: flex;
           align-items: center;
           gap: 12px;
+          flex-wrap: wrap;
         }
 
         .requester-avatar {
@@ -1769,6 +1777,13 @@ export default function BarterTransactions() {
           .filter-btn {
             flex: 1;
             text-align: center;
+          }
+          .details-card h4 {
+            text-align: center;
+          }
+          .request-header {
+            flex-direction: column;
+            align-items: flex-start;
           }
         }
       `}</style>
