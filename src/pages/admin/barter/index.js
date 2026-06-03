@@ -35,12 +35,16 @@ export default function BarterTransactions() {
   const [transactions, setTransactions] = useState([])
   const [barterListings, setBarterListings] = useState([])
   const [barterRequests, setBarterRequests] = useState([])
+  const [filteredListings, setFilteredListings] = useState([])
   const [loading, setLoading] = useState(true)
   const [dateRange, setDateRange] = useState('month')
+  const [listingFilter, setListingFilter] = useState('all')
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState(null)
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [selectedRequests, setSelectedRequests] = useState([])
+  const [selectedListingId, setSelectedListingId] = useState(null)
+  const [showFullDetails, setShowFullDetails] = useState(false)
   const [stats, setStats] = useState({
     total: 0,
     completed: 0,
@@ -50,6 +54,8 @@ export default function BarterTransactions() {
     totalListings: 0,
     totalRequests: 0,
     pendingRequests: 0,
+    approvedRequests: 0,
+    rejectedRequests: 0,
     successRate: 0,
     monthlyGrowth: 0
   })
@@ -68,10 +74,14 @@ export default function BarterTransactions() {
         { event: '*', schema: 'public', table: 'barter_listings' },
         () => fetchData()
       )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'barter_requests' },
+        () => fetchData()
+      )
       .subscribe()
 
     return () => subscription.unsubscribe()
-  }, [dateRange])
+  }, [dateRange, listingFilter])
 
   const fetchData = async () => {
     try {
@@ -86,31 +96,51 @@ export default function BarterTransactions() {
             user_id,
             full_name,
             email,
-            profile_image
+            profile_image,
+            phone_number,
+            district
           )
         `)
         .order('created_at', { ascending: false })
 
       if (!listingsError && listingsData) {
         setBarterListings(listingsData)
+        
+        // Apply filter
+        let filtered = [...listingsData]
+        if (listingFilter === 'active') {
+          filtered = filtered.filter(l => l.status === 'ACTIVE')
+        } else if (listingFilter === 'completed') {
+          filtered = filtered.filter(l => l.status === 'COMPLETED')
+        } else if (listingFilter === 'cancelled') {
+          filtered = filtered.filter(l => l.status === 'CANCELLED')
+        }
+        setFilteredListings(filtered)
       }
 
-      // Fetch barter requests
+      // Fetch barter requests with full details
       const { data: requestsData, error: requestsError } = await supabase
         .from('barter_requests')
         .select(`
           *,
-          users!barter_requests_requester_id_fkey (
+          requester:users!barter_requests_requester_id_fkey (
             user_id,
             full_name,
-            email
+            email,
+            profile_image,
+            phone_number
           ),
-          barter_listings!barter_requests_listing_id_fkey (
+          listing:barter_listings!barter_requests_listing_id_fkey (
             listing_id,
             title,
+            description,
+            quantity,
+            unit,
+            status,
             user_id,
-            users!barter_listings_user_id_fkey (
-              full_name
+            owner:users!barter_listings_user_id_fkey (
+              full_name,
+              email
             )
           )
         `)
@@ -123,7 +153,7 @@ export default function BarterTransactions() {
       // Calculate stats from actual data
       calculateStatsFromData(listingsData || [], requestsData || [])
       
-      // Generate trend data from listings (by created_at date)
+      // Generate trend data
       calculateTrendsFromListings(listingsData || [])
       
     } catch (err) {
@@ -138,16 +168,18 @@ export default function BarterTransactions() {
     const totalListings = listingsData.length
     const totalRequests = requestsData.length
     const pendingRequests = requestsData.filter(r => r.request_status === 'PENDING').length
+    const approvedRequests = requestsData.filter(r => r.request_status === 'APPROVED').length
+    const rejectedRequests = requestsData.filter(r => r.request_status === 'REJECTED').length
     
     // Calculate completed vs pending vs cancelled from requests
     const completed = requestsData.filter(r => r.request_status === 'COMPLETED').length
     const pending = requestsData.filter(r => r.request_status === 'PENDING').length
-    const cancelled = requestsData.filter(r => r.request_status === 'CANCELLED').length
+    const cancelled = requestsData.filter(r => r.request_status === 'CANCELLED' || r.request_status === 'REJECTED').length
     const total = completed + pending + cancelled
     
     const successRate = total > 0 ? Math.round((completed / total) * 100) : 0
     
-    // Calculate monthly growth (compare last 30 days with previous 30 days)
+    // Calculate monthly growth
     const now = new Date()
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
@@ -172,13 +204,14 @@ export default function BarterTransactions() {
       totalListings,
       totalRequests,
       pendingRequests,
+      approvedRequests,
+      rejectedRequests,
       successRate,
       monthlyGrowth
     })
   }
 
   const calculateTrendsFromListings = (listingsData) => {
-    // Group listings by week (last 4 weeks)
     const weeks = [
       { name: 'Week 1', count: 0, completed: 0 },
       { name: 'Week 2', count: 0, completed: 0 },
@@ -207,15 +240,35 @@ export default function BarterTransactions() {
     })
   }
 
-  const viewDetails = (listing) => {
+  const viewFullDetails = (listing) => {
     setSelectedTransaction(listing)
-    setShowDetailsModal(true)
+    setShowFullDetails(true)
   }
 
-  const viewRequests = (listingId) => {
-    const requests = barterRequests.filter(r => r.listing_id === listingId)
-    setSelectedRequests(requests)
-    setShowRequestModal(true)
+  const viewRequests = async (listingId) => {
+    setSelectedListingId(listingId)
+    
+    // Fetch complete request details for this listing
+    const { data: requests, error } = await supabase
+      .from('barter_requests')
+      .select(`
+        *,
+        requester:users!barter_requests_requester_id_fkey (
+          user_id,
+          full_name,
+          email,
+          profile_image,
+          phone_number,
+          district
+        )
+      `)
+      .eq('listing_id', listingId)
+      .order('created_at', { ascending: false })
+
+    if (!error && requests) {
+      setSelectedRequests(requests)
+      setShowRequestModal(true)
+    }
   }
 
   const getStatusBadge = (status) => {
@@ -232,9 +285,10 @@ export default function BarterTransactions() {
   const getRequestStatusBadge = (status) => {
     const badges = {
       'PENDING': <span className="status-badge pending"><i className="bi bi-clock-fill"></i> Pending</span>,
-      'APPROVED': <span className="status-badge completed"><i className="bi bi-check-circle-fill"></i> Approved</span>,
-      'REJECTED': <span className="status-badge cancelled"><i className="bi bi-x-circle-fill"></i> Rejected</span>,
-      'COMPLETED': <span className="status-badge completed"><i className="bi bi-check-circle-fill"></i> Completed</span>
+      'APPROVED': <span className="status-badge approved"><i className="bi bi-check-circle-fill"></i> Approved</span>,
+      'REJECTED': <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>,
+      'COMPLETED': <span className="status-badge completed"><i className="bi bi-check-circle-fill"></i> Completed</span>,
+      'CANCELLED': <span className="status-badge cancelled"><i className="bi bi-x-circle-fill"></i> Cancelled</span>
     }
     return badges[status] || <span className="status-badge default">{status}</span>
   }
@@ -398,7 +452,7 @@ export default function BarterTransactions() {
           </div>
         </div>
 
-        {/* Secondary Stats Row */}
+        {/* Secondary Stats */}
         <div className="secondary-stats">
           <div className="secondary-card">
             <div className="secondary-icon"><i className="bi bi-chat-dots"></i></div>
@@ -417,8 +471,15 @@ export default function BarterTransactions() {
           <div className="secondary-card">
             <div className="secondary-icon"><i className="bi bi-check-circle"></i></div>
             <div className="secondary-info">
-              <span className="secondary-label">Success Rate</span>
-              <strong className="secondary-value text-success">{stats.successRate}%</strong>
+              <span className="secondary-label">Approved Requests</span>
+              <strong className="secondary-value text-success">{stats.approvedRequests}</strong>
+            </div>
+          </div>
+          <div className="secondary-card">
+            <div className="secondary-icon"><i className="bi bi-x-circle"></i></div>
+            <div className="secondary-info">
+              <span className="secondary-label">Rejected Requests</span>
+              <strong className="secondary-value text-danger">{stats.rejectedRequests}</strong>
             </div>
           </div>
         </div>
@@ -445,15 +506,40 @@ export default function BarterTransactions() {
           </div>
         </div>
 
-        {/* Active Barter Listings */}
+        {/* Active Barter Listings with Filter */}
         <div className="listings-section">
           <div className="section-header">
-            <h5><i className="bi bi-box-seam me-2"></i> Active Barter Listings</h5>
-            <span className="section-badge">{barterListings.filter(l => l.status === 'ACTIVE').length} active</span>
+            <h5><i className="bi bi-box-seam me-2"></i> Barter Listings</h5>
+            <div className="filter-buttons">
+              <button 
+                className={`filter-btn ${listingFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setListingFilter('all')}
+              >
+                All ({barterListings.length})
+              </button>
+              <button 
+                className={`filter-btn ${listingFilter === 'active' ? 'active' : ''}`}
+                onClick={() => setListingFilter('active')}
+              >
+                Active ({barterListings.filter(l => l.status === 'ACTIVE').length})
+              </button>
+              <button 
+                className={`filter-btn ${listingFilter === 'completed' ? 'active' : ''}`}
+                onClick={() => setListingFilter('completed')}
+              >
+                Completed ({barterListings.filter(l => l.status === 'COMPLETED').length})
+              </button>
+              <button 
+                className={`filter-btn ${listingFilter === 'cancelled' ? 'active' : ''}`}
+                onClick={() => setListingFilter('cancelled')}
+              >
+                Cancelled ({barterListings.filter(l => l.status === 'CANCELLED').length})
+              </button>
+            </div>
           </div>
           <div className="listings-grid">
-            {barterListings.filter(l => l.status === 'ACTIVE').length > 0 ? (
-              barterListings.filter(l => l.status === 'ACTIVE').slice(0, 6).map((listing) => (
+            {filteredListings.length > 0 ? (
+              filteredListings.slice(0, 6).map((listing) => (
                 <div key={listing.listing_id} className="listing-card">
                   <div className="listing-header">
                     <div className="listing-user">
@@ -479,11 +565,15 @@ export default function BarterTransactions() {
                         <i className="bi bi-box"></i>
                         {listing.quantity} {listing.unit}
                       </span>
+                      <span className="detail-item">
+                        <i className="bi bi-geo-alt"></i>
+                        {listing.users?.district || 'Location not specified'}
+                      </span>
                     </div>
                   </div>
                   <div className="listing-footer">
-                    <button className="btn-view-listing" onClick={() => viewDetails(listing)}>
-                      <i className="bi bi-eye"></i> Details
+                    <button className="btn-view-listing" onClick={() => viewFullDetails(listing)}>
+                      <i className="bi bi-eye"></i> Full Details
                     </button>
                     <button className="btn-view-requests" onClick={() => viewRequests(listing.listing_id)}>
                       <i className="bi bi-chat-dots"></i> Requests ({barterRequests.filter(r => r.listing_id === listing.listing_id).length})
@@ -494,8 +584,8 @@ export default function BarterTransactions() {
             ) : (
               <div className="empty-state">
                 <i className="bi bi-inbox"></i>
-                <h4>No Active Listings</h4>
-                <p>There are no active barter listings at the moment.</p>
+                <h4>No Listings Found</h4>
+                <p>No {listingFilter === 'all' ? '' : listingFilter} listings available.</p>
               </div>
             )}
           </div>
@@ -513,7 +603,7 @@ export default function BarterTransactions() {
                 <div className="request-info">
                   <div className="requester">
                     <i className="bi bi-person-circle"></i>
-                    <span>{request.users?.full_name || 'Anonymous'}</span>
+                    <span>{request.requester?.full_name || 'Anonymous'}</span>
                   </div>
                   <div className="request-details">
                     <span className="offered-item">
@@ -522,7 +612,7 @@ export default function BarterTransactions() {
                     </span>
                     <span className="listing-title">
                       <i className="bi bi-tag"></i>
-                      For: {request.barter_listings?.title}
+                      For: {request.listing?.title}
                     </span>
                   </div>
                   <div className="request-time">
@@ -543,49 +633,98 @@ export default function BarterTransactions() {
         </div>
       </div>
 
-      {/* Listing Details Modal */}
-      {showDetailsModal && selectedTransaction && (
-        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+      {/* Full Details Modal */}
+      {showFullDetails && selectedTransaction && (
+        <div className="modal-overlay" onClick={() => setShowFullDetails(false)}>
+          <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header info">
               <div className="modal-icon">
                 <i className="bi bi-info-circle-fill"></i>
               </div>
-              <h3>Barter Listing Details</h3>
-              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
+              <h3>Complete Barter Details</h3>
+              <button className="modal-close" onClick={() => setShowFullDetails(false)}>
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <div className="modal-body">
-              <div className="details-section">
-                <div className="detail-row">
-                  <span className="detail-label">Title</span>
-                  <span className="detail-value">{selectedTransaction.title}</span>
+              {/* Listing Information */}
+              <div className="details-card">
+                <h4><i className="bi bi-box-seam"></i> Listing Information</h4>
+                <div className="details-grid">
+                  <div className="detail-item">
+                    <label>Title</label>
+                    <div className="value">{selectedTransaction.title}</div>
+                  </div>
+                  <div className="detail-item">
+                    <label>Status</label>
+                    <div className="value">{getStatusBadge(selectedTransaction.status)}</div>
+                  </div>
+                  <div className="detail-item">
+                    <label>Quantity</label>
+                    <div className="value">{selectedTransaction.quantity} {selectedTransaction.unit}</div>
+                  </div>
+                  <div className="detail-item">
+                    <label>Created Date</label>
+                    <div className="value">{new Date(selectedTransaction.created_at).toLocaleString()}</div>
+                  </div>
+                  <div className="detail-item full-width">
+                    <label>Description</label>
+                    <div className="value description">{selectedTransaction.description || 'No description provided'}</div>
+                  </div>
                 </div>
-                <div className="detail-row">
-                  <span className="detail-label">Description</span>
-                  <span className="detail-value">{selectedTransaction.description || 'No description'}</span>
+              </div>
+
+              {/* Seller Information */}
+              <div className="details-card">
+                <h4><i className="bi bi-person-badge"></i> Seller Information</h4>
+                <div className="seller-info">
+                  <div className="seller-avatar">
+                    {selectedTransaction.users?.profile_image ? (
+                      <img src={selectedTransaction.users.profile_image} alt={selectedTransaction.users.full_name} />
+                    ) : (
+                      <span>{selectedTransaction.users?.full_name?.charAt(0) || 'U'}</span>
+                    )}
+                  </div>
+                  <div className="seller-details">
+                    <div><strong>Name:</strong> {selectedTransaction.users?.full_name || 'Anonymous'}</div>
+                    <div><strong>Email:</strong> {selectedTransaction.users?.email || 'Not provided'}</div>
+                    <div><strong>Phone:</strong> {selectedTransaction.users?.phone_number || 'Not provided'}</div>
+                    <div><strong>District:</strong> {selectedTransaction.users?.district || 'Not specified'}</div>
+                  </div>
                 </div>
-                <div className="detail-row">
-                  <span className="detail-label">Quantity</span>
-                  <span className="detail-value">{selectedTransaction.quantity} {selectedTransaction.unit}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="detail-label">Status</span>
-                  <span className="detail-value">{getStatusBadge(selectedTransaction.status)}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="detail-label">Posted By</span>
-                  <span className="detail-value">{selectedTransaction.users?.full_name || 'Anonymous'}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="detail-label">Posted On</span>
-                  <span className="detail-value">{new Date(selectedTransaction.created_at).toLocaleString()}</span>
+              </div>
+
+              {/* Request Statistics */}
+              <div className="details-card">
+                <h4><i className="bi bi-chat-dots"></i> Request Statistics</h4>
+                <div className="stats-mini-grid">
+                  <div className="stat-mini">
+                    <div className="stat-mini-value">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id).length}</div>
+                    <div className="stat-mini-label">Total Requests</div>
+                  </div>
+                  <div className="stat-mini">
+                    <div className="stat-mini-value text-warning">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id && r.request_status === 'PENDING').length}</div>
+                    <div className="stat-mini-label">Pending</div>
+                  </div>
+                  <div className="stat-mini">
+                    <div className="stat-mini-value text-success">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id && r.request_status === 'APPROVED').length}</div>
+                    <div className="stat-mini-label">Approved</div>
+                  </div>
+                  <div className="stat-mini">
+                    <div className="stat-mini-value text-danger">{barterRequests.filter(r => r.listing_id === selectedTransaction.listing_id && (r.request_status === 'REJECTED' || r.request_status === 'CANCELLED')).length}</div>
+                    <div className="stat-mini-label">Rejected/Cancelled</div>
+                  </div>
                 </div>
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
+              <button className="btn-secondary" onClick={() => setShowFullDetails(false)}>Close</button>
+              <button className="btn-primary" onClick={() => {
+                setShowFullDetails(false)
+                viewRequests(selectedTransaction.listing_id)
+              }}>
+                View All Requests <i className="bi bi-arrow-right"></i>
+              </button>
             </div>
           </div>
         </div>
@@ -607,20 +746,37 @@ export default function BarterTransactions() {
             <div className="modal-body">
               {selectedRequests.length > 0 ? (
                 selectedRequests.map((request) => (
-                  <div key={request.request_id} className="request-detail-item">
+                  <div key={request.request_id} className="request-detail-card">
                     <div className="request-header">
-                      <div className="requester-name">
-                        <i className="bi bi-person-circle"></i>
-                        {request.users?.full_name || 'Anonymous'}
+                      <div className="requester-info">
+                        <div className="requester-avatar">
+                          {request.requester?.profile_image ? (
+                            <img src={request.requester.profile_image} alt={request.requester.full_name} />
+                          ) : (
+                            <span>{request.requester?.full_name?.charAt(0) || 'U'}</span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="requester-name">{request.requester?.full_name || 'Anonymous'}</div>
+                          <div className="requester-contact">{request.requester?.email} | {request.requester?.phone_number || 'No phone'}</div>
+                        </div>
                       </div>
                       {getRequestStatusBadge(request.request_status)}
                     </div>
-                    <div className="offered-item-detail">
-                      <strong>Offered:</strong> {request.offered_item}
+                    <div className="offered-section">
+                      <strong>Offered Item:</strong> {request.offered_item}
                     </div>
-                    <div className="request-date">
-                      <i className="bi bi-calendar3"></i>
-                      {new Date(request.created_at).toLocaleString()}
+                    <div className="request-footer">
+                      <div className="request-date">
+                        <i className="bi bi-calendar3"></i>
+                        {new Date(request.created_at).toLocaleString()}
+                      </div>
+                      {request.request_status === 'PENDING' && (
+                        <div className="request-actions">
+                          <button className="btn-approve">Approve</button>
+                          <button className="btn-reject">Reject</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -779,7 +935,7 @@ export default function BarterTransactions() {
 
         .secondary-stats {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 20px;
           margin-bottom: 28px;
         }
@@ -882,21 +1038,33 @@ export default function BarterTransactions() {
           justify-content: space-between;
           align-items: center;
           margin-bottom: 20px;
+          flex-wrap: wrap;
+          gap: 16px;
         }
 
-        .section-header h5 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0;
-          color: #1f2937;
+        .filter-buttons {
+          display: flex;
+          gap: 8px;
         }
 
-        .section-badge {
-          background: #f8f9fa;
+        .filter-btn {
           padding: 4px 12px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
           border-radius: 20px;
           font-size: 12px;
-          color: #6c757d;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .filter-btn.active {
+          background: #4f46e5;
+          color: white;
+          border-color: #4f46e5;
+        }
+
+        .filter-btn:hover:not(.active) {
+          background: #e9ecef;
         }
 
         .listings-grid {
@@ -977,6 +1145,8 @@ export default function BarterTransactions() {
         .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .status-badge.completed { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .status-badge.cancelled { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .status-badge.approved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .status-badge.rejected { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
         .listing-body {
           padding: 16px;
@@ -1091,34 +1261,6 @@ export default function BarterTransactions() {
           color: #9ca3af;
         }
 
-        .request-detail-item {
-          padding: 16px;
-          border-bottom: 1px solid #e9ecef;
-        }
-
-        .request-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 8px;
-        }
-
-        .requester-name {
-          font-weight: 600;
-          color: #1f2937;
-        }
-
-        .offered-item-detail {
-          font-size: 13px;
-          color: #4b5563;
-          margin-bottom: 8px;
-        }
-
-        .request-date {
-          font-size: 10px;
-          color: #9ca3af;
-        }
-
         .empty-state {
           text-align: center;
           padding: 60px 20px;
@@ -1208,43 +1350,237 @@ export default function BarterTransactions() {
           padding: 24px;
         }
 
-        .details-section {
-          display: flex;
-          flex-direction: column;
+        .details-card {
+          background: #f8f9fa;
+          border-radius: 16px;
+          padding: 20px;
+          margin-bottom: 20px;
+        }
+
+        .details-card h4 {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 16px 0;
+          color: #1f2937;
+        }
+
+        .details-card h4 i {
+          margin-right: 8px;
+          color: #4f46e5;
+        }
+
+        .details-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
           gap: 16px;
         }
 
-        .detail-row {
-          display: flex;
+        .detail-item.full-width {
+          grid-column: span 2;
         }
 
-        .detail-label {
-          width: 100px;
-          font-size: 12px;
+        .detail-item label {
+          font-size: 11px;
           font-weight: 600;
+          color: #6c757d;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 4px;
+          display: block;
+        }
+
+        .detail-item .value {
+          font-size: 14px;
+          color: #1f2937;
+        }
+
+        .detail-item .value.description {
+          background: white;
+          padding: 12px;
+          border-radius: 8px;
+          line-height: 1.5;
+        }
+
+        .seller-info {
+          display: flex;
+          gap: 20px;
+          align-items: center;
+        }
+
+        .seller-avatar {
+          width: 70px;
+          height: 70px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          font-size: 24px;
+          overflow: hidden;
+        }
+
+        .seller-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .seller-details {
+          flex: 1;
+        }
+
+        .seller-details div {
+          margin-bottom: 6px;
+          font-size: 13px;
+        }
+
+        .stats-mini-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 16px;
+        }
+
+        .stat-mini {
+          text-align: center;
+          padding: 12px;
+          background: white;
+          border-radius: 12px;
+        }
+
+        .stat-mini-value {
+          font-size: 24px;
+          font-weight: 700;
+        }
+
+        .stat-mini-label {
+          font-size: 11px;
+          color: #6c757d;
+          margin-top: 4px;
+        }
+
+        .request-detail-card {
+          background: #f8f9fa;
+          border-radius: 16px;
+          padding: 16px;
+          margin-bottom: 16px;
+        }
+
+        .request-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+
+        .requester-info {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .requester-avatar {
+          width: 44px;
+          height: 44px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          overflow: hidden;
+        }
+
+        .requester-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .requester-name {
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .requester-contact {
+          font-size: 11px;
           color: #6c757d;
         }
 
-        .detail-value {
-          flex: 1;
+        .offered-section {
+          margin-bottom: 12px;
+          padding: 8px 12px;
+          background: white;
+          border-radius: 8px;
           font-size: 13px;
-          color: #1f2937;
+        }
+
+        .request-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .request-actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .btn-approve, .btn-reject {
+          padding: 4px 12px;
+          border: none;
+          border-radius: 6px;
+          font-size: 11px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-approve {
+          background: #10b981;
+          color: white;
+        }
+
+        .btn-approve:hover {
+          background: #059669;
+        }
+
+        .btn-reject {
+          background: #ef4444;
+          color: white;
+        }
+
+        .btn-reject:hover {
+          background: #dc2626;
         }
 
         .modal-footer {
           padding: 16px 24px 24px;
           display: flex;
           justify-content: flex-end;
+          gap: 12px;
           border-top: 1px solid #e9ecef;
         }
 
         .btn-secondary {
-          padding: 10px 24px;
+          padding: 10px 20px;
           background: #f8f9fa;
           border: 1px solid #e9ecef;
           border-radius: 10px;
           cursor: pointer;
           font-weight: 500;
+        }
+
+        .btn-primary {
+          padding: 10px 24px;
+          background: #4f46e5;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
         }
 
         @keyframes fadeIn {
@@ -1267,11 +1603,17 @@ export default function BarterTransactions() {
           .stats-grid {
             grid-template-columns: repeat(3, 1fr);
           }
+          .secondary-stats {
+            grid-template-columns: repeat(2, 1fr);
+          }
           .charts-section {
             grid-template-columns: 1fr;
           }
           .listings-grid {
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          }
+          .stats-mini-grid {
+            grid-template-columns: repeat(2, 1fr);
           }
         }
 
@@ -1289,12 +1631,18 @@ export default function BarterTransactions() {
           .listings-grid {
             grid-template-columns: 1fr;
           }
-          .detail-row {
-            flex-direction: column;
-            gap: 4px;
+          .details-grid {
+            grid-template-columns: 1fr;
           }
-          .detail-label {
-            width: auto;
+          .detail-item.full-width {
+            grid-column: span 1;
+          }
+          .seller-info {
+            flex-direction: column;
+            text-align: center;
+          }
+          .stats-mini-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
