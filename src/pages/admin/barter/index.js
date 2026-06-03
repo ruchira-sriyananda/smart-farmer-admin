@@ -673,7 +673,7 @@ export default function BarterTransactions() {
       {showFullDetails && selectedTransaction && (
         <div className="modal-overlay" onClick={() => setShowFullDetails(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div class="wrap">
+            <div class="details-grid">
             <div className="modal-header info">
               <div className="modal-icon">
                 <i className="bi bi-info-circle-fill"></i>
