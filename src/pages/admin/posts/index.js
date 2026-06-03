@@ -13,13 +13,28 @@ export default function ContentModeration() {
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
+  const [customReason, setCustomReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [postDetails, setPostDetails] = useState(null)
+  const [loadingDetails, setLoadingDetails] = useState(false)
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
     approved: 0,
     rejected: 0
   })
+
+  // Quick rejection reasons
+  const quickReasons = [
+    { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
+    { id: 2, reason: 'Spam or promotional', icon: 'bi-megaphone', color: '#f59e0b' },
+    { id: 3, reason: 'Misleading information', icon: 'bi-info-circle', color: '#f59e0b' },
+    { id: 4, reason: 'Copyright violation', icon: 'bi-c-circle', color: '#ef4444' },
+    { id: 5, reason: 'Offensive language', icon: 'bi-chat-dots', color: '#ef4444' },
+    { id: 6, reason: 'Duplicate content', icon: 'bi-files', color: '#6c757d' },
+    { id: 7, reason: 'Irrelevant to community', icon: 'bi-x-octagon', color: '#6c757d' },
+    { id: 8, reason: 'Harassment or bullying', icon: 'bi-shield-exclamation', color: '#dc2626' }
+  ]
 
   useEffect(() => {
     fetchPosts()
@@ -31,22 +46,6 @@ export default function ContentModeration() {
       setLoading(true)
       setError(null)
       
-      // First, test if we can access the table
-      const { error: testError } = await supabase
-        .from('content_moderation')
-        .select('count', { count: 'exact', head: true })
-
-      if (testError) {
-        console.error('Table access error:', testError)
-        if (testError.message.includes('row-level security')) {
-          setError('Unable to access content moderation data due to security policies. Please contact your system administrator.')
-        } else {
-          setError(`Database error: ${testError.message}`)
-        }
-        setLoading(false)
-        return
-      }
-
       let query = supabase
         .from('content_moderation')
         .select(`
@@ -65,11 +64,7 @@ export default function ContentModeration() {
 
       const { data, error } = await query
 
-      if (error) {
-        console.error('Fetch error:', error)
-        setError(`Error fetching data: ${error.message}`)
-        return
-      }
+      if (error) throw error
 
       setPosts(data || [])
     } catch (err) {
@@ -99,6 +94,60 @@ export default function ContentModeration() {
     }
   }
 
+  const fetchPostDetails = async (contentId, contentType) => {
+    setLoadingDetails(true)
+    try {
+      let details = null
+      
+      if (contentType === 'POST') {
+        const { data, error } = await supabase
+          .from('posts')
+          .select(`
+            *,
+            users!posts_user_id_fkey (
+              user_id,
+              full_name,
+              email,
+              profile_image
+            ),
+            post_categories!posts_category_id_fkey (
+              category_name
+            )
+          `)
+          .eq('post_id', contentId)
+          .single()
+        
+        if (!error && data) details = data
+      } else if (contentType === 'COMMENT') {
+        const { data, error } = await supabase
+          .from('comments')
+          .select(`
+            *,
+            users!comments_user_id_fkey (
+              user_id,
+              full_name,
+              email,
+              profile_image
+            ),
+            posts!comments_post_id_fkey (
+              post_id,
+              title
+            )
+          `)
+          .eq('comment_id', contentId)
+          .single()
+        
+        if (!error && data) details = data
+      }
+      
+      setPostDetails(details)
+    } catch (err) {
+      console.error('Error fetching post details:', err)
+    } finally {
+      setLoadingDetails(false)
+    }
+  }
+
   const updateStatus = async (postId, status, reason = null) => {
     setActionLoading(true)
     const session = JSON.parse(localStorage.getItem('adminSession'))
@@ -125,6 +174,7 @@ export default function ContentModeration() {
       fetchStats()
       setShowRejectModal(false)
       setRejectReason('')
+      setCustomReason('')
       setSelectedPost(null)
     } else {
       alert(`Error updating status: ${error.message}`)
@@ -137,16 +187,23 @@ export default function ContentModeration() {
     }
   }
 
+  const handleQuickReject = (reason) => {
+    setRejectReason(reason)
+    setCustomReason('')
+  }
+
   const handleReject = async () => {
-    if (!rejectReason.trim()) {
+    const finalReason = customReason || rejectReason
+    if (!finalReason.trim()) {
       alert('Please provide a reason for rejection')
       return
     }
-    await updateStatus(selectedPost.moderation_id, 'REJECTED', rejectReason)
+    await updateStatus(selectedPost.moderation_id, 'REJECTED', finalReason)
   }
 
-  const viewDetails = (post) => {
+  const viewDetails = async (post) => {
     setSelectedPost(post)
+    await fetchPostDetails(post.content_id, post.content_type)
     setShowDetailsModal(true)
   }
 
@@ -208,82 +265,8 @@ export default function ContentModeration() {
           <i className="bi bi-shield-exclamation"></i>
           <h3>Access Denied</h3>
           <p>{error}</p>
-          <div className="error-actions">
-            <button className="btn-primary" onClick={fetchPosts}>
-              <i className="bi bi-arrow-repeat"></i> Retry
-            </button>
-            <button className="btn-secondary" onClick={() => router.push('/admin/dashboard')}>
-              <i className="bi bi-house"></i> Back to Dashboard
-            </button>
-          </div>
-          <div className="info-box">
-            <i className="bi bi-info-circle-fill"></i>
-            <div>
-              <strong>Need help?</strong>
-              <p>Please contact your system administrator to check RLS policies for the content_moderation table.</p>
-            </div>
-          </div>
+          <button className="btn-primary" onClick={fetchPosts}>Retry</button>
         </div>
-        <style jsx>{`
-          .error-container {
-            text-align: center;
-            padding: 60px 20px;
-            background: white;
-            border-radius: 24px;
-            max-width: 600px;
-            margin: 40px auto;
-          }
-          .error-container i {
-            font-size: 48px;
-            color: #f59e0b;
-            margin-bottom: 16px;
-          }
-          .error-container h3 {
-            margin-bottom: 8px;
-            color: #1f2937;
-          }
-          .error-container p {
-            color: #6c757d;
-            margin-bottom: 24px;
-          }
-          .error-actions {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            margin-bottom: 24px;
-          }
-          .btn-primary {
-            padding: 10px 20px;
-            background: #4f46e5;
-            border: none;
-            border-radius: 10px;
-            color: white;
-            font-weight: 500;
-            cursor: pointer;
-          }
-          .btn-secondary {
-            padding: 10px 20px;
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 10px;
-            color: #495057;
-            font-weight: 500;
-            cursor: pointer;
-          }
-          .info-box {
-            background: #e7f1ff;
-            border-radius: 16px;
-            padding: 20px;
-            text-align: left;
-            display: flex;
-            gap: 16px;
-          }
-          .info-box i {
-            font-size: 24px;
-            color: #0d6efd;
-            margin: 0;
-          }
-        `}</style>
       </AdminLayout>
     )
   }
@@ -418,15 +401,12 @@ export default function ContentModeration() {
               <i className="bi bi-inbox"></i>
               <h4>No content found</h4>
               <p>There are no {filter.toLowerCase()} content items to display.</p>
-              <button className="btn-refresh" onClick={fetchPosts}>
-                <i className="bi bi-arrow-repeat"></i> Refresh
-              </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Details Modal with Full Content */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -436,49 +416,191 @@ export default function ContentModeration() {
               <button className="modal-close" onClick={() => setShowDetailsModal(false)}><i className="bi bi-x-lg"></i></button>
             </div>
             <div className="modal-body">
-              <div className="details-grid">
-                <div className="detail-item"><label>Content ID</label><code>{selectedPost.content_id}</code></div>
-                <div className="detail-item"><label>Content Type</label><span className="badge bg-secondary">{selectedPost.content_type}</span></div>
-                <div className="detail-item"><label>Status</label>{getStatusBadge(selectedPost.moderation_status)}</div>
-                <div className="detail-item"><label>Created At</label><span>{new Date(selectedPost.created_at).toLocaleString()}</span></div>
-                {selectedPost.moderation_reason && (
-                  <div className="detail-item full-width"><label>Rejection Reason</label><div className="rejection-box">{selectedPost.moderation_reason}</div></div>
-                )}
-                {selectedPost.reviewed_by_admin && (
-                  <div className="detail-item"><label>Reviewed By</label><span>{selectedPost.reviewed_by_admin?.full_name}</span></div>
-                )}
-                {selectedPost.reviewed_at && (
-                  <div className="detail-item"><label>Reviewed At</label><span>{new Date(selectedPost.reviewed_at).toLocaleString()}</span></div>
-                )}
-              </div>
+              {loadingDetails ? (
+                <div className="text-center py-5">
+                  <div className="spinner-border text-primary"></div>
+                  <p className="mt-2">Loading content details...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Content Metadata */}
+                  <div className="details-section">
+                    <h4><i className="bi bi-info-circle"></i> Content Information</h4>
+                    <div className="details-grid">
+                      <div className="detail-item">
+                        <label>Content ID</label>
+                        <code>{selectedPost.content_id}</code>
+                      </div>
+                      <div className="detail-item">
+                        <label>Content Type</label>
+                        <span className="badge bg-secondary">{selectedPost.content_type}</span>
+                      </div>
+                      <div className="detail-item">
+                        <label>Status</label>
+                        {getStatusBadge(selectedPost.moderation_status)}
+                      </div>
+                      <div className="detail-item">
+                        <label>Created At</label>
+                        <span>{new Date(selectedPost.created_at).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Author Information */}
+                  {postDetails && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-person-badge"></i> Author Information</h4>
+                      <div className="author-info">
+                        <div className="author-avatar">
+                          {postDetails.users?.profile_image ? (
+                            <img src={postDetails.users.profile_image} alt={postDetails.users.full_name} />
+                          ) : (
+                            <i className="bi bi-person-circle"></i>
+                          )}
+                        </div>
+                        <div className="author-details">
+                          <div className="author-name">{postDetails.users?.full_name || 'Unknown User'}</div>
+                          <div className="author-email">{postDetails.users?.email || 'No email'}</div>
+                          {postDetails.users?.user_id && (
+                            <div className="author-id">ID: {postDetails.users.user_id.slice(0, 8)}...</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Post Content */}
+                  {selectedPost.content_type === 'POST' && postDetails && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-file-text"></i> Post Content</h4>
+                      <div className="post-title">{postDetails.title}</div>
+                      <div className="post-content">{postDetails.content}</div>
+                      {postDetails.image_url && (
+                        <div className="post-image">
+                          <img src={postDetails.image_url} alt={postDetails.title} />
+                        </div>
+                      )}
+                      {postDetails.post_categories?.category_name && (
+                        <div className="post-category">
+                          <i className="bi bi-tag"></i> Category: {postDetails.post_categories.category_name}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Comment Content */}
+                  {selectedPost.content_type === 'COMMENT' && postDetails && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-chat"></i> Comment Content</h4>
+                      <div className="comment-post">
+                        <i className="bi bi-file-post"></i> On Post: {postDetails.posts?.title || 'Unknown Post'}
+                      </div>
+                      <div className="comment-text">{postDetails.comment_text}</div>
+                    </div>
+                  )}
+
+                  {/* Moderation Info */}
+                  {selectedPost.moderation_reason && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
+                      <div className="rejection-box">{selectedPost.moderation_reason}</div>
+                    </div>
+                  )}
+
+                  {selectedPost.reviewed_by_admin && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-person-check"></i> Moderation Info</h4>
+                      <div className="moderation-info">
+                        <div>Reviewed by: {selectedPost.reviewed_by_admin?.full_name}</div>
+                        <div>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <div className="modal-footer">
+              {selectedPost.moderation_status === 'PENDING' && (
+                <>
+                  <button className="btn-approve-modal" onClick={() => handleApprove(selectedPost)}>
+                    <i className="bi bi-check-lg"></i> Approve
+                  </button>
+                  <button className="btn-reject-modal" onClick={() => {
+                    setShowDetailsModal(false)
+                    setShowRejectModal(true)
+                  }}>
+                    <i className="bi bi-x-lg"></i> Reject
+                  </button>
+                </>
+              )}
               <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Reject Modal */}
+      {/* Quick Reject Modal with Preset Reasons */}
       {showRejectModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-container modal-reject" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header warning">
               <div className="modal-icon"><i className="bi bi-exclamation-triangle-fill"></i></div>
               <h3>Reject Content</h3>
               <button className="modal-close" onClick={() => setShowRejectModal(false)}><i className="bi bi-x-lg"></i></button>
             </div>
             <div className="modal-body">
-              <p>Are you sure you want to reject this content?</p>
-              <div className="form-group">
-                <label className="form-label">Reason for rejection *</label>
-                <textarea className="form-textarea" rows="4" placeholder="Please provide a reason for rejecting this content..." value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+              <p>Select a reason for rejecting this content:</p>
+              
+              {/* Quick Reason Buttons */}
+              <div className="quick-reasons">
+                {quickReasons.map((reason) => (
+                  <button
+                    key={reason.id}
+                    className={`quick-reason-btn ${rejectReason === reason.reason ? 'selected' : ''}`}
+                    onClick={() => handleQuickReject(reason.reason)}
+                    style={{ '--reason-color': reason.color }}
+                  >
+                    <i className={`bi ${reason.icon}`}></i>
+                    <span>{reason.reason}</span>
+                    {rejectReason === reason.reason && <i className="bi bi-check-circle-fill check-icon"></i>}
+                  </button>
+                ))}
               </div>
+
+              {/* Custom Reason */}
+              <div className="custom-reason">
+                <label className="form-label">Or provide a custom reason:</label>
+                <textarea
+                  className="form-textarea"
+                  rows="3"
+                  placeholder="Enter custom rejection reason..."
+                  value={customReason}
+                  onChange={(e) => {
+                    setCustomReason(e.target.value)
+                    setRejectReason('')
+                  }}
+                />
+              </div>
+
+              {!rejectReason && !customReason && (
+                <div className="warning-message">
+                  <i className="bi bi-info-circle"></i>
+                  Please select a reason or provide a custom reason before rejecting.
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
-              <button className="btn-primary danger" onClick={handleReject} disabled={actionLoading}>
-                {actionLoading ? <><span className="spinner-border spinner-border-sm me-2"></span>Processing...</> : 'Confirm Rejection'}
+              <button 
+                className="btn-primary danger" 
+                onClick={handleReject}
+                disabled={actionLoading || (!rejectReason && !customReason)}
+              >
+                {actionLoading ? (
+                  <><span className="spinner-border spinner-border-sm me-2"></span>Processing...</>
+                ) : (
+                  'Confirm Rejection'
+                )}
               </button>
             </div>
           </div>
@@ -493,6 +615,8 @@ export default function ContentModeration() {
         .header-icon i { font-size: 28px; color: white; }
         .header-title { font-size: 24px; font-weight: 700; color: #1f2937; margin: 0 0 4px 0; }
         .header-subtitle { color: #6c757d; margin: 0; font-size: 14px; }
+        
+        /* Stats Cards */
         .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 28px; }
         .stat-card { background: white; border-radius: 20px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: all 0.3s ease; }
         .stat-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
@@ -508,12 +632,16 @@ export default function ContentModeration() {
         .text-warning { color: #f59e0b; }
         .text-success { color: #10b981; }
         .text-danger { color: #ef4444; }
+        
+        /* Filter Tabs */
         .filter-tabs { display: flex; gap: 12px; margin-bottom: 28px; background: white; padding: 6px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
         .filter-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 20px; background: transparent; border: none; border-radius: 12px; font-size: 14px; font-weight: 500; color: #6c757d; transition: all 0.3s ease; cursor: pointer; }
         .filter-tab:hover { background: #f8f9fa; }
         .filter-tab.active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
         .tab-count { background: rgba(0,0,0,0.1); padding: 2px 8px; border-radius: 20px; font-size: 11px; margin-left: 6px; }
         .filter-tab.active .tab-count { background: rgba(255,255,255,0.2); }
+        
+        /* Content Grid */
         .content-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 24px; }
         .content-card { background: white; border-radius: 20px; overflow: hidden; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
         .content-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
@@ -539,10 +667,12 @@ export default function ContentModeration() {
         .reviewed-info { font-size: 11px; color: #6c757d; text-align: center; }
         .empty-state { text-align: center; padding: 80px 20px; background: white; border-radius: 24px; }
         .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
-        .btn-refresh { margin-top: 16px; padding: 10px 20px; background: #4f46e5; border: none; border-radius: 10px; color: white; cursor: pointer; }
+        
+        /* Modal */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
-        .modal-container { background: white; border-radius: 24px; width: 90%; max-width: 550px; animation: slideUp 0.3s ease; overflow: hidden; }
-        .modal-container.modal-lg { max-width: 700px; }
+        .modal-container { background: white; border-radius: 24px; width: 90%; max-width: 550px; animation: slideUp 0.3s ease; overflow: hidden; max-height: 90vh; overflow-y: auto; }
+        .modal-container.modal-lg { max-width: 800px; }
+        .modal-container.modal-reject { max-width: 600px; }
         .modal-header { padding: 24px 24px 16px; display: flex; align-items: center; gap: 12px; position: relative; border-bottom: 1px solid #e9ecef; }
         .modal-header.warning .modal-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .modal-header.info .modal-icon { background: rgba(59,130,246,0.1); color: #3b82f6; }
@@ -551,27 +681,68 @@ export default function ContentModeration() {
         .modal-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
         .modal-close { position: absolute; right: 20px; top: 20px; background: none; border: none; font-size: 18px; cursor: pointer; color: #9ca3af; }
         .modal-body { padding: 24px; }
-        .details-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-        .detail-item.full-width { grid-column: span 2; }
+        
+        /* Details Section */
+        .details-section { margin-bottom: 28px; }
+        .details-section h4 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #1f2937; }
+        .details-section h4 i { margin-right: 8px; color: #4f46e5; }
+        .details-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
         .detail-item label { font-size: 11px; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block; }
-        .rejection-box { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; font-size: 13px; }
-        .form-group { margin-top: 16px; }
+        .detail-item code { background: #f8f9fa; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+        
+        /* Author Info */
+        .author-info { display: flex; gap: 16px; padding: 16px; background: #f8f9fa; border-radius: 16px; }
+        .author-avatar { width: 60px; height: 60px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .author-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .author-avatar i { font-size: 32px; color: white; }
+        .author-name { font-weight: 600; font-size: 16px; color: #1f2937; margin-bottom: 4px; }
+        .author-email { font-size: 12px; color: #6c757d; margin-bottom: 2px; }
+        .author-id { font-size: 10px; color: #9ca3af; font-family: monospace; }
+        
+        /* Post Content */
+        .post-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #1f2937; }
+        .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; margin-bottom: 16px; line-height: 1.6; color: #4b5563; }
+        .post-image { margin-bottom: 16px; }
+        .post-image img { max-width: 100%; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .post-category { font-size: 12px; color: #6c757d; }
+        .comment-text { background: #f8f9fa; padding: 16px; border-radius: 12px; line-height: 1.6; color: #4b5563; }
+        .comment-post { background: #e7f1ff; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: #0d6efd; }
+        .rejection-box { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
+        .moderation-info { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+        
+        /* Quick Reasons */
+        .quick-reasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
+        .quick-reason-btn { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 12px; cursor: pointer; transition: all 0.3s ease; position: relative; }
+        .quick-reason-btn:hover { background: #e9ecef; transform: translateY(-2px); }
+        .quick-reason-btn.selected { background: #fef3c7; border-color: #f59e0b; }
+        .quick-reason-btn i { font-size: 18px; color: var(--reason-color); }
+        .quick-reason-btn .check-icon { position: absolute; right: 12px; top: 12px; color: #10b981; font-size: 16px; }
+        .custom-reason { margin-top: 20px; }
         .form-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #374151; }
         .form-textarea { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
         .form-textarea:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+        .warning-message { background: #fff3cd; padding: 12px; border-radius: 12px; margin-top: 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #856404; }
+        
+        /* Modal Footer Buttons */
         .modal-footer { padding: 16px 24px 24px; display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid #e9ecef; }
         .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; font-weight: 500; }
         .btn-primary { padding: 10px 24px; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; }
         .btn-primary.danger { background: #ef4444; color: white; }
+        .btn-primary.danger:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
         @media (max-width: 768px) {
           .stats-grid { grid-template-columns: repeat(2, 1fr); }
           .filter-tabs { flex-wrap: wrap; }
           .filter-tab { flex: auto; }
           .content-grid { grid-template-columns: 1fr; }
           .details-grid { grid-template-columns: 1fr; }
-          .detail-item.full-width { grid-column: span 1; }
+          .quick-reasons { grid-template-columns: 1fr; }
+          .author-info { flex-direction: column; text-align: center; }
         }
       `}</style>
     </AdminLayout>
