@@ -12,8 +12,12 @@ export default function ReportsManagement() {
   const [selectedReport, setSelectedReport] = useState(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showActionModal, setShowActionModal] = useState(false)
+  const [showGenerateReportModal, setShowGenerateReportModal] = useState(false)
   const [actionType, setActionType] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [generatingReport, setGeneratingReport] = useState(false)
+  const [reportType, setReportType] = useState('system')
+  const [dateRange, setDateRange] = useState('month')
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -106,10 +110,182 @@ export default function ReportsManagement() {
       fetchStats()
       setShowActionModal(false)
       setSelectedReport(null)
-      alert(`Report ${status.toLowerCase()} successfully!`)
     } else {
       alert(`Error updating report: ${error.message}`)
     }
+  }
+
+  // Generate Report Function
+  const generateReport = async () => {
+    setGeneratingReport(true)
+    
+    try {
+      // Calculate date range
+      const endDate = new Date()
+      let startDate = new Date()
+      
+      switch(dateRange) {
+        case 'today':
+          startDate.setHours(0, 0, 0, 0)
+          break
+        case 'week':
+          startDate.setDate(startDate.getDate() - 7)
+          break
+        case 'month':
+          startDate.setMonth(startDate.getMonth() - 1)
+          break
+        case 'quarter':
+          startDate.setMonth(startDate.getMonth() - 3)
+          break
+        case 'year':
+          startDate.setFullYear(startDate.getFullYear() - 1)
+          break
+        default:
+          startDate.setMonth(startDate.getMonth() - 1)
+      }
+
+      // Fetch data based on report type
+      let reportData = {}
+      
+      if (reportType === 'system' || reportType === 'all') {
+        // Fetch system reports
+        const { data: systemReports } = await supabase
+          .from('system_reports')
+          .select('*')
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+        
+        reportData.systemReports = systemReports || []
+      }
+      
+      if (reportType === 'user' || reportType === 'all') {
+        // Fetch user reports
+        const { data: userReports } = await supabase
+          .from('system_reports')
+          .select('*, admin_users!reported_user_id(full_name, email)')
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+          .not('reported_user_id', 'is', null)
+        
+        reportData.userReports = userReports || []
+      }
+      
+      if (reportType === 'content' || reportType === 'all') {
+        // Fetch content reports
+        const { data: contentReports } = await supabase
+          .from('system_reports')
+          .select('*')
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+          .not('reported_post_id', 'is', null)
+        
+        reportData.contentReports = contentReports || []
+      }
+
+      // Create CSV content
+      const csvRows = []
+      
+      // Add headers
+      csvRows.push(['Report ID', 'Type', 'Reason', 'Description', 'Status', 'Created At', 'Reviewed By', 'Reviewed At'].join(','))
+      
+      // Add data rows
+      const allReports = [
+        ...(reportData.systemReports || []).map(r => ({ ...r, type: 'System' })),
+        ...(reportData.userReports || []).map(r => ({ ...r, type: 'User' })),
+        ...(reportData.contentReports || []).map(r => ({ ...r, type: 'Content' }))
+      ]
+      
+      allReports.forEach(report => {
+        csvRows.push([
+          `"${report.report_id}"`,
+          `"${report.type}"`,
+          `"${report.report_reason?.replace(/"/g, '""') || ''}"`,
+          `"${report.report_description?.replace(/"/g, '""') || ''}"`,
+          `"${report.report_status}"`,
+          `"${new Date(report.created_at).toLocaleString()}"`,
+          `"${report.reviewed_by || ''}"`,
+          `"${report.reviewed_at ? new Date(report.reviewed_at).toLocaleString() : ''}"`
+        ].join(','))
+      })
+      
+      const csvContent = csvRows.join('\n')
+      
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `reports_${reportType}_${new Date().toISOString().split('T')[0]}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      
+      alert('Report generated successfully!')
+      setShowGenerateReportModal(false)
+      
+    } catch (err) {
+      console.error('Error generating report:', err)
+      alert('Error generating report: ' + err.message)
+    } finally {
+      setGeneratingReport(false)
+    }
+  }
+
+  // Export current view to PDF
+  const exportToPDF = async () => {
+    const printWindow = window.open('', '_blank')
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Reports Export - ${new Date().toLocaleString()}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            h1 { color: #333; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            .header { margin-bottom: 20px; }
+            .stats { display: flex; gap: 20px; margin-bottom: 20px; }
+            .stat-box { padding: 10px; background: #f8f9fa; border-radius: 8px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Reports Management Report</h1>
+            <p>Generated on: ${new Date().toLocaleString()}</p>
+          </div>
+          <div class="stats">
+            <div class="stat-box"><strong>Total Reports:</strong> ${stats.total}</div>
+            <div class="stat-box"><strong>Pending:</strong> ${stats.pending}</div>
+            <div class="stat-box"><strong>Resolved:</strong> ${stats.resolved}</div>
+            <div class="stat-box"><strong>Dismissed:</strong> ${stats.dismissed}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Report ID</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Created At</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${reports.map(report => `
+                <tr>
+                  <td>${report.report_id?.slice(0, 8)}</td>
+                  <td>${report.report_reason}</td>
+                  <td>${report.report_status}</td>
+                  <td>${new Date(report.created_at).toLocaleString()}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.print()
   }
 
   const viewDetails = (report) => {
@@ -184,38 +360,6 @@ export default function ReportsManagement() {
           <p>{error}</p>
           <button className="btn-primary" onClick={fetchReports}>Retry</button>
         </div>
-        <style jsx>{`
-          .error-container {
-            text-align: center;
-            padding: 60px 20px;
-            background: white;
-            border-radius: 24px;
-            margin: 40px auto;
-            max-width: 500px;
-          }
-          .error-container i {
-            font-size: 48px;
-            color: #dc3545;
-            margin-bottom: 16px;
-          }
-          .error-container h3 {
-            margin-bottom: 8px;
-            color: #1f2937;
-          }
-          .error-container p {
-            color: #6c757d;
-            margin-bottom: 24px;
-          }
-          .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            padding: 10px 24px;
-            border-radius: 12px;
-            color: white;
-            font-weight: 500;
-            cursor: pointer;
-          }
-        `}</style>
       </AdminLayout>
     )
   }
@@ -223,7 +367,7 @@ export default function ReportsManagement() {
   return (
     <AdminLayout title="Reports Management">
       <div className="reports-container">
-        {/* Header */}
+        {/* Header with Generate Report Button */}
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
@@ -233,6 +377,16 @@ export default function ReportsManagement() {
               <h1 className="header-title">Reports Management</h1>
               <p className="header-subtitle">Review and manage user reports</p>
             </div>
+          </div>
+          <div className="header-actions">
+            <button className="btn-generate" onClick={() => setShowGenerateReportModal(true)}>
+              <i className="bi bi-file-earmark-spreadsheet-fill"></i>
+              Generate Report
+            </button>
+            <button className="btn-export" onClick={exportToPDF}>
+              <i className="bi bi-printer-fill"></i>
+              Export
+            </button>
           </div>
         </div>
 
@@ -316,45 +470,25 @@ export default function ReportsManagement() {
                     </div>
                     {getSeverityBadge(report.severity_level)}
                   </div>
-                  {report.reported_user_id && (
-                    <div className="reported-user">
-                      <i className="bi bi-person"></i>
-                      Reported User ID: {report.reported_user_id?.slice(0, 12)}...
-                    </div>
-                  )}
                 </div>
                 
                 <div className="report-card-footer">
                   {report.report_status === 'PENDING' ? (
                     <div className="action-buttons">
-                      <button 
-                        className="btn-resolve"
-                        onClick={() => openActionModal(report, 'RESOLVED')}
-                      >
-                        <i className="bi bi-check-lg"></i>
-                        Resolve
+                      <button className="btn-resolve" onClick={() => openActionModal(report, 'RESOLVED')}>
+                        <i className="bi bi-check-lg"></i> Resolve
                       </button>
-                      <button 
-                        className="btn-dismiss"
-                        onClick={() => openActionModal(report, 'DISMISSED')}
-                      >
-                        <i className="bi bi-x-lg"></i>
-                        Dismiss
+                      <button className="btn-dismiss" onClick={() => openActionModal(report, 'DISMISSED')}>
+                        <i className="bi bi-x-lg"></i> Dismiss
                       </button>
-                      <button 
-                        className="btn-view"
-                        onClick={() => viewDetails(report)}
-                      >
-                        <i className="bi bi-eye"></i>
-                        Details
+                      <button className="btn-view" onClick={() => viewDetails(report)}>
+                        <i className="bi bi-eye"></i> Details
                       </button>
                     </div>
                   ) : (
                     <div className="reviewed-info">
                       <i className="bi bi-person-check"></i>
                       Reviewed by {report.reviewed_by_admin?.full_name || 'System'}
-                      <br />
-                      <small>{report.reviewed_at ? new Date(report.reviewed_at).toLocaleString() : 'Unknown'}</small>
                     </div>
                   )}
                 </div>
@@ -369,6 +503,73 @@ export default function ReportsManagement() {
           )}
         </div>
       </div>
+
+      {/* Generate Report Modal */}
+      {showGenerateReportModal && (
+        <div className="modal-overlay" onClick={() => setShowGenerateReportModal(false)}>
+          <div className="modal-container modal-generate" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header info">
+              <div className="modal-icon"><i className="bi bi-file-earmark-spreadsheet-fill"></i></div>
+              <h3>Generate Report</h3>
+              <button className="modal-close" onClick={() => setShowGenerateReportModal(false)}><i className="bi bi-x-lg"></i></button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Report Type</label>
+                <select className="form-select" value={reportType} onChange={(e) => setReportType(e.target.value)}>
+                  <option value="system">System Reports</option>
+                  <option value="user">User Reports</option>
+                  <option value="content">Content Reports</option>
+                  <option value="all">All Reports</option>
+                </select>
+              </div>
+              
+              <div className="form-group">
+                <label className="form-label">Date Range</label>
+                <select className="form-select" value={dateRange} onChange={(e) => setDateRange(e.target.value)}>
+                  <option value="today">Today</option>
+                  <option value="week">Last 7 Days</option>
+                  <option value="month">Last 30 Days</option>
+                  <option value="quarter">Last 3 Months</option>
+                  <option value="year">Last Year</option>
+                </select>
+              </div>
+
+              <div className="report-preview">
+                <h4>Report Summary</h4>
+                <div className="preview-stats">
+                  <div className="preview-stat">
+                    <span>Total Reports:</span>
+                    <strong>{stats.total}</strong>
+                  </div>
+                  <div className="preview-stat">
+                    <span>Pending:</span>
+                    <strong className="text-warning">{stats.pending}</strong>
+                  </div>
+                  <div className="preview-stat">
+                    <span>Resolved:</span>
+                    <strong className="text-success">{stats.resolved}</strong>
+                  </div>
+                  <div className="preview-stat">
+                    <span>Dismissed:</span>
+                    <strong className="text-danger">{stats.dismissed}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowGenerateReportModal(false)}>Cancel</button>
+              <button className="btn-primary success" onClick={generateReport} disabled={generatingReport}>
+                {generatingReport ? (
+                  <><span className="spinner-border spinner-border-sm me-2"></span>Generating...</>
+                ) : (
+                  <><i className="bi bi-download"></i> Generate Report</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Details Modal */}
       {showDetailsModal && selectedReport && (
@@ -413,40 +614,6 @@ export default function ReportsManagement() {
                   <div className="report-description-box">{selectedReport.report_description || 'No description provided'}</div>
                 </div>
               </div>
-
-              {selectedReport.reported_user_id && (
-                <div className="details-section">
-                  <h4><i className="bi bi-person"></i> Reported User</h4>
-                  <div className="user-info-box">
-                    <div><strong>User ID:</strong> {selectedReport.reported_user_id}</div>
-                    {selectedReport.reported_user && (
-                      <>
-                        <div><strong>Name:</strong> {selectedReport.reported_user.full_name}</div>
-                        <div><strong>Email:</strong> {selectedReport.reported_user.email}</div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {selectedReport.reported_post_id && (
-                <div className="details-section">
-                  <h4><i className="bi bi-file-post"></i> Reported Post</h4>
-                  <div className="post-info-box">
-                    <div><strong>Post ID:</strong> {selectedReport.reported_post_id}</div>
-                  </div>
-                </div>
-              )}
-
-              {selectedReport.reviewed_by_admin && (
-                <div className="details-section">
-                  <h4><i className="bi bi-person-check"></i> Moderation Info</h4>
-                  <div className="moderation-info-box">
-                    <div><strong>Reviewed by:</strong> {selectedReport.reviewed_by_admin?.full_name}</div>
-                    <div><strong>Reviewed at:</strong> {new Date(selectedReport.reviewed_at).toLocaleString()}</div>
-                  </div>
-                </div>
-              )}
             </div>
             <div className="modal-footer">
               {selectedReport.report_status === 'PENDING' && (
@@ -526,9 +693,13 @@ export default function ReportsManagement() {
           margin: 0 auto;
         }
 
-        /* Header */
         .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           margin-bottom: 28px;
+          flex-wrap: wrap;
+          gap: 16px;
         }
 
         .header-content {
@@ -563,6 +734,43 @@ export default function ReportsManagement() {
           color: #6c757d;
           margin: 0;
           font-size: 14px;
+        }
+
+        .header-actions {
+          display: flex;
+          gap: 12px;
+        }
+
+        .btn-generate, .btn-export {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 20px;
+          border: none;
+          border-radius: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-generate {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+        }
+
+        .btn-generate:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-export {
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          color: #495057;
+        }
+
+        .btn-export:hover {
+          background: #e9ecef;
         }
 
         /* Stats Cards */
@@ -676,10 +884,6 @@ export default function ReportsManagement() {
           background: rgba(255, 255, 255, 0.2);
         }
 
-        .tab-count.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .tab-count.resolved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .tab-count.dismissed { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-
         /* Reports Grid */
         .reports-grid {
           display: grid;
@@ -729,7 +933,6 @@ export default function ReportsManagement() {
         .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .status-badge.resolved { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .status-badge.dismissed { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .status-badge.reviewed { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
         .severity-badge {
           display: inline-flex;
@@ -777,15 +980,6 @@ export default function ReportsManagement() {
           align-items: center;
           font-size: 11px;
           color: #9ca3af;
-          margin-bottom: 8px;
-        }
-
-        .reported-user {
-          font-size: 11px;
-          color: #9ca3af;
-          padding: 8px 12px;
-          background: #f8f9fa;
-          border-radius: 8px;
         }
 
         .report-card-footer {
@@ -812,35 +1006,12 @@ export default function ReportsManagement() {
           transition: all 0.3s ease;
         }
 
-        .btn-resolve {
-          background: rgba(16, 185, 129, 0.1);
-          color: #10b981;
-        }
-
-        .btn-resolve:hover {
-          background: #10b981;
-          color: white;
-        }
-
-        .btn-dismiss {
-          background: rgba(239, 68, 68, 0.1);
-          color: #ef4444;
-        }
-
-        .btn-dismiss:hover {
-          background: #ef4444;
-          color: white;
-        }
-
-        .btn-view {
-          background: rgba(79, 70, 229, 0.1);
-          color: #4f46e5;
-        }
-
-        .btn-view:hover {
-          background: #4f46e5;
-          color: white;
-        }
+        .btn-resolve { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .btn-resolve:hover { background: #10b981; color: white; }
+        .btn-dismiss { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .btn-dismiss:hover { background: #ef4444; color: white; }
+        .btn-view { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .btn-view:hover { background: #4f46e5; color: white; }
 
         .reviewed-info {
           font-size: 11px;
@@ -856,11 +1027,80 @@ export default function ReportsManagement() {
           grid-column: span 3;
         }
 
-        .empty-state i {
-          font-size: 64px;
-          color: #cbd5e1;
-          margin-bottom: 16px;
+        /* Generate Report Modal */
+        .modal-generate {
+          max-width: 450px;
+        }
+
+        .form-group {
+          margin-bottom: 20px;
+        }
+
+        .form-label {
           display: block;
+          font-size: 13px;
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: #374151;
+        }
+
+        .form-select {
+          width: 100%;
+          padding: 10px 12px;
+          border: 2px solid #e9ecef;
+          border-radius: 10px;
+          font-size: 14px;
+        }
+
+        .report-preview {
+          background: #f8f9fa;
+          border-radius: 12px;
+          padding: 16px;
+          margin-top: 20px;
+        }
+
+        .report-preview h4 {
+          font-size: 14px;
+          font-weight: 600;
+          margin-bottom: 12px;
+        }
+
+        .preview-stats {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+        }
+
+        .preview-stat {
+          display: flex;
+          justify-content: space-between;
+          font-size: 13px;
+        }
+
+        .report-summary {
+          background: #f8f9fa;
+          padding: 12px;
+          border-radius: 12px;
+          margin: 16px 0;
+        }
+
+        .warning-message {
+          padding: 12px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+        }
+
+        .warning-message.success {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .warning-message.danger {
+          background: #fee2e2;
+          color: #991b1b;
         }
 
         /* Modal */
@@ -949,11 +1189,6 @@ export default function ReportsManagement() {
           color: #1f2937;
         }
 
-        .details-section h4 i {
-          margin-right: 8px;
-          color: #4f46e5;
-        }
-
         .details-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -970,11 +1205,11 @@ export default function ReportsManagement() {
           display: block;
         }
 
-        .report-detail-box, .report-description-box {
+        .report-detail-box {
           margin-bottom: 16px;
         }
 
-        .report-detail-box label, .report-description-box label {
+        .report-detail-box label {
           font-size: 12px;
           font-weight: 600;
           margin-bottom: 6px;
@@ -994,38 +1229,6 @@ export default function ReportsManagement() {
           border-radius: 12px;
           color: #4b5563;
           line-height: 1.5;
-        }
-
-        .user-info-box, .post-info-box, .moderation-info-box {
-          background: #f8f9fa;
-          padding: 12px;
-          border-radius: 12px;
-        }
-
-        .report-summary {
-          background: #f8f9fa;
-          padding: 12px;
-          border-radius: 12px;
-          margin: 16px 0;
-        }
-
-        .warning-message {
-          padding: 12px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-        }
-
-        .warning-message.success {
-          background: #d1fae5;
-          color: #065f46;
-        }
-
-        .warning-message.danger {
-          background: #fee2e2;
-          color: #991b1b;
         }
 
         .modal-footer {
@@ -1107,6 +1310,15 @@ export default function ReportsManagement() {
           }
           
           .details-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .preview-stats {
             grid-template-columns: 1fr;
           }
         }
