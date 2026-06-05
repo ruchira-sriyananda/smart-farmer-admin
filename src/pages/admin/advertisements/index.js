@@ -1,3 +1,4 @@
+// pages/admin/advertisements/index.js
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
@@ -10,44 +11,57 @@ export default function Advertisements() {
   const [error, setError] = useState(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
+  const [showPackageModal, setShowPackageModal] = useState(false)
+  const [showPackageListModal, setShowPackageListModal] = useState(false)
   const [selectedAd, setSelectedAd] = useState(null)
+  const [selectedPackage, setSelectedPackage] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [filter, setFilter] = useState('all')
   const [dateRange, setDateRange] = useState('all')
   const [showFilters, setShowFilters] = useState(false)
-  const [subscriptionPlans, setSubscriptionPlans] = useState([])
-  const [selectedPlan, setSelectedPlan] = useState(null)
+  const [packages, setPackages] = useState([])
+  const [editingPackage, setEditingPackage] = useState(null)
   
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     image_url: '',
-    ad_type: 'PREMIUM',
-    duration_days: 30,
+    package_id: '',
     target_audience: 'ALL',
-    status: 'ACTIVE'
+    status: 'PENDING'
+  })
+
+  const [packageFormData, setPackageFormData] = useState({
+    package_name: '',
+    description: '',
+    price: '',
+    duration_days: 30,
+    ad_type: 'STANDARD',
+    features: [],
+    is_active: true,
+    display_order: 0
   })
 
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
     expired: 0,
+    pending: 0,
     clicks: 0,
     impressions: 0,
     ctr: 0,
     revenue: 0,
-    activeSubscriptions: 0
+    totalSubscriptions: 0
   })
 
   useEffect(() => {
     fetchAds()
-    fetchSubscriptionPlans()
+    fetchPackages()
     
     const subscription = supabase
       .channel('ads_changes')
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'advertisements' },
+        { event: '*', schema: 'public', table: 'mobile_advertisements' },
         () => fetchAds()
       )
       .subscribe()
@@ -55,25 +69,36 @@ export default function Advertisements() {
     return () => subscription.unsubscribe()
   }, [])
 
+  const fetchPackages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('subscription_packages')
+        .select('*')
+        .order('display_order', { ascending: true })
+
+      if (error) throw error
+      setPackages(data || [])
+    } catch (err) {
+      console.error('Error fetching packages:', err)
+    }
+  }
+
   const fetchAds = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      // Build the query based on filters
       let query = supabase
-        .from('advertisements')
-        .select('*')
+        .from('mobile_advertisements')
+        .select(`
+          *,
+          subscription_packages (*),
+          user_subscriptions (*)
+        `)
         .order('created_at', { ascending: false })
 
       if (filter !== 'all') {
-        if (filter === 'expired') {
-          // For expired, we need to check both status and date
-          const now = new Date().toISOString()
-          query = query.or(`status.eq.EXPIRED,end_date.lt.${now}`)
-        } else {
-          query = query.eq('status', filter.toUpperCase())
-        }
+        query = query.eq('status', filter.toUpperCase())
       }
 
       if (dateRange !== 'all') {
@@ -99,61 +124,8 @@ export default function Advertisements() {
 
       if (error) throw error
 
-      // Fetch user information separately
-      if (data && data.length > 0) {
-        // Get unique user IDs
-        const userIds = [...new Set(data.map(ad => ad.user_id).filter(id => id))]
-        
-        if (userIds.length > 0) {
-          // Fetch admin users from the correct table (likely 'users' or 'profiles')
-          // Based on your schema, try 'users' first, if not then 'admin_users'
-          let adminUsers = []
-          let usersError = null
-          
-          // Try to fetch from 'users' table first
-          const { data: usersData, error: usersErrorResponse } = await supabase
-            .from('users')
-            .select('id, full_name, email')
-            .in('id', userIds)
-          
-          if (!usersErrorResponse && usersData) {
-            adminUsers = usersData
-          } else {
-            // Fallback to 'admin_users' table
-            const { data: adminUsersData, error: adminUsersError } = await supabase
-              .from('admin_users')
-              .select('admin_id, full_name, email')
-              .in('admin_id', userIds)
-            
-            if (!adminUsersError && adminUsersData) {
-              adminUsers = adminUsersData
-            }
-          }
-          
-          // Create a map for easy lookup
-          const userMap = {}
-          adminUsers.forEach(user => {
-            // Handle different ID field names
-            const userId = user.id || user.admin_id
-            userMap[userId] = user
-          })
-          
-          // Merge user data into ads
-          const adsWithUsers = data.map(ad => ({
-            ...ad,
-            user_details: userMap[ad.user_id] || { full_name: 'Unknown User' }
-          }))
-          
-          setAds(adsWithUsers)
-          calculateStats(adsWithUsers)
-        } else {
-          setAds(data)
-          calculateStats(data)
-        }
-      } else {
-        setAds([])
-        calculateStats([])
-      }
+      setAds(data || [])
+      calculateStats(data || [])
     } catch (err) {
       console.error('Error fetching ads:', err)
       setError(err.message)
@@ -162,145 +134,203 @@ export default function Advertisements() {
     }
   }
 
-  const fetchSubscriptionPlans = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('ad_packages')
-        .select('*')
-        .order('price', { ascending: true })
-
-      if (!error && data && data.length > 0) {
-        setSubscriptionPlans(data)
-      } else {
-        // Default plans if no data in database
-        setSubscriptionPlans([
-          { package_id: 'basic', package_name: 'Basic', price: 49, duration_days: 30, features: ['Standard placement', 'Basic targeting', '30 days duration'] },
-          { package_id: 'premium', package_name: 'Premium', price: 99, duration_days: 30, features: ['Premium placement', 'Advanced targeting', '30 days duration', 'Priority support'] },
-          { package_id: 'featured', package_name: 'Featured', price: 199, duration_days: 30, features: ['Featured placement', 'Advanced targeting', '30 days duration', 'Priority support', 'Analytics dashboard'] }
-        ])
-      }
-    } catch (err) {
-      console.error('Error fetching subscription plans:', err)
-    }
-  }
-
   const calculateStats = (adsData) => {
     const now = new Date()
     const active = adsData.filter(ad => ad.status === 'ACTIVE' && new Date(ad.end_date) > now).length
     const expired = adsData.filter(ad => ad.status === 'EXPIRED' || (ad.end_date && new Date(ad.end_date) <= now)).length
+    const pending = adsData.filter(ad => ad.status === 'PENDING').length
     const totalClicks = adsData.reduce((sum, ad) => sum + (ad.clicks || 0), 0)
     const totalImpressions = adsData.reduce((sum, ad) => sum + (ad.impressions || 0), 0)
     const totalRevenue = adsData.reduce((sum, ad) => sum + (ad.amount_paid || 0), 0)
-    const activeSubscriptions = adsData.filter(ad => ad.subscription_active === true && ad.status === 'ACTIVE').length
     
     setStats({
       total: adsData.length,
       active: active,
       expired: expired,
+      pending: pending,
       clicks: totalClicks,
       impressions: totalImpressions,
       ctr: totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : 0,
       revenue: totalRevenue,
-      activeSubscriptions: activeSubscriptions
+      totalSubscriptions: packages.length
     })
   }
 
-  const createAd = async () => {
+  const createPackage = async () => {
     setActionLoading(true)
-    const session = JSON.parse(localStorage.getItem('adminSession'))
     
     try {
+      const { error } = await supabase
+        .from('subscription_packages')
+        .insert({
+          package_name: packageFormData.package_name,
+          description: packageFormData.description,
+          price: parseFloat(packageFormData.price),
+          duration_days: parseInt(packageFormData.duration_days),
+          ad_type: packageFormData.ad_type,
+          features: packageFormData.features,
+          is_active: packageFormData.is_active,
+          display_order: packageFormData.display_order
+        })
+
+      if (error) throw error
+
+      alert('Package created successfully!')
+      setShowPackageModal(false)
+      resetPackageForm()
+      fetchPackages()
+    } catch (err) {
+      console.error('Error creating package:', err)
+      alert('Error creating package: ' + err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const updatePackage = async () => {
+    setActionLoading(true)
+    
+    try {
+      const { error } = await supabase
+        .from('subscription_packages')
+        .update({
+          package_name: packageFormData.package_name,
+          description: packageFormData.description,
+          price: parseFloat(packageFormData.price),
+          duration_days: parseInt(packageFormData.duration_days),
+          ad_type: packageFormData.ad_type,
+          features: packageFormData.features,
+          is_active: packageFormData.is_active,
+          display_order: packageFormData.display_order,
+          updated_at: new Date().toISOString()
+        })
+        .eq('package_id', editingPackage.package_id)
+
+      if (error) throw error
+
+      alert('Package updated successfully!')
+      setShowPackageModal(false)
+      resetPackageForm()
+      setEditingPackage(null)
+      fetchPackages()
+    } catch (err) {
+      console.error('Error updating package:', err)
+      alert('Error updating package: ' + err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const deletePackage = async (packageId) => {
+    if (!confirm('Are you sure you want to delete this package? This may affect existing subscriptions.')) return
+    
+    setActionLoading(true)
+    
+    try {
+      const { error } = await supabase
+        .from('subscription_packages')
+        .delete()
+        .eq('package_id', packageId)
+
+      if (error) throw error
+
+      alert('Package deleted successfully!')
+      fetchPackages()
+    } catch (err) {
+      console.error('Error deleting package:', err)
+      alert('Error deleting package: ' + err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const approveAd = async (adId) => {
+    setActionLoading(true)
+    
+    try {
+      const ad = ads.find(a => a.ad_id === adId)
+      const pkg = packages.find(p => p.package_id === ad.package_id)
+      
       const startDate = new Date()
       const endDate = new Date()
-      endDate.setDate(endDate.getDate() + formData.duration_days)
+      endDate.setDate(endDate.getDate() + (pkg?.duration_days || 30))
 
       const { error } = await supabase
-        .from('advertisements')
-        .insert({
-          title: formData.title,
-          description: formData.description,
-          image_url: formData.image_url,
-          ad_type: formData.ad_type,
+        .from('mobile_advertisements')
+        .update({ 
+          status: 'ACTIVE',
           start_date: startDate.toISOString(),
           end_date: endDate.toISOString(),
-          status: formData.status,
-          target_audience: formData.target_audience,
-          user_id: session?.admin?.admin_id || session?.user?.id,
-          created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
+        .eq('ad_id', adId)
 
       if (error) throw error
 
-      alert('Advertisement created successfully!')
-      setShowCreateModal(false)
-      resetForm()
+      alert('Ad approved successfully!')
       fetchAds()
     } catch (err) {
-      console.error('Error creating ad:', err)
-      alert('Error creating ad: ' + err.message)
+      console.error('Error approving ad:', err)
+      alert('Error approving ad: ' + err.message)
     } finally {
       setActionLoading(false)
     }
   }
 
-  const updateAdStatus = async (adId, newStatus) => {
+  const rejectAd = async (adId) => {
+    const reason = prompt('Please provide a reason for rejection:')
+    if (!reason) return
+    
     setActionLoading(true)
     
     try {
       const { error } = await supabase
-        .from('advertisements')
+        .from('mobile_advertisements')
         .update({ 
-          status: newStatus,
+          status: 'REJECTED',
+          rejection_reason: reason,
           updated_at: new Date().toISOString()
         })
         .eq('ad_id', adId)
 
       if (error) throw error
 
-      alert(`Ad ${newStatus.toLowerCase()} successfully!`)
+      alert('Ad rejected successfully!')
       fetchAds()
     } catch (err) {
-      console.error('Error updating ad:', err)
-      alert('Error updating ad: ' + err.message)
+      console.error('Error rejecting ad:', err)
+      alert('Error rejecting ad: ' + err.message)
     } finally {
       setActionLoading(false)
     }
   }
 
-  const deleteAd = async (adId) => {
-    if (!confirm('Are you sure you want to delete this advertisement?')) return
-    
-    setActionLoading(true)
-    
-    try {
-      const { error } = await supabase
-        .from('advertisements')
-        .delete()
-        .eq('ad_id', adId)
-
-      if (error) throw error
-
-      alert('Advertisement deleted successfully!')
-      fetchAds()
-    } catch (err) {
-      console.error('Error deleting ad:', err)
-      alert('Error deleting ad: ' + err.message)
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const resetForm = () => {
-    setFormData({
-      title: '',
+  const resetPackageForm = () => {
+    setPackageFormData({
+      package_name: '',
       description: '',
-      image_url: '',
-      ad_type: 'PREMIUM',
+      price: '',
       duration_days: 30,
-      target_audience: 'ALL',
-      status: 'ACTIVE'
+      ad_type: 'STANDARD',
+      features: [],
+      is_active: true,
+      display_order: 0
     })
+  }
+
+  const editPackage = (pkg) => {
+    setEditingPackage(pkg)
+    setPackageFormData({
+      package_name: pkg.package_name,
+      description: pkg.description || '',
+      price: pkg.price,
+      duration_days: pkg.duration_days,
+      ad_type: pkg.ad_type,
+      features: pkg.features || [],
+      is_active: pkg.is_active,
+      display_order: pkg.display_order
+    })
+    setShowPackageModal(true)
   }
 
   const getStatusBadge = (status, endDate) => {
@@ -327,72 +357,6 @@ export default function Advertisements() {
           <div className="loading-spinner"></div>
           <p>Loading advertisements...</p>
         </div>
-        <style jsx>{`
-          .loading-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 400px;
-          }
-          .loading-spinner {
-            width: 48px;
-            height: 48px;
-            border: 3px solid #e9ecef;
-            border-top-color: #4f46e5;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 16px;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </AdminLayout>
-    )
-  }
-
-  if (error && ads.length === 0) {
-    return (
-      <AdminLayout title="Advertisements">
-        <div className="error-container">
-          <i className="bi bi-exclamation-triangle-fill"></i>
-          <h3>Failed to Load Advertisements</h3>
-          <p>{error}</p>
-          <button className="retry-btn" onClick={fetchAds}>Retry</button>
-        </div>
-        <style jsx>{`
-          .error-container {
-            text-align: center;
-            padding: 60px 20px;
-            background: white;
-            border-radius: 24px;
-            max-width: 500px;
-            margin: 40px auto;
-          }
-          .error-container i {
-            font-size: 48px;
-            color: #dc3545;
-            margin-bottom: 16px;
-          }
-          .error-container h3 {
-            margin-bottom: 8px;
-            color: #1f2937;
-          }
-          .error-container p {
-            color: #6c757d;
-            margin-bottom: 24px;
-          }
-          .retry-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            padding: 10px 24px;
-            border-radius: 12px;
-            color: white;
-            font-weight: 500;
-            cursor: pointer;
-          }
-        `}</style>
       </AdminLayout>
     )
   }
@@ -408,7 +372,7 @@ export default function Advertisements() {
             </div>
             <div>
               <h1 className="header-title">Advertisements</h1>
-              <p className="header-subtitle">Manage campaigns, track performance, and configure subscriptions</p>
+              <p className="header-subtitle">Manage campaigns, track performance, and configure subscription packages</p>
             </div>
           </div>
           <div className="header-actions">
@@ -416,13 +380,13 @@ export default function Advertisements() {
               <i className="bi bi-funnel-fill"></i>
               <span>Filters</span>
             </button>
+            <button className="btn-packages" onClick={() => setShowPackageListModal(true)}>
+              <i className="bi bi-tags"></i>
+              Packages ({packages.length})
+            </button>
             <button className="btn-subscription" onClick={() => router.push('/admin/advertisements/subscriptions')}>
               <i className="bi bi-credit-card"></i>
               Subscriptions
-            </button>
-            <button className="btn-create" onClick={() => setShowCreateModal(true)}>
-              <i className="bi bi-plus-circle-fill"></i>
-              Create Ad
             </button>
           </div>
         </div>
@@ -484,17 +448,17 @@ export default function Advertisements() {
             </div>
           </div>
           <div className="stat-card">
+            <div className="stat-icon pending"><i className="bi bi-hourglass-split"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Pending Approval</span>
+              <h2 className="stat-value text-pending">{stats.pending}</h2>
+            </div>
+          </div>
+          <div className="stat-card">
             <div className="stat-icon info"><i className="bi bi-eye"></i></div>
             <div className="stat-info">
               <span className="stat-label">Total Clicks</span>
               <h2 className="stat-value">{stats.clicks.toLocaleString()}</h2>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon purple"><i className="bi bi-graph-up"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">CTR</span>
-              <h2 className="stat-value">{stats.ctr}%</h2>
             </div>
           </div>
           <div className="stat-card">
@@ -513,8 +477,9 @@ export default function Advertisements() {
               <div key={ad.ad_id} className="ad-card">
                 <div className="ad-card-header">
                   <div className="ad-type">
-                    <i className={`bi ${ad.ad_type === 'PREMIUM' ? 'bi-star-fill' : ad.ad_type === 'FEATURED' ? 'bi-gem' : 'bi-megaphone'}`}></i>
-                    <span>{ad.ad_type || 'STANDARD'}</span>
+                    <i className={`bi ${ad.subscription_packages?.ad_type === 'PREMIUM' ? 'bi-star-fill' : 
+                                      ad.subscription_packages?.ad_type === 'FEATURED' ? 'bi-gem' : 'bi-megaphone'}`}></i>
+                    <span>{ad.subscription_packages?.package_name || ad.ad_type || 'STANDARD'}</span>
                   </div>
                   {getStatusBadge(ad.status, ad.end_date)}
                 </div>
@@ -528,6 +493,12 @@ export default function Advertisements() {
                 <div className="ad-body">
                   <h6 className="ad-title">{ad.title}</h6>
                   <p className="ad-description">{ad.description?.substring(0, 100)}...</p>
+                  
+                  <div className="package-info">
+                    <i className="bi bi-box"></i>
+                    <span>Package: {ad.subscription_packages?.package_name}</span>
+                    <span className="package-price">${ad.subscription_packages?.price}</span>
+                  </div>
                   
                   <div className="ad-stats">
                     <div className="ad-stat">
@@ -551,7 +522,7 @@ export default function Advertisements() {
                     </div>
                     <div className="meta-item">
                       <i className="bi bi-person"></i>
-                      {ad.user_details?.full_name || 'Admin'}
+                      User
                     </div>
                   </div>
                 </div>
@@ -560,19 +531,19 @@ export default function Advertisements() {
                   <button className="btn-view" onClick={() => router.push(`/admin/advertisements/${ad.ad_id}`)}>
                     <i className="bi bi-eye"></i> View
                   </button>
-                  <button className="btn-edit" onClick={() => {
-                    setSelectedAd(ad)
-                    setShowEditModal(true)
-                  }}>
-                    <i className="bi bi-pencil"></i> Edit
-                  </button>
-                  {ad.status === 'ACTIVE' ? (
+                  {ad.status === 'PENDING' && (
+                    <>
+                      <button className="btn-approve" onClick={() => approveAd(ad.ad_id)}>
+                        <i className="bi bi-check-lg"></i> Approve
+                      </button>
+                      <button className="btn-reject" onClick={() => rejectAd(ad.ad_id)}>
+                        <i className="bi bi-x-lg"></i> Reject
+                      </button>
+                    </>
+                  )}
+                  {ad.status === 'ACTIVE' && (
                     <button className="btn-pause" onClick={() => updateAdStatus(ad.ad_id, 'EXPIRED')}>
                       <i className="bi bi-pause-circle"></i> Pause
-                    </button>
-                  ) : ad.status !== 'EXPIRED' && (
-                    <button className="btn-activate" onClick={() => updateAdStatus(ad.ad_id, 'ACTIVE')}>
-                      <i className="bi bi-play-circle"></i> Activate
                     </button>
                   )}
                   <button className="btn-delete" onClick={() => deleteAd(ad.ad_id)}>
@@ -585,35 +556,110 @@ export default function Advertisements() {
             <div className="empty-state">
               <i className="bi bi-megaphone-slash"></i>
               <h4>No Advertisements Found</h4>
-              <p>Create your first ad campaign to get started.</p>
-              <button className="btn-create-empty" onClick={() => setShowCreateModal(true)}>
-                <i className="bi bi-plus-circle"></i> Create Ad
-              </button>
+              <p>Mobile users will create ads here after purchasing packages.</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Create Ad Modal */}
-      {showCreateModal && (
-        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
+      {/* Packages List Modal */}
+      {showPackageListModal && (
+        <div className="modal-overlay" onClick={() => setShowPackageListModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header info">
-              <div className="modal-icon"><i className="bi bi-plus-circle-fill"></i></div>
-              <h3>Create Advertisement</h3>
-              <button className="modal-close" onClick={() => setShowCreateModal(false)}>
+            <div className="modal-header packages">
+              <div className="modal-icon"><i className="bi bi-tags-fill"></i></div>
+              <h3>Subscription Packages</h3>
+              <button className="modal-close" onClick={() => setShowPackageListModal(false)}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="packages-header">
+                <button className="btn-add-package" onClick={() => {
+                  setShowPackageListModal(false)
+                  setEditingPackage(null)
+                  resetPackageForm()
+                  setShowPackageModal(true)
+                }}>
+                  <i className="bi bi-plus-lg"></i> Add New Package
+                </button>
+              </div>
+              <div className="packages-grid">
+                {packages.map((pkg) => (
+                  <div key={pkg.package_id} className="package-card">
+                    <div className="package-header">
+                      <div className="package-name">
+                        <i className="bi bi-box-seam"></i>
+                        <h4>{pkg.package_name}</h4>
+                      </div>
+                      <span className={`package-status ${pkg.is_active ? 'active' : 'inactive'}`}>
+                        {pkg.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    <div className="package-price">
+                      <span className="currency">$</span>
+                      <span className="amount">{pkg.price}</span>
+                      <span className="period">/{pkg.duration_days} days</span>
+                    </div>
+                    <p className="package-description">{pkg.description}</p>
+                    <div className="package-features">
+                      {pkg.features?.map((feature, idx) => (
+                        <div key={idx} className="feature-item">
+                          <i className="bi bi-check-circle-fill"></i>
+                          <span>{feature}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="package-actions">
+                      <button className="btn-edit-package" onClick={() => {
+                        setShowPackageListModal(false)
+                        editPackage(pkg)
+                      }}>
+                        <i className="bi bi-pencil"></i> Edit
+                      </button>
+                      <button className="btn-delete-package" onClick={() => deletePackage(pkg.package_id)}>
+                        <i className="bi bi-trash"></i> Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowPackageListModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Package Create/Edit Modal */}
+      {showPackageModal && (
+        <div className="modal-overlay" onClick={() => {
+          setShowPackageModal(false)
+          setEditingPackage(null)
+          resetPackageForm()
+        }}>
+          <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header packages">
+              <div className="modal-icon"><i className="bi bi-box-seam"></i></div>
+              <h3>{editingPackage ? 'Edit Package' : 'Create Package'}</h3>
+              <button className="modal-close" onClick={() => {
+                setShowPackageModal(false)
+                setEditingPackage(null)
+                resetPackageForm()
+              }}>
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <div className="modal-body">
               <div className="form-group">
-                <label className="form-label">Title *</label>
+                <label className="form-label">Package Name *</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Enter ad title"
-                  value={formData.title}
-                  onChange={(e) => setFormData({...formData, title: e.target.value})}
+                  placeholder="e.g., Basic, Premium, Featured"
+                  value={packageFormData.package_name}
+                  onChange={(e) => setPackageFormData({...packageFormData, package_name: e.target.value})}
                 />
               </div>
               
@@ -621,22 +667,35 @@ export default function Advertisements() {
                 <label className="form-label">Description</label>
                 <textarea
                   className="form-textarea"
-                  rows="4"
-                  placeholder="Enter ad description..."
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  rows="3"
+                  placeholder="Describe what this package includes..."
+                  value={packageFormData.description}
+                  onChange={(e) => setPackageFormData({...packageFormData, description: e.target.value})}
                 />
               </div>
               
-              <div className="form-group">
-                <label className="form-label">Image URL</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="https://example.com/image.jpg"
-                  value={formData.image_url}
-                  onChange={(e) => setFormData({...formData, image_url: e.target.value})}
-                />
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Price ($) *</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="29.99"
+                    value={packageFormData.price}
+                    onChange={(e) => setPackageFormData({...packageFormData, price: e.target.value})}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Duration (Days) *</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="30"
+                    value={packageFormData.duration_days}
+                    onChange={(e) => setPackageFormData({...packageFormData, duration_days: e.target.value})}
+                  />
+                </div>
               </div>
               
               <div className="form-row">
@@ -644,8 +703,8 @@ export default function Advertisements() {
                   <label className="form-label">Ad Type</label>
                   <select
                     className="form-select"
-                    value={formData.ad_type}
-                    onChange={(e) => setFormData({...formData, ad_type: e.target.value})}
+                    value={packageFormData.ad_type}
+                    onChange={(e) => setPackageFormData({...packageFormData, ad_type: e.target.value})}
                   >
                     <option value="STANDARD">Standard</option>
                     <option value="PREMIUM">Premium</option>
@@ -654,50 +713,57 @@ export default function Advertisements() {
                 </div>
                 
                 <div className="form-group">
-                  <label className="form-label">Duration (Days)</label>
+                  <label className="form-label">Display Order</label>
                   <input
                     type="number"
                     className="form-input"
-                    value={formData.duration_days}
-                    onChange={(e) => setFormData({...formData, duration_days: parseInt(e.target.value)})}
+                    placeholder="0"
+                    value={packageFormData.display_order}
+                    onChange={(e) => setPackageFormData({...packageFormData, display_order: parseInt(e.target.value)})}
                   />
                 </div>
               </div>
               
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Target Audience</label>
-                  <select
-                    className="form-select"
-                    value={formData.target_audience}
-                    onChange={(e) => setFormData({...formData, target_audience: e.target.value})}
-                  >
-                    <option value="ALL">All Users</option>
-                    <option value="FARMERS">Farmers Only</option>
-                    <option value="VENDORS">Vendors Only</option>
-                  </select>
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label">Status</label>
-                  <select
-                    className="form-select"
-                    value={formData.status}
-                    onChange={(e) => setFormData({...formData, status: e.target.value})}
-                  >
-                    <option value="ACTIVE">Active</option>
-                    <option value="PENDING">Pending</option>
-                  </select>
-                </div>
+              <div className="form-group">
+                <label className="form-label">Features (comma separated)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Standard placement, Basic targeting, Email support"
+                  value={packageFormData.features.join(', ')}
+                  onChange={(e) => setPackageFormData({
+                    ...packageFormData, 
+                    features: e.target.value.split(',').map(f => f.trim()).filter(f => f)
+                  })}
+                />
+              </div>
+              
+              <div className="form-group">
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={packageFormData.is_active}
+                    onChange={(e) => setPackageFormData({...packageFormData, is_active: e.target.checked})}
+                  />
+                  <span>Active (visible to users)</span>
+                </label>
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
-              <button className="btn-primary" onClick={createAd} disabled={actionLoading}>
+              <button className="btn-secondary" onClick={() => {
+                setShowPackageModal(false)
+                setEditingPackage(null)
+                resetPackageForm()
+              }}>Cancel</button>
+              <button 
+                className="btn-primary" 
+                onClick={editingPackage ? updatePackage : createPackage} 
+                disabled={actionLoading}
+              >
                 {actionLoading ? (
-                  <><span className="spinner-border spinner-border-sm me-2"></span>Creating...</>
+                  <><span className="spinner-border spinner-border-sm me-2"></span>Saving...</>
                 ) : (
-                  'Create Ad'
+                  editingPackage ? 'Update Package' : 'Create Package'
                 )}
               </button>
             </div>
@@ -760,7 +826,7 @@ export default function Advertisements() {
           flex-wrap: wrap;
         }
 
-        .filter-toggle-btn, .btn-subscription, .btn-create {
+        .filter-toggle-btn, .btn-packages, .btn-subscription {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -769,6 +835,7 @@ export default function Advertisements() {
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
+          border: none;
         }
 
         .filter-toggle-btn {
@@ -781,26 +848,24 @@ export default function Advertisements() {
           background: #e9ecef;
         }
 
+        .btn-packages {
+          background: #10b981;
+          color: white;
+        }
+
+        .btn-packages:hover {
+          background: #059669;
+          transform: translateY(-1px);
+        }
+
         .btn-subscription {
           background: #8b5cf6;
-          border: none;
           color: white;
         }
 
         .btn-subscription:hover {
           background: #7c3aed;
           transform: translateY(-1px);
-        }
-
-        .btn-create {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border: none;
-          color: white;
-        }
-
-        .btn-create:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
         }
 
         .filters-panel {
@@ -879,8 +944,8 @@ export default function Advertisements() {
         .stat-icon.primary { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
         .stat-icon.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .stat-icon.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .stat-icon.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .stat-icon.info { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        .stat-icon.purple { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
         .stat-icon.revenue { background: rgba(16, 185, 129, 0.1); color: #10b981; }
 
         .stat-icon i { font-size: 24px; }
@@ -905,6 +970,7 @@ export default function Advertisements() {
 
         .text-success { color: #10b981; }
         .text-warning { color: #f59e0b; }
+        .text-pending { color: #f59e0b; }
 
         .ads-grid {
           display: grid;
@@ -987,6 +1053,23 @@ export default function Advertisements() {
           line-height: 1.4;
         }
 
+        .package-info {
+          background: #f3f4f6;
+          padding: 8px 12px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 12px;
+          margin-bottom: 12px;
+        }
+
+        .package-price {
+          margin-left: auto;
+          font-weight: 600;
+          color: #4f46e5;
+        }
+
         .ad-stats {
           display: flex;
           gap: 16px;
@@ -1019,7 +1102,7 @@ export default function Advertisements() {
           flex-wrap: wrap;
         }
 
-        .btn-view, .btn-edit, .btn-pause, .btn-activate, .btn-delete {
+        .btn-view, .btn-approve, .btn-reject, .btn-pause, .btn-delete {
           flex: 1;
           padding: 6px 12px;
           border: none;
@@ -1036,12 +1119,12 @@ export default function Advertisements() {
 
         .btn-view { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
         .btn-view:hover { background: #4f46e5; color: white; }
-        .btn-edit { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .btn-edit:hover { background: #10b981; color: white; }
+        .btn-approve { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .btn-approve:hover { background: #10b981; color: white; }
+        .btn-reject { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .btn-reject:hover { background: #ef4444; color: white; }
         .btn-pause { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .btn-pause:hover { background: #f59e0b; color: white; }
-        .btn-activate { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .btn-activate:hover { background: #10b981; color: white; }
         .btn-delete { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
         .btn-delete:hover { background: #ef4444; color: white; }
 
@@ -1060,13 +1143,175 @@ export default function Advertisements() {
           display: block;
         }
 
-        .btn-create-empty {
-          margin-top: 16px;
-          padding: 10px 24px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border: none;
-          border-radius: 12px;
+        /* Packages Modal Styles */
+        .packages-header {
+          display: flex;
+          justify-content: flex-end;
+          margin-bottom: 24px;
+        }
+
+        .btn-add-package {
+          background: #4f46e5;
           color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+        }
+
+        .packages-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          gap: 20px;
+          max-height: 500px;
+          overflow-y: auto;
+          padding-right: 8px;
+        }
+
+        .package-card {
+          background: #f9fafb;
+          border-radius: 16px;
+          padding: 20px;
+          transition: all 0.3s ease;
+        }
+
+        .package-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .package-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 16px;
+        }
+
+        .package-name {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .package-name i {
+          font-size: 20px;
+          color: #4f46e5;
+        }
+
+        .package-name h4 {
+          margin: 0;
+          font-size: 16px;
+          font-weight: 600;
+        }
+
+        .package-status {
+          font-size: 11px;
+          padding: 4px 8px;
+          border-radius: 20px;
+        }
+
+        .package-status.active {
+          background: rgba(16, 185, 129, 0.1);
+          color: #10b981;
+        }
+
+        .package-status.inactive {
+          background: rgba(107, 114, 128, 0.1);
+          color: #6c757d;
+        }
+
+        .package-price {
+          margin-bottom: 12px;
+        }
+
+        .package-price .currency {
+          font-size: 18px;
+          font-weight: 600;
+          color: #6c757d;
+        }
+
+        .package-price .amount {
+          font-size: 32px;
+          font-weight: 700;
+          color: #1f2937;
+        }
+
+        .package-price .period {
+          font-size: 12px;
+          color: #6c757d;
+        }
+
+        .package-description {
+          font-size: 13px;
+          color: #6c757d;
+          margin-bottom: 16px;
+          line-height: 1.4;
+        }
+
+        .package-features {
+          margin-bottom: 20px;
+        }
+
+        .feature-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          padding: 4px 0;
+          color: #374151;
+        }
+
+        .feature-item i {
+          color: #10b981;
+          font-size: 12px;
+        }
+
+        .package-actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .btn-edit-package, .btn-delete-package {
+          flex: 1;
+          padding: 6px 12px;
+          border-radius: 8px;
+          font-size: 12px;
+          cursor: pointer;
+          border: none;
+        }
+
+        .btn-edit-package {
+          background: rgba(79, 70, 229, 0.1);
+          color: #4f46e5;
+        }
+
+        .btn-edit-package:hover {
+          background: #4f46e5;
+          color: white;
+        }
+
+        .btn-delete-package {
+          background: rgba(239, 68, 68, 0.1);
+          color: #ef4444;
+        }
+
+        .btn-delete-package:hover {
+          background: #ef4444;
+          color: white;
+        }
+
+        .form-checkbox {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+        }
+
+        .form-checkbox input {
+          width: auto;
           cursor: pointer;
         }
 
@@ -1106,7 +1351,7 @@ export default function Advertisements() {
           border-bottom: 1px solid #e9ecef;
         }
 
-        .modal-header.info .modal-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .modal-header.packages .modal-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
 
         .modal-icon {
           width: 48px;
@@ -1201,6 +1446,26 @@ export default function Advertisements() {
           color: white;
           font-weight: 600;
           cursor: pointer;
+        }
+
+        .loading-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 400px;
+        }
+        .loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid #e9ecef;
+          border-top-color: #4f46e5;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
 
         @keyframes fadeIn {
