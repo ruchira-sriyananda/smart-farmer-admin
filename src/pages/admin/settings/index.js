@@ -161,34 +161,70 @@ export default function Settings() {
     }
   }
 
-  const handleTestEmail = async () => {
-    if (!settings.smtp_host || !settings.smtp_user) {
-      showMessage('error', 'Please configure SMTP settings first')
-      return
-    }
-    
-    showMessage('info', 'Sending test email...')
-    
-    try {
-      const { error } = await supabase.functions.invoke('send-test-email', {
-        body: { 
-          to: settings.admin_email || settings.support_email,
-          settings: {
-            host: settings.smtp_host,
-            port: settings.smtp_port,
-            user: settings.smtp_user,
-            pass: settings.smtp_password
-          }
-        }
-      })
-      
-      if (error) throw error
-      showMessage('success', 'Test email sent successfully!')
-    } catch (err) {
-      console.error('Error sending test email:', err)
-      showMessage('error', 'Failed to send test email. Please check SMTP settings.')
-    }
+  // In your Settings component, update the handleTestEmail function
+
+const handleTestEmail = async () => {
+  if (!settings.smtp_host || !settings.smtp_user) {
+    showMessage('error', 'Please configure SMTP settings first')
+    return
   }
+  
+  const recipientEmail = settings.admin_email || settings.support_email
+  
+  if (!recipientEmail) {
+    showMessage('error', 'Please configure admin or support email address')
+    return
+  }
+  
+  setSaving(true)
+  showMessage('info', 'Sending test email via Resend...')
+  
+  try {
+    // First save the settings
+    const updates = []
+    for (const [key, value] of Object.entries(settings)) {
+      const stringValue = typeof value === 'boolean' ? String(value) : String(value)
+      updates.push({
+        setting_key: key,
+        setting_value: stringValue,
+        updated_at: new Date().toISOString()
+      })
+    }
+    
+    for (const update of updates) {
+      await supabase
+        .from('system_settings')
+        .upsert(update, { onConflict: 'setting_key' })
+    }
+    
+    // Call Supabase Edge Function
+    const { data, error } = await supabase.functions.invoke('send-test-email', {
+      body: { 
+        to: recipientEmail,
+        settings: {
+          host: settings.smtp_host,
+          port: settings.smtp_port,
+          user: settings.smtp_user,
+          pass: settings.smtp_password
+        },
+        siteName: settings.site_name
+      }
+    })
+    
+    if (error) throw error
+    
+    if (data?.success) {
+      showMessage('success', `✅ Test email sent to ${recipientEmail}! Please check your inbox.`)
+    } else {
+      showMessage('error', data?.error || 'Failed to send test email')
+    }
+  } catch (err) {
+    console.error('Error:', err)
+    showMessage('error', 'Failed to send test email. Please check your Resend API key configuration.')
+  } finally {
+    setSaving(false)
+  }
+}
 
   const handleBackupNow = async () => {
     if (!confirm('Creating a backup may take a few minutes. Continue?')) return
