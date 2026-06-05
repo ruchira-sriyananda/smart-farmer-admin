@@ -17,10 +17,6 @@ export default function ContentModeration() {
   const [actionLoading, setActionLoading] = useState(false)
   const [postDetails, setPostDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
-  const [showFullImage, setShowFullImage] = useState(false)
-  const [selectedImage, setSelectedImage] = useState(null)
-  const [imageLoading, setImageLoading] = useState({})
-  const [imageErrors, setImageErrors] = useState({})
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -100,12 +96,10 @@ export default function ContentModeration() {
 
   const fetchPostDetails = async (contentId, contentType) => {
     setLoadingDetails(true)
-    setImageErrors({})
     try {
       let details = null
       
       if (contentType === 'POST') {
-        // Fetch post details with images
         const { data, error } = await supabase
           .from('posts')
           .select(`
@@ -123,24 +117,7 @@ export default function ContentModeration() {
           .eq('post_id', contentId)
           .single()
         
-        if (!error && data) {
-          // Try to fetch images from post_images table
-          const { data: images, error: imagesError } = await supabase
-            .from('post_images')
-            .select('image_id, image_url, image_order')
-            .eq('post_id', contentId)
-            .order('image_order', { ascending: true })
-          
-          if (!imagesError && images && images.length > 0) {
-            data.images = images
-          } else if (data.image_url) {
-            // If no images in post_images but has image_url field
-            data.images = [{ image_url: data.image_url, image_order: 0 }]
-          } else {
-            data.images = []
-          }
-          details = data
-        }
+        if (!error && data) details = data
       } else if (contentType === 'COMMENT') {
         const { data, error } = await supabase
           .from('comments')
@@ -154,29 +131,13 @@ export default function ContentModeration() {
             ),
             posts!comments_post_id_fkey (
               post_id,
-              title,
-              image_url
+              title
             )
           `)
           .eq('comment_id', contentId)
           .single()
         
-        if (!error && data) {
-          // Check if comment has images
-          const { data: images, error: imagesError } = await supabase
-            .from('comment_images')
-            .select('image_url')
-            .eq('comment_id', contentId)
-          
-          if (!imagesError && images && images.length > 0) {
-            data.images = images
-          } else if (data.image_url) {
-            data.images = [{ image_url: data.image_url }]
-          } else {
-            data.images = []
-          }
-          details = data
-        }
+        if (!error && data) details = data
       }
       
       setPostDetails(details)
@@ -187,27 +148,24 @@ export default function ContentModeration() {
     }
   }
 
-  const handleReject = async () => {
-    const finalReason = customReason || rejectReason
-    if (!finalReason.trim()) {
-      alert('Please provide a reason for rejection')
-      return
-    }
-    
+  const updateStatus = async (postId, status, reason = null) => {
     setActionLoading(true)
     const session = JSON.parse(localStorage.getItem('adminSession'))
     
     const updateData = {
-      moderation_status: 'REJECTED',
+      moderation_status: status,
       reviewed_by: session?.admin?.admin_id,
-      reviewed_at: new Date().toISOString(),
-      moderation_reason: finalReason
+      reviewed_at: new Date().toISOString()
+    }
+
+    if (reason) {
+      updateData.moderation_reason = reason
     }
 
     const { error } = await supabase
       .from('content_moderation')
       .update(updateData)
-      .eq('moderation_id', selectedPost.moderation_id)
+      .eq('moderation_id', postId)
 
     setActionLoading(false)
 
@@ -218,30 +176,35 @@ export default function ContentModeration() {
       setRejectReason('')
       setCustomReason('')
       setSelectedPost(null)
-      if (showDetailsModal) setShowDetailsModal(false)
     } else {
-      alert(`Error rejecting content: ${error.message}`)
+      alert(`Error updating status: ${error.message}`)
     }
+  }
+
+  const handleApprove = async (post) => {
+    if (confirm(`Are you sure you want to approve this content?`)) {
+      await updateStatus(post.moderation_id, 'APPROVED')
+    }
+  }
+
+  const handleQuickReject = (reason) => {
+    setRejectReason(reason)
+    setCustomReason('')
+  }
+
+  const handleReject = async () => {
+    const finalReason = customReason || rejectReason
+    if (!finalReason.trim()) {
+      alert('Please provide a reason for rejection')
+      return
+    }
+    await updateStatus(selectedPost.moderation_id, 'REJECTED', finalReason)
   }
 
   const viewDetails = async (post) => {
     setSelectedPost(post)
     await fetchPostDetails(post.content_id, post.content_type)
     setShowDetailsModal(true)
-  }
-
-  const openFullImage = (imageUrl) => {
-    setSelectedImage(imageUrl)
-    setShowFullImage(true)
-  }
-
-  const handleImageLoad = (imageId) => {
-    setImageLoading(prev => ({ ...prev, [imageId]: false }))
-  }
-
-  const handleImageError = (imageId) => {
-    setImageLoading(prev => ({ ...prev, [imageId]: false }))
-    setImageErrors(prev => ({ ...prev, [imageId]: true }))
   }
 
   const getStatusBadge = (status) => {
@@ -261,14 +224,6 @@ export default function ContentModeration() {
       'VIDEO': 'bi-camera-reels'
     }
     return icons[type] || 'bi-file-text'
-  }
-
-  // Get Supabase storage URL for images
-  const getImageUrl = (imagePath) => {
-    if (!imagePath) return null
-    if (imagePath.startsWith('http')) return imagePath
-    const { data } = supabase.storage.from('post-images').getPublicUrl(imagePath)
-    return data?.publicUrl || imagePath
   }
 
   if (loading) {
@@ -327,7 +282,7 @@ export default function ContentModeration() {
             </div>
             <div>
               <h1 className="header-title">Content Moderation</h1>
-              <p className="header-subtitle">Review and manage user-generated content (Posts are auto-approved by default)</p>
+              <p className="header-subtitle">Review and manage user-generated content</p>
             </div>
           </div>
         </div>
@@ -417,6 +372,9 @@ export default function ContentModeration() {
                 <div className="content-card-footer">
                   {post.moderation_status === 'PENDING' ? (
                     <div className="action-buttons">
+                      <button className="btn-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
+                        <i className="bi bi-check-lg"></i> Approve
+                      </button>
                       <button className="btn-reject" onClick={() => {
                         setSelectedPost(post)
                         setShowRejectModal(true)
@@ -432,7 +390,7 @@ export default function ContentModeration() {
                       <i className="bi bi-person-check"></i>
                       Reviewed by {post.reviewed_by_admin?.full_name || 'System'}
                       <br />
-                      <small>{post.reviewed_at ? new Date(post.reviewed_at).toLocaleString() : 'Auto-approved'}</small>
+                      <small>{post.reviewed_at ? new Date(post.reviewed_at).toLocaleString() : 'Unknown'}</small>
                     </div>
                   )}
                 </div>
@@ -448,7 +406,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal with Full Content and Image Viewer */}
+      {/* Details Modal with Full Content */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -495,7 +453,7 @@ export default function ContentModeration() {
                       <div className="author-info">
                         <div className="author-avatar">
                           {postDetails.users?.profile_image ? (
-                            <img src={getImageUrl(postDetails.users.profile_image)} alt={postDetails.users.full_name} />
+                            <img src={postDetails.users.profile_image} alt={postDetails.users.full_name} />
                           ) : (
                             <i className="bi bi-person-circle"></i>
                           )}
@@ -511,61 +469,17 @@ export default function ContentModeration() {
                     </div>
                   )}
 
-                  {/* Post Content with Images */}
+                  {/* Post Content */}
                   {selectedPost.content_type === 'POST' && postDetails && (
                     <div className="details-section">
                       <h4><i className="bi bi-file-text"></i> Post Content</h4>
                       <div className="post-title">{postDetails.title}</div>
                       <div className="post-content">{postDetails.content}</div>
-                      
-                      {/* Display Images from Supabase */}
-                      {postDetails.images && postDetails.images.length > 0 && (
-                        <div className="post-images">
-                          <label className="images-label">
-                            <i className="bi bi-images"></i> 
-                            Attached Images ({postDetails.images.length})
-                          </label>
-                          <div className="images-grid">
-                            {postDetails.images.map((img, idx) => {
-                              const imageUrl = getImageUrl(img.image_url)
-                              const imageId = `${selectedPost.content_id}_img_${idx}`
-                              return (
-                                <div 
-                                  key={idx} 
-                                  className="image-item"
-                                  onClick={() => openFullImage(imageUrl)}
-                                >
-                                  {imageLoading[imageId] !== false && (
-                                    <div className="image-loading">
-                                      <div className="spinner-border spinner-border-sm"></div>
-                                    </div>
-                                  )}
-                                  <img 
-                                    src={imageUrl} 
-                                    alt={`Post image ${idx + 1}`}
-                                    onLoad={() => handleImageLoad(imageId)}
-                                    onError={() => handleImageError(imageId)}
-                                    style={{ display: imageLoading[imageId] === false ? 'block' : 'none' }}
-                                  />
-                                  {!imageErrors[imageId] && imageLoading[imageId] === false && (
-                                    <div className="image-overlay">
-                                      <i className="bi bi-zoom-in"></i>
-                                      <span>Click to enlarge</span>
-                                    </div>
-                                  )}
-                                  {imageErrors[imageId] && (
-                                    <div className="image-error">
-                                      <i className="bi bi-image-slash"></i>
-                                      <span>Failed to load</span>
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
+                      {postDetails.image_url && (
+                        <div className="post-image">
+                          <img src={postDetails.image_url} alt={postDetails.title} />
                         </div>
                       )}
-
                       {postDetails.post_categories?.category_name && (
                         <div className="post-category">
                           <i className="bi bi-tag"></i> Category: {postDetails.post_categories.category_name}
@@ -582,34 +496,6 @@ export default function ContentModeration() {
                         <i className="bi bi-file-post"></i> On Post: {postDetails.posts?.title || 'Unknown Post'}
                       </div>
                       <div className="comment-text">{postDetails.comment_text}</div>
-                      
-                      {/* Comment images from Supabase */}
-                      {postDetails.images && postDetails.images.length > 0 && (
-                        <div className="post-images">
-                          <label className="images-label">
-                            <i className="bi bi-images"></i> 
-                            Attached Images ({postDetails.images.length})
-                          </label>
-                          <div className="images-grid">
-                            {postDetails.images.map((img, idx) => {
-                              const imageUrl = getImageUrl(img.image_url)
-                              return (
-                                <div 
-                                  key={idx} 
-                                  className="image-item single"
-                                  onClick={() => openFullImage(imageUrl)}
-                                >
-                                  <img src={imageUrl} alt="Comment attachment" />
-                                  <div className="image-overlay">
-                                    <i className="bi bi-zoom-in"></i>
-                                    <span>Click to enlarge</span>
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -635,43 +521,19 @@ export default function ContentModeration() {
             </div>
             <div className="modal-footer">
               {selectedPost.moderation_status === 'PENDING' && (
-                <button className="btn-reject-modal" onClick={() => {
-                  setShowDetailsModal(false)
-                  setShowRejectModal(true)
-                }}>
-                  <i className="bi bi-x-lg"></i> Reject
-                </button>
+                <>
+                  <button className="btn-approve-modal" onClick={() => handleApprove(selectedPost)}>
+                    <i className="bi bi-check-lg"></i> Approve
+                  </button>
+                  <button className="btn-reject-modal" onClick={() => {
+                    setShowDetailsModal(false)
+                    setShowRejectModal(true)
+                  }}>
+                    <i className="bi bi-x-lg"></i> Reject
+                  </button>
+                </>
               )}
               <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Full Image Modal */}
-      {showFullImage && selectedImage && (
-        <div className="modal-overlay" onClick={() => setShowFullImage(false)}>
-          <div className="full-image-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="close-image-btn" onClick={() => setShowFullImage(false)}>
-              <i className="bi bi-x-lg"></i>
-            </button>
-            <img src={selectedImage} alt="Full size" />
-            <div className="image-actions">
-              <button 
-                className="download-image-btn" 
-                onClick={() => window.open(selectedImage, '_blank')}
-              >
-                <i className="bi bi-box-arrow-up-right"></i> Open in new tab
-              </button>
-              <button 
-                className="copy-image-btn" 
-                onClick={() => {
-                  navigator.clipboard.writeText(selectedImage)
-                  alert('Image URL copied to clipboard!')
-                }}
-              >
-                <i className="bi bi-clipboard"></i> Copy URL
-              </button>
             </div>
           </div>
         </div>
@@ -695,7 +557,7 @@ export default function ContentModeration() {
                   <button
                     key={reason.id}
                     className={`quick-reason-btn ${rejectReason === reason.reason ? 'selected' : ''}`}
-                    onClick={() => setRejectReason(reason.reason)}
+                    onClick={() => handleQuickReject(reason.reason)}
                     style={{ '--reason-color': reason.color }}
                   >
                     <i className={`bi ${reason.icon}`}></i>
@@ -795,7 +657,9 @@ export default function ContentModeration() {
         .rejection-reason { background: #fef3c7; padding: 8px 12px; border-radius: 8px; font-size: 12px; color: #92400e; display: flex; align-items: center; gap: 6px; margin-top: 8px; }
         .content-card-footer { padding: 16px 20px; }
         .action-buttons { display: flex; gap: 12px; }
-        .btn-reject, .btn-view { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border: none; border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; }
+        .btn-approve, .btn-reject, .btn-view { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border: none; border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; }
+        .btn-approve { background: rgba(16,185,129,0.1); color: #10b981; }
+        .btn-approve:hover { background: #10b981; color: white; }
         .btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; }
         .btn-reject:hover { background: #ef4444; color: white; }
         .btn-view { background: rgba(79,70,229,0.1); color: #4f46e5; }
@@ -804,35 +668,8 @@ export default function ContentModeration() {
         .empty-state { text-align: center; padding: 80px 20px; background: white; border-radius: 24px; }
         .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
         
-        /* Images Grid */
-        .post-images { margin-top: 20px; }
-        .images-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 12px; }
-        .images-label i { color: #667eea; }
-        .images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-        .image-item { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; cursor: pointer; border: 2px solid #e9ecef; transition: all 0.3s ease; background: #f8f9fa; }
-        .image-item:hover { transform: scale(1.02); border-color: #667eea; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .image-item img { width: 100%; height: 100%; object-fit: cover; }
-        .image-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
-        .image-error { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #9ca3af; }
-        .image-error i { font-size: 24px; margin-bottom: 4px; display: block; }
-        .image-error span { font-size: 11px; }
-        .image-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; opacity: 0; transition: opacity 0.3s ease; color: white; }
-        .image-item:hover .image-overlay { opacity: 1; }
-        .image-overlay i { font-size: 24px; }
-        .image-overlay span { font-size: 11px; }
-        .image-item.single { grid-column: span 2; max-width: 300px; }
-        
-        /* Full Image Modal */
-        .full-image-modal { position: relative; max-width: 90vw; max-height: 90vh; background: #1a1f2e; border-radius: 12px; overflow: hidden; animation: slideUp 0.3s ease; }
-        .full-image-modal img { max-width: 100%; max-height: 85vh; display: block; margin: 0 auto; }
-        .close-image-btn { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; background: rgba(0,0,0,0.7); border: none; border-radius: 50%; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; z-index: 10; }
-        .close-image-btn:hover { background: rgba(0,0,0,0.9); transform: rotate(90deg); }
-        .image-actions { position: absolute; bottom: 16px; right: 16px; display: flex; gap: 8px; z-index: 10; }
-        .download-image-btn, .copy-image-btn { padding: 8px 16px; background: rgba(0,0,0,0.7); border: none; border-radius: 8px; color: white; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 13px; transition: all 0.3s ease; }
-        .download-image-btn:hover, .copy-image-btn:hover { background: rgba(0,0,0,0.9); transform: translateY(-2px); }
-        
         /* Modal */
-        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
         .modal-container { background: white; border-radius: 24px; width: 90%; max-width: 550px; animation: slideUp 0.3s ease; overflow: hidden; max-height: 90vh; overflow-y: auto; }
         .modal-container.modal-lg { max-width: 800px; }
         .modal-container.modal-reject { max-width: 600px; }
@@ -865,7 +702,9 @@ export default function ContentModeration() {
         /* Post Content */
         .post-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #1f2937; }
         .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; margin-bottom: 16px; line-height: 1.6; color: #4b5563; }
-        .post-category { font-size: 12px; color: #6c757d; margin-top: 12px; }
+        .post-image { margin-bottom: 16px; }
+        .post-image img { max-width: 100%; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .post-category { font-size: 12px; color: #6c757d; }
         .comment-text { background: #f8f9fa; padding: 16px; border-radius: 12px; line-height: 1.6; color: #4b5563; }
         .comment-post { background: #e7f1ff; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: #0d6efd; }
         .rejection-box { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
@@ -890,6 +729,7 @@ export default function ContentModeration() {
         .btn-primary { padding: 10px 24px; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; }
         .btn-primary.danger { background: #ef4444; color: white; }
         .btn-primary.danger:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
         .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
         
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -903,10 +743,6 @@ export default function ContentModeration() {
           .details-grid { grid-template-columns: 1fr; }
           .quick-reasons { grid-template-columns: 1fr; }
           .author-info { flex-direction: column; text-align: center; }
-          .images-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
-          .full-image-modal { max-width: 95vw; }
-          .image-actions { bottom: 8px; right: 8px; }
-          .download-image-btn span, .copy-image-btn span { display: none; }
         }
       `}</style>
     </AdminLayout>
