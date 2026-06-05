@@ -133,20 +133,55 @@ export default function AdminDashboard() {
     return permissions[userRole] || permissions.SUPPORT_ADMIN
   }
 
+  // Navigation handlers for View All buttons
+  const handleViewAllUsers = () => {
+    router.push('/admin/mobile-users')
+  }
+
+  const handleViewAllPosts = () => {
+    router.push('/admin/mobile-posts')
+  }
+
+  const handleViewAllBarter = () => {
+    router.push('/admin/mobile-barter')
+  }
+
+  const handleViewAllAds = () => {
+    router.push('/admin/advertisements')
+  }
+
+  const handleViewAnalytics = () => {
+    router.push('/admin/analytics')
+  }
+
+  const handleManageUsers = () => {
+    router.push('/admin/mobile-users')
+  }
+
+  const handleModeratePosts = () => {
+    router.push('/admin/mobile-posts')
+  }
+
+  const handleBarterOversight = () => {
+    router.push('/admin/mobile-barter')
+  }
+
+  const handleManageAds = () => {
+    router.push('/admin/advertisements')
+  }
+
   // Fetch all data based on role
   const fetchAllData = async () => {
     const perms = getPermissions()
     
     const promises = []
     
-    // Always fetch stats
     promises.push(fetchStats())
     promises.push(fetchOnlineUsers())
     promises.push(fetchUserGrowth())
     promises.push(fetchRoleDistribution())
     promises.push(fetchWeeklyActivity())
     
-    // Role-based data fetching
     if (perms.canViewAllUsers) {
       promises.push(fetchRecentUsers())
     }
@@ -193,7 +228,7 @@ export default function AdminDashboard() {
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_verified', false),
         supabase.from('posts').select('*', { count: 'exact', head: true }),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }),
-        supabase.from('advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+        supabase.from('mobile_advertisements').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
         supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
         supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
         supabase.from('barter_listings').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE')
@@ -582,9 +617,9 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Main Stats Cards - All roles can see */}
+        {/* Main Stats Cards */}
         <div className="stats-grid">
-          <div className="stat-card primary">
+          <div className="stat-card primary" onClick={handleViewAllUsers}>
             <div className="stat-card-icon"><i className="bi bi-people-fill"></i></div>
             <div className="stat-card-content">
               <span className="stat-label">Total Users</span>
@@ -620,7 +655,7 @@ export default function AdminDashboard() {
 
         {/* Secondary Stats */}
         <div className="secondary-stats">
-          <div className="stat-card-mini">
+          <div className="stat-card-mini" onClick={handleViewAllUsers}>
             <div className="stat-mini-icon verified"><i className="bi bi-check2-circle"></i></div>
             <div className="stat-mini-info">
               <div className="stat-mini-value">{stats.verifiedUsers.toLocaleString()}</div>
@@ -628,7 +663,7 @@ export default function AdminDashboard() {
               <div className="stat-mini-trend">{stats.totalUsers > 0 ? Math.round((stats.verifiedUsers / stats.totalUsers) * 100) : 0}% of total</div>
             </div>
           </div>
-          <div className="stat-card-mini">
+          <div className="stat-card-mini" onClick={handleViewAllUsers}>
             <div className="stat-mini-icon pending"><i className="bi bi-hourglass-split"></i></div>
             <div className="stat-mini-info">
               <div className="stat-mini-value">{stats.pendingVerification}</div>
@@ -636,7 +671,7 @@ export default function AdminDashboard() {
               <div className="stat-mini-trend">Awaiting verification</div>
             </div>
           </div>
-          <div className="stat-card-mini">
+          <div className="stat-card-mini" onClick={handleViewAllPosts}>
             <div className="stat-mini-icon posts"><i className="bi bi-file-post"></i></div>
             <div className="stat-mini-info">
               <div className="stat-mini-value">{stats.totalPosts.toLocaleString()}</div>
@@ -644,7 +679,7 @@ export default function AdminDashboard() {
               <div className="stat-mini-trend text-success">+{stats.newPostsToday} today</div>
             </div>
           </div>
-          <div className="stat-card-mini">
+          <div className="stat-card-mini" onClick={handleViewAllAds}>
             <div className="stat-mini-icon ads"><i className="bi bi-megaphone"></i></div>
             <div className="stat-mini-info">
               <div className="stat-mini-value">{stats.totalAds}</div>
@@ -652,7 +687,7 @@ export default function AdminDashboard() {
               <div className="stat-mini-trend">Live campaigns</div>
             </div>
           </div>
-          <div className="stat-card-mini">
+          <div className="stat-card-mini" onClick={handleViewAllBarter}>
             <div className="stat-mini-icon barter"><i className="bi bi-box-seam"></i></div>
             <div className="stat-mini-info">
               <div className="stat-mini-value">{stats.totalBarterListings}</div>
@@ -662,7 +697,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Charts - All roles can see analytics */}
+        {/* Charts */}
         <div className="charts-row">
           <div className="chart-card">
             <div className="chart-header">
@@ -680,7 +715,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* User Distribution & Top Contributors - Conditional based on role */}
+        {/* User Distribution & Top Contributors */}
         <div className="two-columns">
           <div className="card-distribution">
             <div className="card-header-custom">
@@ -705,7 +740,7 @@ export default function AdminDashboard() {
             </div>
           </div>
           
-          {/* Top Contributors - Only for Content Admin and Super Admin */}
+          {/* Top Contributors */}
           {(perms.canViewAllPosts || perms.canModerateContent) && (
             <div className="card-contributors">
               <div className="card-header-custom">
@@ -731,7 +766,7 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* Online Users - All roles can see */}
+        {/* Online Users */}
         <div className="online-section">
           <div className="online-header">
             <h5><i className="bi bi-wifi"></i> Currently Online</h5>
@@ -761,12 +796,12 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Recent Users Table - Only for roles with user management access */}
+        {/* Recent Users Table */}
         {perms.canViewAllUsers && (
           <div className="recent-table">
             <div className="table-header">
               <h5><i className="bi bi-people"></i> Recent Users</h5>
-              <button className="view-all" onClick={() => router.push('/admin/mobile-users')}>View All <i className="bi bi-arrow-right"></i></button>
+              <button className="view-all" onClick={handleViewAllUsers}>View All <i className="bi bi-arrow-right"></i></button>
             </div>
             <div className="table-responsive">
               <table className="custom-table">
@@ -777,9 +812,9 @@ export default function AdminDashboard() {
                       <td className="user-cell">
                         <div className="user-avatar-sm">{user.profile_image ? <img src={user.profile_image} alt={user.full_name} /> : <span>{user.full_name?.charAt(0)}</span>}</div>
                         <div><div className="user-name-sm">{user.full_name}</div><div className="user-email">{user.email}</div></div>
-                       </td>
-                       <td>{getRoleBadge(user.role_name)}</td>
-                       <td>{user.is_verified ? <span className="status-verified"><i className="bi bi-check-circle"></i> Verified</span> : <span className="status-pending"><i className="bi bi-clock"></i> Pending</span>}</td>
+                      </td>
+                      <td>{getRoleBadge(user.role_name)}</td>
+                      <td>{user.is_verified ? <span className="status-verified"><i className="bi bi-check-circle"></i> Verified</span> : <span className="status-pending"><i className="bi bi-clock"></i> Pending</span>}</td>
                       <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))}
@@ -789,12 +824,12 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Recent Posts - Only for roles with content management access */}
+        {/* Recent Posts */}
         {(perms.canViewAllPosts || perms.canModerateContent) && (
           <div className="recent-posts-section">
             <div className="section-header">
               <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
-              <button className="view-all" onClick={() => router.push('/admin/mobile-posts')}>View All <i className="bi bi-arrow-right"></i></button>
+              <button className="view-all" onClick={handleViewAllPosts}>View All <i className="bi bi-arrow-right"></i></button>
             </div>
             <div className="posts-grid">
               {recentPosts.map((post) => (
@@ -815,12 +850,12 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Recent Barter Listings - Only for roles with barter management access */}
+        {/* Recent Barter Listings */}
         {perms.canViewAllBarter && (
           <div className="recent-barter-section">
             <div className="section-header">
               <h5><i className="bi bi-arrow-left-right"></i> Recent Barter Listings</h5>
-              <button className="view-all" onClick={() => router.push('/admin/mobile-barter')}>View All <i className="bi bi-arrow-right"></i></button>
+              <button className="view-all" onClick={handleViewAllBarter}>View All <i className="bi bi-arrow-right"></i></button>
             </div>
             <div className="barter-grid">
               {recentBarterListings.map((listing) => (
@@ -841,32 +876,32 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Quick Actions - Role-based actions */}
+        {/* Quick Actions */}
         <div className="quick-actions">
           <h5><i className="bi bi-lightning-charge"></i> Quick Actions</h5>
           <div className="actions-grid">
             {perms.canViewAllUsers && (
-              <button className="action-item" onClick={() => router.push('/admin/mobile-users')}>
+              <button className="action-item" onClick={handleManageUsers}>
                 <i className="bi bi-people"></i><span>Manage Users</span>
               </button>
             )}
             {(perms.canViewAllPosts || perms.canModerateContent) && (
-              <button className="action-item" onClick={() => router.push('/admin/mobile-posts')}>
+              <button className="action-item" onClick={handleModeratePosts}>
                 <i className="bi bi-file-post"></i><span>Moderate Posts</span>
               </button>
             )}
             {perms.canViewAllBarter && (
-              <button className="action-item" onClick={() => router.push('/admin/mobile-barter')}>
+              <button className="action-item" onClick={handleBarterOversight}>
                 <i className="bi bi-arrow-left-right"></i><span>Barter Oversight</span>
               </button>
             )}
             {perms.canManageAds && (
-              <button className="action-item" onClick={() => router.push('/admin/mobile-ads')}>
+              <button className="action-item" onClick={handleManageAds}>
                 <i className="bi bi-megaphone"></i><span>Manage Ads</span>
               </button>
             )}
             {perms.canViewAnalytics && (
-              <button className="action-item" onClick={() => router.push('/admin/analytics')}>
+              <button className="action-item" onClick={handleViewAnalytics}>
                 <i className="bi bi-graph-up"></i><span>Analytics</span>
               </button>
             )}
@@ -875,18 +910,18 @@ export default function AdminDashboard() {
       </div>
 
       <style jsx global>{`
-        .dashboard-wrapper { max-width: 1400px; margin: 0 auto; }
+        .dashboard-wrapper { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
         .welcome-section { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; flex-wrap: wrap; gap: 20px; }
         .greeting { font-size: 14px; color: #6c757d; margin-bottom: 4px; }
         .welcome-title { font-size: 28px; font-weight: 700; margin: 0 0 8px 0; color: #1f2937; }
         .user-name { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         .welcome-subtitle { color: #6c757d; margin: 0; font-size: 14px; }
-        .header-actions { display: flex; align-items: center; gap: 16px; }
+        .header-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
         .role-badge-header { display: flex; align-items: center; gap: 6px; background: #e9ecef; padding: 6px 14px; border-radius: 30px; font-size: 13px; font-weight: 600; color: #495057; }
         .live-badge { display: flex; align-items: center; gap: 8px; background: rgba(16,185,129,0.1); padding: 6px 14px; border-radius: 30px; font-size: 13px; font-weight: 600; color: #10b981; }
         .live-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
         .last-update { font-size: 13px; color: #6c757d; }
-        .refresh-btn { width: 36px; height: 36px; border-radius: 10px; background: #f8f9fa; border: 1px solid #e9ecef; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+        .refresh-btn { width: 36px; height: 36px; border-radius: 10px; background: #f8f9fa; border: 1px solid #e9ecef; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.3s ease; }
         .refresh-btn:hover { background: #e9ecef; transform: rotate(15deg); }
         .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
         .stat-card { background: white; border-radius: 24px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: all 0.3s ease; cursor: pointer; }
@@ -903,7 +938,7 @@ export default function AdminDashboard() {
         .stat-change { font-size: 12px; }
         .stat-change.positive { color: #10b981; }
         .secondary-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 28px; }
-        .stat-card-mini { background: white; border-radius: 18px; padding: 14px; display: flex; align-items: center; gap: 12px; transition: all 0.3s ease; }
+        .stat-card-mini { background: white; border-radius: 18px; padding: 14px; display: flex; align-items: center; gap: 12px; transition: all 0.3s ease; cursor: pointer; }
         .stat-card-mini:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
         .stat-mini-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
         .stat-mini-icon.verified { background: rgba(16,185,129,0.1); color: #10b981; }
@@ -964,13 +999,13 @@ export default function AdminDashboard() {
         .table-header, .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .table-header h5, .section-header h5 { font-size: 16px; font-weight: 600; margin: 0; color: #1f2937; }
         .table-header h5 i, .section-header h5 i { margin-right: 8px; color: #4f46e5; }
-        .view-all { background: none; border: none; color: #4f46e5; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; transition: all 0.3s ease; }
-        .view-all:hover { gap: 10px; }
+        .view-all { background: none; border: none; color: #4f46e5; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: all 0.3s ease; }
+        .view-all:hover { gap: 10px; color: #7c3aed; }
         .custom-table { width: 100%; border-collapse: collapse; }
         .custom-table th { text-align: left; padding: 12px 16px; background: #f8f9fa; font-weight: 600; font-size: 13px; color: #495057; border-radius: 12px; }
         .custom-table td { padding: 16px; border-bottom: 1px solid #e9ecef; }
         .user-cell { display: flex; align-items: center; gap: 12px; }
-        .user-avatar-sm { width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content; center; color: white; font-weight: 600; overflow: hidden; }
+        .user-avatar-sm { width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; overflow: hidden; }
         .user-avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
         .user-name-sm { font-weight: 600; color: #1f2937; margin-bottom: 4px; }
         .user-email { font-size: 11px; color: #6c757d; }
@@ -985,7 +1020,7 @@ export default function AdminDashboard() {
         .badge-pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .recent-posts-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
         .posts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-        .post-card { background: #f8f9fa; border-radius: 16px; overflow: hidden; transition: all 0.3s ease; }
+        .post-card { background: #f8f9fa; border-radius: 16px; overflow: hidden; transition: all 0.3s ease; cursor: pointer; }
         .post-card:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
         .post-card-image { height: 160px; overflow: hidden; }
         .post-card-image img { width: 100%; height: 100%; object-fit: cover; }
@@ -996,7 +1031,7 @@ export default function AdminDashboard() {
         .post-card-meta i { margin-right: 4px; }
         .recent-barter-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
         .barter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-        .barter-card { background: #f8f9fa; border-radius: 16px; padding: 16px; transition: all 0.3s ease; }
+        .barter-card { background: #f8f9fa; border-radius: 16px; padding: 16px; transition: all 0.3s ease; cursor: pointer; }
         .barter-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
         .barter-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .barter-card-header h6 { margin: 0; font-size: 14px; font-weight: 600; }
@@ -1008,10 +1043,10 @@ export default function AdminDashboard() {
         .barter-status.inactive { background: #fee2e2; color: #991b1b; }
         .no-data-card { grid-column: span 3; text-align: center; padding: 60px 20px; color: #9ca3af; }
         .no-data-card i { font-size: 48px; margin-bottom: 12px; display: block; }
-        .quick-actions { background: white; border-radius: 24px; padding: 20px; }
+        .quick-actions { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
         .quick-actions h5 { margin: 0 0 20px 0; font-size: 16px; font-weight: 600; }
         .quick-actions h5 i { margin-right: 8px; color: #4f46e5; }
-        .actions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+        .actions-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
         .action-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; background: #f8f9fa; border: none; border-radius: 16px; color: #495057; transition: all 0.3s ease; cursor: pointer; }
         .action-item:hover { background: #e9ecef; transform: translateY(-2px); }
         .action-item i { font-size: 24px; color: #4f46e5; }
@@ -1019,6 +1054,7 @@ export default function AdminDashboard() {
         @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.1); } }
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        
         @media (max-width: 1200px) {
           .stats-grid { grid-template-columns: repeat(2,1fr); }
           .secondary-stats { grid-template-columns: repeat(3,1fr); }
@@ -1026,13 +1062,14 @@ export default function AdminDashboard() {
           .online-list { grid-template-columns: repeat(2,1fr); }
           .posts-grid { grid-template-columns: repeat(2,1fr); }
           .barter-grid { grid-template-columns: repeat(2,1fr); }
-          .actions-grid { grid-template-columns: repeat(2,1fr); }
+          .actions-grid { grid-template-columns: repeat(3,1fr); }
         }
         @media (max-width: 768px) {
+          .dashboard-wrapper { padding: 0 16px; }
           .stats-grid, .secondary-stats { grid-template-columns: 1fr; }
           .welcome-section { flex-direction: column; align-items: flex-start; }
           .online-list, .posts-grid, .barter-grid { grid-template-columns: 1fr; }
-          .actions-grid { grid-template-columns: 1fr; }
+          .actions-grid { grid-template-columns: repeat(2,1fr); }
         }
       `}</style>
     </AdminLayout>
