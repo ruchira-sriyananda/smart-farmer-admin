@@ -1,7 +1,25 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { supabase } from '@/lib/supabaseClient'
+import { createClient } from '@supabase/supabase-js'
 import AdminLayout from '@/components/AdminLayout'
+
+// Initialize supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+// Create regular client
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// Create admin client (bypasses RLS) - only on server side
+const supabaseAdmin = typeof window === 'undefined' && supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
+  : supabase
 
 export default function Advertisements() {
   const router = useRouter()
@@ -92,6 +110,7 @@ export default function Advertisements() {
       setPackages(data || [])
     } catch (err) {
       console.error('Error fetching packages:', err)
+      setPackages([])
     }
   }
 
@@ -101,11 +120,7 @@ export default function Advertisements() {
         .from('user_subscriptions')
         .select(`
           *,
-          users!user_subscriptions_user_id_fkey (
-            full_name,
-            email
-          ),
-          subscription_packages!user_subscriptions_package_id_fkey (
+          subscription_packages:package_id (
             package_name,
             price
           )
@@ -117,6 +132,7 @@ export default function Advertisements() {
       setSubscriptions(data || [])
     } catch (err) {
       console.error('Error fetching subscriptions:', err)
+      setSubscriptions([])
     }
   }
 
@@ -129,19 +145,13 @@ export default function Advertisements() {
         .from('mobile_advertisements')
         .select(`
           *,
-          subscription_packages!mobile_advertisements_package_id_fkey (
+          subscription_packages:package_id (
             package_id,
             package_name,
             price,
             duration_days,
             ad_type,
             features
-          ),
-          user_subscriptions!mobile_advertisements_subscription_id_fkey (
-            subscription_id,
-            status,
-            payment_status,
-            amount_paid
           )
         `)
         .order('created_at', { ascending: false })
@@ -185,7 +195,7 @@ export default function Advertisements() {
 
   const calculateStats = (adsData) => {
     const now = new Date()
-    const active = adsData.filter(ad => ad.status === 'ACTIVE' && new Date(ad.end_date) > now).length
+    const active = adsData.filter(ad => ad.status === 'ACTIVE' && ad.end_date && new Date(ad.end_date) > now).length
     const expired = adsData.filter(ad => ad.status === 'EXPIRED' || (ad.end_date && new Date(ad.end_date) <= now)).length
     const pending = adsData.filter(ad => ad.status === 'PENDING').length
     const rejected = adsData.filter(ad => ad.status === 'REJECTED').length
@@ -468,6 +478,72 @@ export default function Advertisements() {
           <div className="loading-spinner"></div>
           <p>Loading advertisements...</p>
         </div>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+          }
+          .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e9ecef;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </AdminLayout>
+    )
+  }
+
+  if (error && ads.length === 0) {
+    return (
+      <AdminLayout title="Advertisements">
+        <div className="error-container">
+          <i className="bi bi-exclamation-triangle-fill"></i>
+          <h3>Failed to Load Advertisements</h3>
+          <p>{error}</p>
+          <button className="retry-btn" onClick={fetchAds}>Retry</button>
+        </div>
+        <style jsx>{`
+          .error-container {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 24px;
+            max-width: 500px;
+            margin: 40px auto;
+          }
+          .error-container i {
+            font-size: 48px;
+            color: #dc3545;
+            margin-bottom: 16px;
+          }
+          .error-container h3 {
+            margin-bottom: 8px;
+            color: #1f2937;
+          }
+          .error-container p {
+            color: #6c757d;
+            margin-bottom: 24px;
+          }
+          .retry-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 10px 24px;
+            border-radius: 12px;
+            color: white;
+            font-weight: 500;
+            cursor: pointer;
+          }
+        `}</style>
       </AdminLayout>
     )
   }
@@ -490,7 +566,6 @@ export default function Advertisements() {
             <button className="filter-toggle-btn" onClick={() => setShowFilters(!showFilters)}>
               <i className="bi bi-funnel-fill"></i>
               <span>Filters</span>
-              {(filter !== 'all' || dateRange !== 'all') && <span className="active-badge"></span>}
             </button>
             <button className="btn-packages" onClick={() => setShowPackageListModal(true)}>
               <i className="bi bi-tags"></i>
@@ -958,7 +1033,6 @@ export default function Advertisements() {
           cursor: pointer;
           transition: all 0.3s ease;
           border: none;
-          position: relative;
         }
 
         .filter-toggle-btn {
@@ -969,16 +1043,6 @@ export default function Advertisements() {
 
         .filter-toggle-btn:hover {
           background: #e9ecef;
-        }
-
-        .active-badge {
-          position: absolute;
-          top: -4px;
-          right: -4px;
-          width: 10px;
-          height: 10px;
-          background: #4f46e5;
-          border-radius: 50%;
         }
 
         .btn-packages {
@@ -1195,7 +1259,6 @@ export default function Advertisements() {
           gap: 10px;
           font-size: 12px;
           margin-bottom: 12px;
-          flex-wrap: wrap;
         }
 
         .package-price {
@@ -1211,7 +1274,6 @@ export default function Advertisements() {
           border-top: 1px solid #e9ecef;
           border-bottom: 1px solid #e9ecef;
           margin-bottom: 12px;
-          flex-wrap: wrap;
         }
 
         .ad-stat {
@@ -1241,7 +1303,7 @@ export default function Advertisements() {
 
         .btn-view, .btn-approve, .btn-reject, .btn-pause, .btn-delete {
           flex: 1;
-          padding: 6px 12px;
+          padding: 8px 12px;
           border: none;
           border-radius: 8px;
           font-size: 12px;
@@ -1251,22 +1313,22 @@ export default function Advertisements() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          gap: 4px;
+          gap: 6px;
         }
 
         .btn-view { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
-        .btn-view:hover { background: #4f46e5; color: white; }
+        .btn-view:hover:not(:disabled) { background: #4f46e5; color: white; }
         .btn-approve { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .btn-approve:hover { background: #10b981; color: white; }
+        .btn-approve:hover:not(:disabled) { background: #10b981; color: white; }
         .btn-reject { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .btn-reject:hover { background: #ef4444; color: white; }
+        .btn-reject:hover:not(:disabled) { background: #ef4444; color: white; }
         .btn-pause { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .btn-pause:hover { background: #f59e0b; color: white; }
+        .btn-pause:hover:not(:disabled) { background: #f59e0b; color: white; }
         .btn-delete { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .btn-delete:hover { background: #ef4444; color: white; }
+        .btn-delete:hover:not(:disabled) { background: #ef4444; color: white; }
 
-        .btn-view:disabled, .btn-approve:disabled, .btn-reject:disabled, .btn-pause:disabled, .btn-delete:disabled {
-          opacity: 0.6;
+        button:disabled {
+          opacity: 0.5;
           cursor: not-allowed;
         }
 
@@ -1285,7 +1347,6 @@ export default function Advertisements() {
           display: block;
         }
 
-        /* Packages Modal Styles */
         .packages-header {
           display: flex;
           justify-content: flex-end;
@@ -1445,6 +1506,13 @@ export default function Advertisements() {
           color: white;
         }
 
+        .form-hint {
+          display: block;
+          font-size: 11px;
+          color: #6c757d;
+          margin-top: 4px;
+        }
+
         .form-checkbox {
           display: flex;
           align-items: center;
@@ -1455,13 +1523,6 @@ export default function Advertisements() {
         .form-checkbox input {
           width: auto;
           cursor: pointer;
-        }
-
-        .form-hint {
-          display: block;
-          font-size: 11px;
-          color: #9ca3af;
-          margin-top: 4px;
         }
 
         .modal-overlay {
@@ -1597,24 +1658,9 @@ export default function Advertisements() {
           cursor: pointer;
         }
 
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          min-height: 400px;
-        }
-        .loading-spinner {
-          width: 48px;
-          height: 48px;
-          border: 3px solid #e9ecef;
-          border-top-color: #4f46e5;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
+        .btn-primary:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
 
         @keyframes fadeIn {
@@ -1661,9 +1707,6 @@ export default function Advertisements() {
           }
           .filter-group {
             width: 100%;
-          }
-          .packages-grid {
-            grid-template-columns: 1fr;
           }
         }
       `}</style>
