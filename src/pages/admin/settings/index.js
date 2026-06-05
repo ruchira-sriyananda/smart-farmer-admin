@@ -164,20 +164,21 @@ export default function Settings() {
   // In your Settings component, update the handleTestEmail function
 
 const handleTestEmail = async () => {
+  // Validate SMTP settings
   if (!settings.smtp_host || !settings.smtp_user) {
-    showMessage('error', 'Please configure SMTP settings first')
+    showMessage('error', 'Please configure SMTP host and username first')
     return
   }
   
   const recipientEmail = settings.admin_email || settings.support_email
   
   if (!recipientEmail) {
-    showMessage('error', 'Please configure admin or support email address')
+    showMessage('error', 'Please configure admin or support email address first')
     return
   }
   
   setSaving(true)
-  showMessage('info', 'Sending test email via Resend...')
+  showMessage('info', 'Sending test email...')
   
   try {
     // First save the settings
@@ -197,30 +198,34 @@ const handleTestEmail = async () => {
         .upsert(update, { onConflict: 'setting_key' })
     }
     
-    // Call Supabase Edge Function
-    const { data, error } = await supabase.functions.invoke('send-test-email', {
-      body: { 
+    // Call our Next.js API route
+    const response = await fetch('/api/send-test-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
         to: recipientEmail,
-        settings: {
+        smtpSettings: {
           host: settings.smtp_host,
           port: settings.smtp_port,
           user: settings.smtp_user,
           pass: settings.smtp_password
         },
         siteName: settings.site_name
-      }
+      })
     })
     
-    if (error) throw error
+    const data = await response.json()
     
-    if (data?.success) {
+    if (data.success) {
       showMessage('success', `✅ Test email sent to ${recipientEmail}! Please check your inbox.`)
     } else {
-      showMessage('error', data?.error || 'Failed to send test email')
+      showMessage('error', data.error || 'Failed to send test email')
     }
   } catch (err) {
-    console.error('Error:', err)
-    showMessage('error', 'Failed to send test email. Please check your Resend API key configuration.')
+    console.error('Error sending test email:', err)
+    showMessage('error', 'Failed to send test email. Please check your SMTP settings and try again.')
   } finally {
     setSaving(false)
   }
