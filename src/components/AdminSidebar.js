@@ -67,7 +67,7 @@ export default function AdminSidebar() {
       path: '/admin/security', 
       icon: 'bi-shield-lock', 
       label: 'Security', 
-      color: 'dark',
+      color: 'danger',
       roles: ['SUPER_ADMIN', 'SECURITY_ADMIN'],
       description: 'Security monitoring and settings'
     },
@@ -121,15 +121,26 @@ export default function AdminSidebar() {
 
   const getIconColor = (color) => {
     const colors = {
-      primary: '#4f46e5',
-      success: '#10b981',
-      info: '#0dcaf0',
-      danger: '#ef4444',
-      warning: '#f59e0b',
-      dark: '#1f2937',
-      secondary: '#6c757d'
+      primary: '#4f46e5',   // Purple - visible on dark
+      success: '#10b981',   // Green - visible on dark
+      info: '#0dcaf0',      // Cyan - visible on dark
+      danger: '#ef4444',    // Red - highly visible on dark
+      warning: '#f59e0b',   // Orange - visible on dark
+      secondary: '#94a3b8'  // Light gray - visible on dark
     }
     return colors[color] || colors.primary
+  }
+
+  const getIconBackground = (color) => {
+    const backgrounds = {
+      primary: 'rgba(79, 70, 229, 0.15)',
+      success: 'rgba(16, 185, 129, 0.15)',
+      info: 'rgba(13, 202, 240, 0.15)',
+      danger: 'rgba(239, 68, 68, 0.15)',
+      warning: 'rgba(245, 158, 11, 0.15)',
+      secondary: 'rgba(148, 163, 184, 0.15)'
+    }
+    return backgrounds[color] || backgrounds.primary
   }
 
   const isActive = (path) => {
@@ -203,7 +214,13 @@ export default function AdminSidebar() {
                   onMouseEnter={() => setHoveredItem(item.path)}
                   onMouseLeave={() => setHoveredItem(null)}
                 >
-                  <span className="menu-icon" style={{ color: getIconColor(item.color) }}>
+                  <span 
+                    className="menu-icon" 
+                    style={{ 
+                      backgroundColor: getIconBackground(item.color),
+                      color: getIconColor(item.color)
+                    }}
+                  >
                     <i className={`bi ${item.icon}`}></i>
                   </span>
                   <span className="menu-text">
@@ -262,13 +279,13 @@ export default function AdminSidebar() {
           top: 0;
           width: 280px;
           height: 100vh;
-          background: #1a1f2e;
-          color: #a0aec0;
+          background: #0f172a;
+          color: #94a3b8;
           z-index: 1000;
           transition: width 0.3s ease;
           overflow-y: auto;
           overflow-x: hidden;
-          box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+          box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
         }
 
         .admin-sidebar.collapsed {
@@ -281,18 +298,22 @@ export default function AdminSidebar() {
         }
 
         .admin-sidebar::-webkit-scrollbar-track {
-          background: #2d3748;
+          background: #1e293b;
         }
 
         .admin-sidebar::-webkit-scrollbar-thumb {
-          background: #4a5568;
+          background: #475569;
           border-radius: 2px;
+        }
+
+        .admin-sidebar::-webkit-scrollbar-thumb:hover {
+          background: #64748b;
         }
 
         /* Brand Section */
         .brand-section {
           padding: 24px 20px;
-          border-bottom: 1px solid #2d3748;
+          border-bottom: 1px solid #1e293b;
           display: flex;
           align-items: center;
           gap: 12px;
@@ -306,11 +327,17 @@ export default function AdminSidebar() {
           display: flex;
           align-items: center;
           justify-content: center;
+          flex-shrink: 0;
         }
 
         .brand-logo i {
           font-size: 20px;
           color: white;
+        }
+
+        .brand-info {
+          flex: 1;
+          min-width: 0;
         }
 
         .brand-title {
@@ -323,22 +350,26 @@ export default function AdminSidebar() {
         .brand-subtitle {
           font-size: 11px;
           margin: 0;
-          opacity: 0.7;
+          color: #94a3b8;
         }
 
         /* Profile Section */
         .profile-section {
           padding: 20px;
-          border-bottom: 1px solid #2d3748;
+          border-bottom: 1px solid #1e293b;
           display: flex;
           align-items: center;
           gap: 12px;
           position: relative;
         }
 
+        .profile-avatar {
+          flex-shrink: 0;
+        }
+
         .profile-avatar i {
           font-size: 44px;
-          color: #718096;
+          color: #64748b;
         }
 
         .profile-details {
@@ -359,13 +390,13 @@ export default function AdminSidebar() {
         .profile-role {
           font-size: 11px;
           margin: 0 0 2px 0;
-          opacity: 0.7;
+          color: #94a3b8;
         }
 
         .profile-email {
           font-size: 10px;
           margin: 0;
-          opacity: 0.5;
+          color: #64748b;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -416,7 +447,7 @@ export default function AdminSidebar() {
           background: transparent;
           border: none;
           border-radius: 10px;
-          color: #a0aec0;
+          color: #94a3b8;
           cursor: pointer;
           transition: all 0.2s ease;
           text-align: left;
@@ -424,27 +455,25 @@ export default function AdminSidebar() {
         }
 
         .menu-link:hover {
-          background: #2d3748;
+          background: #1e293b;
           color: white;
         }
 
         .menu-link.active {
-          background: #2d3748;
+          background: #1e293b;
           color: white;
         }
 
-        .menu-link.active .menu-icon i {
-          color: #4f46e5;
-        }
-
         .menu-icon {
-          width: 32px;
-          height: 32px;
+          width: 36px;
+          height: 36px;
           display: flex;
           align-items: center;
           justify-content: center;
+          border-radius: 10px;
           font-size: 18px;
           flex-shrink: 0;
+          transition: all 0.2s ease;
         }
 
         .menu-text {
@@ -462,7 +491,12 @@ export default function AdminSidebar() {
         .menu-description {
           display: block;
           font-size: 10px;
-          opacity: 0.6;
+          color: #64748b;
+        }
+
+        .menu-link:hover .menu-description,
+        .menu-link.active .menu-description {
+          color: #94a3b8;
         }
 
         .menu-active {
@@ -483,15 +517,16 @@ export default function AdminSidebar() {
           top: 50%;
           transform: translateY(-50%);
           margin-left: 12px;
-          background: #2d3748;
+          background: #1e293b;
           padding: 8px 12px;
           border-radius: 8px;
           white-space: nowrap;
           z-index: 1100;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
           display: flex;
           flex-direction: column;
           gap: 4px;
+          border: 1px solid #334155;
         }
 
         .menu-tooltip strong {
@@ -501,7 +536,7 @@ export default function AdminSidebar() {
 
         .menu-tooltip span {
           font-size: 10px;
-          color: #a0aec0;
+          color: #94a3b8;
         }
 
         /* Sidebar Footer */
@@ -511,8 +546,8 @@ export default function AdminSidebar() {
           left: 0;
           right: 0;
           padding: 16px 20px;
-          border-top: 1px solid #2d3748;
-          background: #1a1f2e;
+          border-top: 1px solid #1e293b;
+          background: #0f172a;
         }
 
         .system-status {
@@ -531,16 +566,17 @@ export default function AdminSidebar() {
           background: #10b981;
           border-radius: 50%;
           display: inline-block;
+          box-shadow: 0 0 6px #10b981;
         }
 
         .status-label {
           font-size: 11px;
-          opacity: 0.7;
+          color: #94a3b8;
         }
 
         .footer-divider {
           height: 1px;
-          background: #2d3748;
+          background: #1e293b;
           margin: 12px 0;
         }
 
@@ -550,7 +586,7 @@ export default function AdminSidebar() {
           justify-content: center;
           gap: 6px;
           font-size: 10px;
-          opacity: 0.5;
+          color: #64748b;
         }
 
         .version-info i {
@@ -597,11 +633,12 @@ export default function AdminSidebar() {
           z-index: 1100;
           display: none;
           cursor: pointer;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
         .sidebar-toggle:hover {
           background: #7c3aed;
+          transform: scale(1.05);
         }
 
         /* Sidebar Overlay */
@@ -611,7 +648,7 @@ export default function AdminSidebar() {
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
+          background: rgba(0, 0, 0, 0.6);
           z-index: 999;
         }
 
