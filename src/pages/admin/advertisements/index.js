@@ -28,18 +28,13 @@ export default function Advertisements() {
   const [viewMode, setViewMode] = useState('grid')
   const [selectedAds, setSelectedAds] = useState([])
   const [showBulkActions, setShowBulkActions] = useState(false)
-  const [campaigns, setCampaigns] = useState([])
   
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     image_url: '',
     package_id: '',
-    target_audience: 'ALL',
-    status: 'PENDING',
-    budget: '',
-    start_date: '',
-    end_date: ''
+    target_audience: 'ALL'
   })
 
   const [packageFormData, setPackageFormData] = useState({
@@ -85,7 +80,7 @@ export default function Advertisements() {
   }, [filter, dateRange])
 
   const fetchAllData = async () => {
-    await Promise.all([fetchAds(), fetchPackages(), fetchCampaigns()])
+    await Promise.all([fetchAds(), fetchPackages()])
   }
 
   const fetchPackages = async () => {
@@ -100,21 +95,6 @@ export default function Advertisements() {
     } catch (err) {
       console.error('Error fetching packages:', err)
       setPackages([])
-    }
-  }
-
-  const fetchCampaigns = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('mobile_advertisements')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (error) throw error
-      setCampaigns(data || [])
-    } catch (err) {
-      console.error('Error fetching campaigns:', err)
     }
   }
 
@@ -325,27 +305,29 @@ export default function Advertisements() {
     
     try {
       const selectedPackage = packages.find(p => p.package_id === formData.package_id)
-      const startDate = formData.start_date ? new Date(formData.start_date) : new Date()
-      const endDate = formData.end_date ? new Date(formData.end_date) : new Date()
       
-      if (!formData.end_date) {
-        endDate.setDate(endDate.getDate() + (selectedPackage?.duration_days || 30))
+      // Get current date for start_date
+      const startDate = new Date()
+      const endDate = new Date()
+      endDate.setDate(endDate.getDate() + (selectedPackage?.duration_days || 30))
+
+      // Only include fields that exist in the table
+      const adData = {
+        title: formData.title,
+        description: formData.description || '',
+        image_url: formData.image_url || null,
+        package_id: formData.package_id,
+        target_audience: formData.target_audience,
+        status: 'PENDING',
+        amount_paid: selectedPackage?.price || 0,
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
+        created_at: new Date().toISOString()
       }
 
       const { error } = await supabase
         .from('mobile_advertisements')
-        .insert({
-          title: formData.title,
-          description: formData.description,
-          image_url: formData.image_url,
-          package_id: formData.package_id,
-          target_audience: formData.target_audience,
-          status: 'PENDING',
-          amount_paid: selectedPackage?.price || 0,
-          start_date: startDate.toISOString(),
-          end_date: endDate.toISOString(),
-          budget: parseFloat(formData.budget) || 0
-        })
+        .insert(adData)
 
       if (error) throw error
 
@@ -447,11 +429,7 @@ export default function Advertisements() {
       description: '',
       image_url: '',
       package_id: '',
-      target_audience: 'ALL',
-      status: 'PENDING',
-      budget: '',
-      start_date: '',
-      end_date: ''
+      target_audience: 'ALL'
     })
   }
 
@@ -827,7 +805,7 @@ export default function Advertisements() {
                         <i className="bi bi-currency-dollar"></i>
                         <div>
                           <span className="metric-value">${ad.amount_paid || 0}</span>
-                          <span className="metric-label">Budget</span>
+                          <span className="metric-label">Amount</span>
                         </div>
                       </div>
                     </div>
@@ -939,6 +917,7 @@ export default function Advertisements() {
                   value={formData.image_url}
                   onChange={(e) => setFormData({...formData, image_url: e.target.value})}
                 />
+                <small className="form-hint">Enter a valid image URL for your campaign</small>
               </div>
 
               <div className="form-group">
@@ -957,52 +936,17 @@ export default function Advertisements() {
                 </select>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Target Audience</label>
-                  <select
-                    className="form-select"
-                    value={formData.target_audience}
-                    onChange={(e) => setFormData({...formData, target_audience: e.target.value})}
-                  >
-                    <option value="ALL">All Users</option>
-                    <option value="FARMERS">Farmers Only</option>
-                    <option value="VENDORS">Vendors Only</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label>Budget ($)</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    placeholder="Enter budget"
-                    value={formData.budget}
-                    onChange={(e) => setFormData({...formData, budget: e.target.value})}
-                  />
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Start Date (Optional)</label>
-                  <input
-                    type="date"
-                    className="form-input"
-                    value={formData.start_date}
-                    onChange={(e) => setFormData({...formData, start_date: e.target.value})}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>End Date (Optional)</label>
-                  <input
-                    type="date"
-                    className="form-input"
-                    value={formData.end_date}
-                    onChange={(e) => setFormData({...formData, end_date: e.target.value})}
-                  />
-                </div>
+              <div className="form-group">
+                <label>Target Audience</label>
+                <select
+                  className="form-select"
+                  value={formData.target_audience}
+                  onChange={(e) => setFormData({...formData, target_audience: e.target.value})}
+                >
+                  <option value="ALL">All Users</option>
+                  <option value="FARMERS">Farmers Only</option>
+                  <option value="VENDORS">Vendors Only</option>
+                </select>
               </div>
             </div>
             <div className="modal-footer">
@@ -1057,7 +1001,7 @@ export default function Advertisements() {
                   <span>{selectedAd.target_audience}</span>
                 </div>
                 <div className="view-item">
-                  <label>Budget</label>
+                  <label>Amount Paid</label>
                   <span>${selectedAd.amount_paid || 0}</span>
                 </div>
                 <div className="view-item">
@@ -1422,14 +1366,13 @@ export default function Advertisements() {
       )}
 
       <style jsx>{`
-        /* All the CSS styles from previous version plus additional styles */
+        /* All CSS styles remain the same as in the previous version */
         .ads-dashboard {
           max-width: 1600px;
           margin: 0 auto;
           padding: 0 24px;
         }
 
-        /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border-radius: 28px;
@@ -1497,24 +1440,13 @@ export default function Advertisements() {
           border: none;
         }
 
-        .btn-analytics {
+        .btn-analytics, .btn-packages {
           background: rgba(255,255,255,0.2);
           color: white;
           border: 1px solid rgba(255,255,255,0.3);
         }
 
-        .btn-analytics:hover {
-          background: rgba(255,255,255,0.3);
-          transform: translateY(-2px);
-        }
-
-        .btn-packages {
-          background: rgba(255,255,255,0.2);
-          color: white;
-          border: 1px solid rgba(255,255,255,0.3);
-        }
-
-        .btn-packages:hover {
+        .btn-analytics:hover, .btn-packages:hover {
           background: rgba(255,255,255,0.3);
           transform: translateY(-2px);
         }
@@ -1529,7 +1461,6 @@ export default function Advertisements() {
           box-shadow: 0 8px 20px rgba(0,0,0,0.15);
         }
 
-        /* Stats Grid */
         .stats-wrapper {
           margin-bottom: 32px;
         }
@@ -1612,7 +1543,6 @@ export default function Advertisements() {
           opacity: 0.05;
         }
 
-        /* Controls Bar */
         .controls-bar {
           background: white;
           border-radius: 20px;
@@ -1782,7 +1712,6 @@ export default function Advertisements() {
           color: #667eea;
         }
 
-        /* Bulk Actions */
         .bulk-actions-bar {
           background: linear-gradient(135deg, #667eea, #764ba2);
           border-radius: 16px;
@@ -1840,7 +1769,6 @@ export default function Advertisements() {
           color: white;
         }
 
-        /* Ads Container */
         .ads-container.grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
@@ -2077,7 +2005,6 @@ export default function Advertisements() {
         .action-btn.delete { background: rgba(239,68,68,0.1); color: #ef4444; }
         .action-btn.delete:hover { background: #ef4444; color: white; }
 
-        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 80px 20px;
@@ -2115,7 +2042,6 @@ export default function Advertisements() {
           gap: 8px;
         }
 
-        /* Loading Screen */
         .loading-screen {
           display: flex;
           align-items: center;
@@ -2150,7 +2076,6 @@ export default function Advertisements() {
           40% { transform: scale(1); opacity: 1; }
         }
 
-        /* Modals */
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -2236,7 +2161,6 @@ export default function Advertisements() {
           gap: 12px;
         }
 
-        /* Form Styles */
         .form-group {
           margin-bottom: 20px;
         }
@@ -2293,7 +2217,6 @@ export default function Advertisements() {
           cursor: pointer;
         }
 
-        /* View Modal Styles */
         .view-image {
           margin-bottom: 24px;
           border-radius: 16px;
@@ -2367,7 +2290,6 @@ export default function Advertisements() {
           color: #6c757d;
         }
 
-        /* Analytics Grid */
         .analytics-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -2423,7 +2345,6 @@ export default function Advertisements() {
           color: #10b981;
         }
 
-        /* Packages Grid */
         .packages-header {
           display: flex;
           justify-content: flex-end;
@@ -2596,7 +2517,6 @@ export default function Advertisements() {
           }
         }
 
-        /* Responsive */
         @media (max-width: 1200px) {
           .stats-grid {
             grid-template-columns: repeat(3, 1fr);
