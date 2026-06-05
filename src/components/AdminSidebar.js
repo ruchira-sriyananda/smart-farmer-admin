@@ -29,7 +29,7 @@ export default function AdminSidebar() {
     getRole()
   }, [])
 
-  // Menu items with permissions (Reports and Backup removed)
+  // Menu items with permissions
   const menuItems = [
     { 
       path: '/admin/dashboard', 
@@ -175,7 +175,7 @@ export default function AdminSidebar() {
 
       {/* Sidebar */}
       <aside className={`admin-sidebar ${collapsed ? 'collapsed' : ''}`}>
-        {/* Brand Section */}
+        {/* Brand Section - Fixed at top */}
         <div className="brand-section">
           <div className="brand-logo">
             <i className="bi bi-tractor"></i>
@@ -186,7 +186,7 @@ export default function AdminSidebar() {
           </div>
         </div>
 
-        {/* Profile Section */}
+        {/* Profile Section - Fixed */}
         <div className="profile-section">
           <div className="profile-avatar">
             <i className="bi bi-person-circle"></i>
@@ -203,59 +203,58 @@ export default function AdminSidebar() {
           )}
         </div>
 
-        {/* Navigation Menu */}
-        <nav className="navigation-menu">
-          <ul className="menu-list">
-            {filteredMenuItems.map((item) => (
-              <li key={item.path} className="menu-item">
-                <button
-                  className={`menu-link ${isActive(item.path) ? 'active' : ''}`}
-                  onClick={() => router.push(item.path)}
-                  onMouseEnter={() => setHoveredItem(item.path)}
-                  onMouseLeave={() => setHoveredItem(null)}
-                >
-                  <span 
-                    className="menu-icon" 
-                    style={{ 
-                      backgroundColor: getIconBackground(item.color),
-                      color: getIconColor(item.color)
-                    }}
+        {/* Navigation Menu - Scrollable area */}
+        <div className="navigation-wrapper">
+          <nav className="navigation-menu">
+            <ul className="menu-list">
+              {filteredMenuItems.map((item) => (
+                <li key={item.path} className="menu-item">
+                  <button
+                    className={`menu-link ${isActive(item.path) ? 'active' : ''}`}
+                    onClick={() => router.push(item.path)}
+                    onMouseEnter={() => setHoveredItem(item.path)}
+                    onMouseLeave={() => setHoveredItem(null)}
                   >
-                    <i className={`bi ${item.icon}`}></i>
-                  </span>
-                  <span className="menu-text">
-                    <span className="menu-label">{item.label}</span>
-                    <span className="menu-description">{item.description}</span>
-                  </span>
-                  {isActive(item.path) && <span className="menu-active"></span>}
-                </button>
+                    <span 
+                      className="menu-icon" 
+                      style={{ 
+                        backgroundColor: getIconBackground(item.color),
+                        color: getIconColor(item.color)
+                      }}
+                    >
+                      <i className={`bi ${item.icon}`}></i>
+                    </span>
+                    <span className="menu-text">
+                      <span className="menu-label">{item.label}</span>
+                      <span className="menu-description">{item.description}</span>
+                    </span>
+                    {isActive(item.path) && <span className="menu-active"></span>}
+                  </button>
 
-                {/* Tooltip for collapsed mode */}
-                {collapsed && hoveredItem === item.path && (
-                  <div className="menu-tooltip">
-                    <strong>{item.label}</strong>
-                    <span>{item.description}</span>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </nav>
+                  {/* Tooltip for collapsed mode */}
+                  {collapsed && hoveredItem === item.path && (
+                    <div className="menu-tooltip">
+                      <strong>{item.label}</strong>
+                      <span>{item.description}</span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </div>
 
-        {/* Footer Section - Enhanced Responsive */}
+        {/* Footer Section - Fixed at bottom */}
         <div className="sidebar-footer">
-          <div className="footer-content">
-            <div className="system-status">
-              <div className="status-indicator">
-                <span className="status-dot"></span>
-                <span className="status-label">System Operational</span>
-              </div>
+          <div className="system-status">
+            <div className="status-indicator">
+              <span className="status-dot"></span>
+              <span className="status-label">System Operational</span>
             </div>
-            <div className="footer-divider"></div>
-            <div className="version-info">
-              <i className="bi bi-code-square"></i>
-              <span>Version 3.0.0</span>
-            </div>
+          </div>
+          <div className="version-info">
+            <i className="bi bi-code-square"></i>
+            <span>Version 3.0.0</span>
           </div>
         </div>
 
@@ -285,8 +284,9 @@ export default function AdminSidebar() {
           color: #94a3b8;
           z-index: 1000;
           transition: width 0.3s ease;
-          overflow-y: auto;
-          overflow-x: hidden;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
           box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
         }
 
@@ -294,27 +294,15 @@ export default function AdminSidebar() {
           width: 80px;
         }
 
-        /* Scrollbar */
-        .admin-sidebar::-webkit-scrollbar {
-          width: 4px;
-        }
-
-        .admin-sidebar::-webkit-scrollbar-track {
-          background: #1e293b;
-        }
-
-        .admin-sidebar::-webkit-scrollbar-thumb {
-          background: #475569;
-          border-radius: 2px;
-        }
-
-        /* Brand Section */
+        /* Brand Section - Fixed at top */
         .brand-section {
           padding: 24px 20px;
           border-bottom: 1px solid #1e293b;
           display: flex;
           align-items: center;
           gap: 12px;
+          flex-shrink: 0;
+          background: #0f172a;
         }
 
         .brand-logo {
@@ -351,7 +339,7 @@ export default function AdminSidebar() {
           color: #94a3b8;
         }
 
-        /* Profile Section */
+        /* Profile Section - Fixed */
         .profile-section {
           padding: 20px;
           border-bottom: 1px solid #1e293b;
@@ -359,6 +347,8 @@ export default function AdminSidebar() {
           align-items: center;
           gap: 12px;
           position: relative;
+          flex-shrink: 0;
+          background: #0f172a;
         }
 
         .profile-avatar {
@@ -418,10 +408,35 @@ export default function AdminSidebar() {
           color: white;
         }
 
+        /* Navigation Wrapper - Scrollable area */
+        .navigation-wrapper {
+          flex: 1;
+          overflow-y: auto;
+          overflow-x: hidden;
+          min-height: 0;
+        }
+
+        /* Custom scrollbar for navigation */
+        .navigation-wrapper::-webkit-scrollbar {
+          width: 4px;
+        }
+
+        .navigation-wrapper::-webkit-scrollbar-track {
+          background: #1e293b;
+        }
+
+        .navigation-wrapper::-webkit-scrollbar-thumb {
+          background: #475569;
+          border-radius: 2px;
+        }
+
+        .navigation-wrapper::-webkit-scrollbar-thumb:hover {
+          background: #64748b;
+        }
+
         /* Navigation Menu */
         .navigation-menu {
           padding: 16px 12px;
-          flex: 1;
         }
 
         .menu-list {
@@ -511,11 +526,10 @@ export default function AdminSidebar() {
 
         /* Tooltip for collapsed mode */
         .menu-tooltip {
-          position: absolute;
-          left: 100%;
+          position: fixed;
+          left: 80px;
           top: 50%;
           transform: translateY(-50%);
-          margin-left: 12px;
           background: #1e293b;
           padding: 8px 12px;
           border-radius: 8px;
@@ -526,6 +540,7 @@ export default function AdminSidebar() {
           flex-direction: column;
           gap: 4px;
           border: 1px solid #334155;
+          pointer-events: none;
         }
 
         .menu-tooltip strong {
@@ -538,27 +553,16 @@ export default function AdminSidebar() {
           color: #94a3b8;
         }
 
-        /* Sidebar Footer - Enhanced Responsive */
+        /* Sidebar Footer - Fixed at bottom */
         .sidebar-footer {
-          position: relative;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          width: 100%;
           padding: 16px 20px;
           border-top: 1px solid #1e293b;
           background: #0f172a;
-          margin-top: auto;
-        }
-
-        .footer-content {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
+          flex-shrink: 0;
         }
 
         .system-status {
-          width: 100%;
+          margin-bottom: 12px;
         }
 
         .status-indicator {
@@ -591,16 +595,10 @@ export default function AdminSidebar() {
           color: #94a3b8;
         }
 
-        .footer-divider {
-          height: 1px;
-          background: #1e293b;
-          width: 100%;
-        }
-
         .version-info {
           display: flex;
           align-items: center;
-          justify-content: flex-start;
+          justify-content: center;
           gap: 6px;
           font-size: 10px;
           color: #64748b;
@@ -677,8 +675,7 @@ export default function AdminSidebar() {
         .admin-sidebar.collapsed .profile-details,
         .admin-sidebar.collapsed .menu-text,
         .admin-sidebar.collapsed .status-label,
-        .admin-sidebar.collapsed .version-info span,
-        .admin-sidebar.collapsed .footer-divider {
+        .admin-sidebar.collapsed .version-info span {
           display: none;
         }
 
@@ -709,48 +706,20 @@ export default function AdminSidebar() {
           justify-content: center;
         }
 
-        .admin-sidebar.collapsed .version-info {
-          justify-content: center;
-        }
-
-        .admin-sidebar.collapsed .status-indicator {
-          justify-content: center;
-        }
-
         .admin-sidebar.collapsed .sidebar-footer {
           text-align: center;
-          padding: 16px 12px;
+        }
+
+        .admin-sidebar.collapsed .version-info {
+          justify-content: center;
         }
 
         /* ============================================
            RESPONSIVE STYLES
            ============================================ */
 
-        /* Tablet Styles */
-        @media (max-width: 1024px) and (min-width: 769px) {
-          .admin-sidebar {
-            width: 260px;
-          }
-
-          .admin-sidebar.collapsed {
-            width: 70px;
-          }
-
-          .sidebar-footer {
-            padding: 14px 16px;
-          }
-
-          .status-label {
-            font-size: 10px;
-          }
-
-          .version-info {
-            font-size: 9px;
-          }
-        }
-
-        /* Mobile Styles */
-        @media (max-width: 768px) {
+        /* Tablet and Mobile */
+        @media (max-width: 992px) {
           .admin-sidebar {
             transform: translateX(-100%);
             width: 280px;
@@ -776,8 +745,7 @@ export default function AdminSidebar() {
           .admin-sidebar.collapsed .profile-details,
           .admin-sidebar.collapsed .menu-text,
           .admin-sidebar.collapsed .status-label,
-          .admin-sidebar.collapsed .version-info span,
-          .admin-sidebar.collapsed .footer-divider {
+          .admin-sidebar.collapsed .version-info span {
             display: block;
           }
 
@@ -788,10 +756,6 @@ export default function AdminSidebar() {
 
           .admin-sidebar.collapsed .profile-section {
             justify-content: flex-start;
-          }
-
-          .admin-sidebar.collapsed .profile-avatar i {
-            font-size: 44px;
           }
 
           .admin-sidebar.collapsed .menu-link {
@@ -807,25 +771,65 @@ export default function AdminSidebar() {
             justify-content: flex-start;
           }
 
+          .admin-sidebar.collapsed .sidebar-footer {
+            text-align: left;
+          }
+
           .admin-sidebar.collapsed .version-info {
             justify-content: flex-start;
           }
-
-          .admin-sidebar.collapsed .status-indicator {
-            justify-content: flex-start;
-          }
-
-          .admin-sidebar.collapsed .sidebar-footer {
-            text-align: left;
-            padding: 16px 20px;
-          }
         }
 
-        /* Small Mobile Styles */
+        /* Small Mobile Devices */
         @media (max-width: 480px) {
           .admin-sidebar {
-            width: 100%;
-            max-width: 280px;
+            width: 260px;
+          }
+
+          .brand-section {
+            padding: 16px;
+          }
+
+          .profile-section {
+            padding: 16px;
+          }
+
+          .profile-avatar i {
+            font-size: 36px;
+          }
+
+          .profile-name {
+            font-size: 13px;
+          }
+
+          .profile-role {
+            font-size: 10px;
+          }
+
+          .profile-email {
+            font-size: 9px;
+          }
+
+          .navigation-menu {
+            padding: 12px;
+          }
+
+          .menu-link {
+            padding: 8px 12px;
+          }
+
+          .menu-icon {
+            width: 32px;
+            height: 32px;
+            font-size: 16px;
+          }
+
+          .menu-label {
+            font-size: 12px;
+          }
+
+          .menu-description {
+            font-size: 9px;
           }
 
           .sidebar-footer {
@@ -840,49 +844,30 @@ export default function AdminSidebar() {
             font-size: 9px;
           }
 
-          .footer-content {
-            gap: 8px;
+          .sidebar-toggle {
+            width: 44px;
+            height: 44px;
+            font-size: 18px;
+            bottom: 16px;
+            right: 16px;
           }
         }
 
-        /* Desktop styles */
-        @media (min-width: 769px) {
+        /* Desktop hover effect */
+        @media (min-width: 993px) {
           .admin-sidebar:not(.collapsed):hover {
             width: 280px;
           }
-          
-          /* Ensure footer stays at bottom */
-          .admin-sidebar {
-            display: flex;
-            flex-direction: column;
-          }
-          
-          .navigation-menu {
-            flex: 1;
-          }
-          
-          .sidebar-footer {
-            margin-top: auto;
-            position: relative;
-          }
         }
 
-        /* Height-based responsive adjustments */
-        @media (max-height: 600px) {
-          .sidebar-footer {
-            padding: 10px 16px;
+        /* Landscape mode on mobile */
+        @media (max-width: 768px) and (orientation: landscape) {
+          .admin-sidebar {
+            overflow-y: auto;
           }
-          
-          .footer-content {
-            gap: 6px;
-          }
-          
-          .status-label {
-            font-size: 9px;
-          }
-          
-          .version-info {
-            font-size: 8px;
+
+          .navigation-wrapper {
+            max-height: calc(100vh - 200px);
           }
         }
       `}</style>
