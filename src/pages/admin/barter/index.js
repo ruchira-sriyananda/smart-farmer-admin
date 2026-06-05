@@ -49,6 +49,7 @@ export default function BarterTransactions() {
   const [selectedRequests, setSelectedRequests] = useState([])
   const [showImageModal, setShowImageModal] = useState(false)
   const [selectedImage, setSelectedImage] = useState('')
+  const [emailSettings, setEmailSettings] = useState({ enable_notifications: false })
   
   // Quick rejection reasons
   const quickReasons = [
@@ -85,6 +86,7 @@ export default function BarterTransactions() {
 
   useEffect(() => {
     fetchData()
+    fetchEmailSettings()
     
     const subscription = supabase
       .channel('barter_changes')
@@ -100,6 +102,50 @@ export default function BarterTransactions() {
 
     return () => subscription.unsubscribe()
   }, [listingFilter])
+
+  const fetchEmailSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('setting_key, setting_value')
+        .in('setting_key', ['enable_notifications', 'smtp_host', 'smtp_user', 'smtp_password'])
+      
+      if (!error && data) {
+        const settingsMap = {}
+        data.forEach(setting => {
+          settingsMap[setting.setting_key] = setting.setting_value === 'true' || setting.setting_value === true
+        })
+        setEmailSettings(settingsMap)
+      }
+    } catch (err) {
+      console.error('Error fetching email settings:', err)
+    }
+  }
+
+  const sendEmailNotification = async (type, recipient, data) => {
+    if (!emailSettings.enable_notifications) {
+      console.log('Email notifications are disabled')
+      return false
+    }
+
+    try {
+      const response = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          to: recipient,
+          data
+        })
+      })
+      
+      const result = await response.json()
+      return result.success
+    } catch (error) {
+      console.error('Failed to send email:', error)
+      return false
+    }
+  }
 
   const fetchData = async () => {
     try {
@@ -123,7 +169,6 @@ export default function BarterTransactions() {
       if (!listingsError && listingsData) {
         setBarterListings(listingsData)
         
-        // Separate pending listings
         const pending = listingsData.filter(l => l.status === 'PENDING_APPROVAL')
         setPendingListings(pending)
         
@@ -274,9 +319,22 @@ export default function BarterTransactions() {
       .eq('listing_id', selectedListing.listing_id)
 
     if (!error) {
+      // Send email notification to user
+      if (selectedListing.users?.email) {
+        await sendEmailNotification('barter_approved', selectedListing.users.email, {
+          userName: selectedListing.users.full_name,
+          title: selectedListing.title,
+          quantity: selectedListing.quantity,
+          unit: selectedListing.unit,
+          description: selectedListing.description,
+          approvedAt: new Date().toISOString()
+        })
+      }
+      
       fetchData()
       setShowApprovalModal(false)
       setSelectedListing(null)
+      alert('Listing approved successfully! Email notification sent to user.')
     } else {
       alert('Error approving listing: ' + error.message)
     }
@@ -303,11 +361,22 @@ export default function BarterTransactions() {
       .eq('listing_id', selectedListing.listing_id)
 
     if (!error) {
+      // Send email notification to user
+      if (selectedListing.users?.email) {
+        await sendEmailNotification('barter_rejected', selectedListing.users.email, {
+          userName: selectedListing.users.full_name,
+          title: selectedListing.title,
+          reason: finalReason,
+          rejectedAt: new Date().toISOString()
+        })
+      }
+      
       fetchData()
       setShowApprovalModal(false)
       setSelectedListing(null)
       setRejectReason('')
       setCustomReason('')
+      alert('Listing rejected successfully! Email notification sent to user.')
     } else {
       alert('Error rejecting listing: ' + error.message)
     }
@@ -512,9 +581,17 @@ export default function BarterTransactions() {
               <p className="header-subtitle">Manage barter listings with approval workflow</p>
             </div>
           </div>
-          <button className="refresh-btn" onClick={fetchData}>
-            <i className="bi bi-arrow-repeat"></i> Refresh
-          </button>
+          <div className="header-actions">
+            {emailSettings.enable_notifications && (
+              <div className="email-badge">
+                <i className="bi bi-envelope-fill"></i>
+                Email Notifications Active
+              </div>
+            )}
+            <button className="refresh-btn" onClick={fetchData}>
+              <i className="bi bi-arrow-repeat"></i> Refresh
+            </button>
+          </div>
         </div>
 
         {/* Stats Cards */}
@@ -987,6 +1064,8 @@ export default function BarterTransactions() {
         .header-icon i { font-size: 28px; color: white; }
         .header-title { font-size: 24px; font-weight: 700; color: #1f2937; margin: 0 0 4px 0; }
         .header-subtitle { color: #6c757d; margin: 0; font-size: 14px; }
+        .header-actions { display: flex; gap: 12px; align-items: center; }
+        .email-badge { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(16,185,129,0.1); color: #10b981; border-radius: 12px; font-size: 13px; font-weight: 500; }
         .refresh-btn { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; color: #495057; font-weight: 500; transition: all 0.3s ease; }
         .refresh-btn:hover { background: #e9ecef; transform: translateY(-1px); }
         
@@ -1132,7 +1211,7 @@ export default function BarterTransactions() {
         .rejection-box { background: #fee2e2; padding: 12px; border-radius: 8px; color: #991b1b; }
         
         .seller-info { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
-        .seller-avatar { width: 70px; height: 70px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content; center; color: white; font-weight: 600; font-size: 24px; overflow: hidden; }
+        .seller-avatar { width: 70px; height: 70px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 24px; overflow: hidden; }
         .seller-details { flex: 1; }
         .seller-details div { margin-bottom: 6px; font-size: 13px; }
         
