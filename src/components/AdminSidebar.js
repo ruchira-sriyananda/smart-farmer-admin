@@ -8,7 +8,8 @@ export default function AdminSidebar() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [hoveredItem, setHoveredItem] = useState(null)
-  const [notifications, setNotifications] = useState(3)
+  const [adminName, setAdminName] = useState('Administrator')
+  const [adminEmail, setAdminEmail] = useState('')
 
   useEffect(() => {
     const getRole = () => {
@@ -17,12 +18,18 @@ export default function AdminSidebar() {
         const parsed = JSON.parse(session)
         setUserRole(parsed.role || 'SUPPORT_ADMIN')
         setIsSuperAdmin(parsed.admin?.is_super_admin || false)
+        if (parsed.admin?.full_name) {
+          setAdminName(parsed.admin.full_name)
+        }
+        if (parsed.admin?.email) {
+          setAdminEmail(parsed.admin.email)
+        }
       }
     }
     getRole()
   }, [])
 
-  // Menu items with permissions (Removed Reports and Backup)
+  // Menu items with permissions (Reports and Backup removed)
   const menuItems = [
     { 
       path: '/admin/dashboard', 
@@ -30,8 +37,7 @@ export default function AdminSidebar() {
       label: 'Dashboard', 
       color: 'primary',
       roles: ['SUPER_ADMIN', 'CONTENT_ADMIN', 'SECURITY_ADMIN', 'SUPPORT_ADMIN'],
-      description: 'Overview & Analytics',
-      badge: null
+      description: 'System overview and key metrics'
     },
     { 
       path: '/admin/users', 
@@ -39,8 +45,7 @@ export default function AdminSidebar() {
       label: 'User Management', 
       color: 'success',
       roles: ['SUPER_ADMIN', 'SECURITY_ADMIN', 'SUPPORT_ADMIN'],
-      description: 'Manage all users',
-      badge: null
+      description: 'Manage user accounts and permissions'
     },
     { 
       path: '/admin/posts', 
@@ -48,8 +53,7 @@ export default function AdminSidebar() {
       label: 'Content Moderation', 
       color: 'info',
       roles: ['SUPER_ADMIN', 'CONTENT_ADMIN'],
-      description: 'Manage posts & comments',
-      badge: null
+      description: 'Review and moderate user content'
     },
     { 
       path: '/admin/analytics', 
@@ -57,8 +61,7 @@ export default function AdminSidebar() {
       label: 'Analytics', 
       color: 'warning',
       roles: ['SUPER_ADMIN', 'CONTENT_ADMIN'],
-      description: 'Platform statistics',
-      badge: 'new'
+      description: 'Platform analytics and reports'
     },
     { 
       path: '/admin/security', 
@@ -66,8 +69,7 @@ export default function AdminSidebar() {
       label: 'Security', 
       color: 'dark',
       roles: ['SUPER_ADMIN', 'SECURITY_ADMIN'],
-      description: 'Security monitoring',
-      badge: null
+      description: 'Security monitoring and settings'
     },
     { 
       path: '/admin/barter', 
@@ -75,8 +77,7 @@ export default function AdminSidebar() {
       label: 'Barter System', 
       color: 'success',
       roles: ['SUPER_ADMIN'],
-      description: 'Manage barter trades',
-      badge: null
+      description: 'Manage barter transactions'
     },
     { 
       path: '/admin/advertisements', 
@@ -84,8 +85,7 @@ export default function AdminSidebar() {
       label: 'Advertisements', 
       color: 'info',
       roles: ['SUPER_ADMIN'],
-      description: 'Manage ads & campaigns',
-      badge: null
+      description: 'Manage ad campaigns'
     },
     { 
       path: '/admin/ai-chatbot', 
@@ -93,8 +93,7 @@ export default function AdminSidebar() {
       label: 'AI Chatbot', 
       color: 'primary',
       roles: ['SUPER_ADMIN', 'CONTENT_ADMIN'],
-      description: 'Chatbot monitoring',
-      badge: null
+      description: 'Chatbot monitoring and logs'
     },
     { 
       path: '/admin/settings', 
@@ -102,8 +101,7 @@ export default function AdminSidebar() {
       label: 'Settings', 
       color: 'secondary',
       roles: ['SUPER_ADMIN'],
-      description: 'System configuration',
-      badge: null
+      description: 'System configuration'
     },
     { 
       path: '/admin/activity-logs', 
@@ -111,8 +109,7 @@ export default function AdminSidebar() {
       label: 'Activity Logs', 
       color: 'secondary',
       roles: ['SUPER_ADMIN', 'SECURITY_ADMIN'],
-      description: 'View all activities',
-      badge: null
+      description: 'View system activity'
     }
   ]
 
@@ -135,474 +132,376 @@ export default function AdminSidebar() {
     return colors[color] || colors.primary
   }
 
-  const getIconGradient = (color) => {
-    const gradients = {
-      primary: 'linear-gradient(135deg, #667eea20, #764ba220)',
-      success: 'linear-gradient(135deg, #10b98120, #05966920)',
-      info: 'linear-gradient(135deg, #0dcaf020, #0b5ed720)',
-      danger: 'linear-gradient(135deg, #ef444420, #dc262620)',
-      warning: 'linear-gradient(135deg, #f59e0b20, #d9770620)',
-      dark: 'linear-gradient(135deg, #1f293720, #11182720)',
-      secondary: 'linear-gradient(135deg, #6c757d20, #49505720)'
-    }
-    return gradients[color] || gradients.primary
-  }
-
   const isActive = (path) => {
     return router.pathname === path
   }
 
+  const formatRoleName = (role) => {
+    const roleMap = {
+      'SUPER_ADMIN': 'Super Administrator',
+      'CONTENT_ADMIN': 'Content Administrator',
+      'SECURITY_ADMIN': 'Security Administrator',
+      'SUPPORT_ADMIN': 'Support Administrator'
+    }
+    return roleMap[role] || role
+  }
+
   return (
     <>
-      {/* Toggle Button for Mobile */}
+      {/* Mobile Toggle Button */}
       <button 
-        className="sidebar-toggle"
+        className="sidebar-toggle d-md-none"
         onClick={() => setCollapsed(!collapsed)}
+        aria-label="Toggle Sidebar"
       >
         <i className={`bi ${collapsed ? 'bi-x-lg' : 'bi-list'}`}></i>
       </button>
 
-      {/* Sidebar Overlay for Mobile */}
+      {/* Sidebar Overlay */}
       {collapsed && (
-        <div className="sidebar-overlay" onClick={() => setCollapsed(false)}></div>
+        <div className="sidebar-overlay d-md-none" onClick={() => setCollapsed(false)}></div>
       )}
 
       {/* Sidebar */}
-      <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-        {/* Logo Section with Animation */}
-        <div className="logo-section">
-          <div className="logo-wrapper">
-            <div className="logo-icon">
-              <i className="bi bi-tractor"></i>
-            </div>
-            <div className="logo-text">
-              <h5 className="logo-title">Smart Farmer</h5>
-              <span className="logo-badge">Admin Portal</span>
-            </div>
+      <aside className={`admin-sidebar ${collapsed ? 'collapsed' : ''}`}>
+        {/* Brand Section */}
+        <div className="brand-section">
+          <div className="brand-logo">
+            <i className="bi bi-tractor"></i>
+          </div>
+          <div className="brand-info">
+            <h1 className="brand-title">Smart Farmer</h1>
+            <p className="brand-subtitle">Administration Portal</p>
           </div>
         </div>
 
-        {/* User Profile Section */}
-        <div className="user-section">
-          <div className="user-avatar">
+        {/* Profile Section */}
+        <div className="profile-section">
+          <div className="profile-avatar">
             <i className="bi bi-person-circle"></i>
-            <div className="user-status online"></div>
           </div>
-          <div className="user-info">
-            <div className="user-name">Admin User</div>
-            <div className="user-role">
-              <i className="bi bi-shield-check"></i>
-              <span>{userRole || 'Loading...'}</span>
-            </div>
+          <div className="profile-details">
+            <h3 className="profile-name">{adminName}</h3>
+            <p className="profile-role">{formatRoleName(userRole)}</p>
+            {adminEmail && <p className="profile-email">{adminEmail}</p>}
           </div>
           {isSuperAdmin && (
-            <div className="super-admin-badge">
+            <div className="super-admin-tag">
               <i className="bi bi-star-fill"></i>
             </div>
           )}
         </div>
 
         {/* Navigation Menu */}
-        <nav className="nav-menu">
-          {filteredMenuItems.map((item) => (
-            <button
-              key={item.path}
-              className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
-              onClick={() => router.push(item.path)}
-              onMouseEnter={() => setHoveredItem(item.path)}
-              onMouseLeave={() => setHoveredItem(null)}
-            >
-              <div className="nav-icon-wrapper" style={{ background: getIconGradient(item.color) }}>
-                <i className={`bi ${item.icon}`} style={{ color: getIconColor(item.color) }}></i>
-              </div>
-              <div className="nav-content">
-                <div className="nav-label-wrapper">
-                  <span className="nav-label">{item.label}</span>
-                  {item.badge && (
-                    <span className="nav-badge">{item.badge}</span>
-                  )}
-                </div>
-                <span className="nav-description">{item.description}</span>
-              </div>
-              {isActive(item.path) && <div className="active-indicator"></div>}
-              
-              {/* Tooltip on hover when collapsed */}
-              {collapsed && hoveredItem === item.path && (
-                <div className="nav-tooltip">
-                  <div className="tooltip-icon" style={{ background: getIconGradient(item.color) }}>
-                    <i className={`bi ${item.icon}`} style={{ color: getIconColor(item.color) }}></i>
-                  </div>
-                  <div className="tooltip-content">
+        <nav className="navigation-menu">
+          <ul className="menu-list">
+            {filteredMenuItems.map((item) => (
+              <li key={item.path} className="menu-item">
+                <button
+                  className={`menu-link ${isActive(item.path) ? 'active' : ''}`}
+                  onClick={() => router.push(item.path)}
+                  onMouseEnter={() => setHoveredItem(item.path)}
+                  onMouseLeave={() => setHoveredItem(null)}
+                >
+                  <span className="menu-icon" style={{ color: getIconColor(item.color) }}>
+                    <i className={`bi ${item.icon}`}></i>
+                  </span>
+                  <span className="menu-text">
+                    <span className="menu-label">{item.label}</span>
+                    <span className="menu-description">{item.description}</span>
+                  </span>
+                  {isActive(item.path) && <span className="menu-active"></span>}
+                </button>
+
+                {/* Tooltip for collapsed mode */}
+                {collapsed && hoveredItem === item.path && (
+                  <div className="menu-tooltip">
                     <strong>{item.label}</strong>
-                    <small>{item.description}</small>
+                    <span>{item.description}</span>
                   </div>
-                </div>
-              )}
-            </button>
-          ))}
+                )}
+              </li>
+            ))}
+          </ul>
         </nav>
 
-        {/* Footer Section with System Info */}
+        {/* Footer Section */}
         <div className="sidebar-footer">
           <div className="system-status">
             <div className="status-indicator">
-              <div className="status-dot"></div>
-              <div className="status-pulse"></div>
-            </div>
-            <div className="status-text">
-              <span className="status-label">System Status</span>
-              <span className="status-value">Operational</span>
+              <span className="status-dot"></span>
+              <span className="status-label">System Operational</span>
             </div>
           </div>
           <div className="footer-divider"></div>
           <div className="version-info">
             <i className="bi bi-code-square"></i>
-            <span>v3.0.0</span>
+            <span>Version 3.0.0</span>
           </div>
         </div>
 
-        {/* Collapse Toggle Button (Desktop) */}
+        {/* Collapse Toggle (Desktop) */}
         <button 
           className="collapse-toggle"
           onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
         >
           <i className={`bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-left'}`}></i>
         </button>
-      </div>
+      </aside>
 
       <style jsx>{`
-        /* Modern Sidebar Styles */
-        .sidebar {
+        /* ============================================
+           ADMIN SIDEBAR - PROFESSIONAL DESIGN
+           ============================================ */
+
+        /* Sidebar Container */
+        .admin-sidebar {
           position: fixed;
           left: 0;
           top: 0;
           width: 280px;
           height: 100vh;
-          background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-          backdrop-filter: blur(10px);
-          color: #e2e8f0;
+          background: #1a1f2e;
+          color: #a0aec0;
           z-index: 1000;
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: width 0.3s ease;
           overflow-y: auto;
           overflow-x: hidden;
-          box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
+          box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
         }
 
-        .sidebar.collapsed {
-          width: 88px;
+        .admin-sidebar.collapsed {
+          width: 80px;
         }
 
-        /* Scrollbar Styling */
-        .sidebar::-webkit-scrollbar {
+        /* Scrollbar */
+        .admin-sidebar::-webkit-scrollbar {
           width: 4px;
         }
 
-        .sidebar::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.05);
+        .admin-sidebar::-webkit-scrollbar-track {
+          background: #2d3748;
         }
 
-        .sidebar::-webkit-scrollbar-thumb {
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          border-radius: 4px;
+        .admin-sidebar::-webkit-scrollbar-thumb {
+          background: #4a5568;
+          border-radius: 2px;
         }
 
-        /* Logo Section */
-        .logo-section {
-          padding: 28px 20px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          margin-bottom: 20px;
-        }
-
-        .logo-wrapper {
+        /* Brand Section */
+        .brand-section {
+          padding: 24px 20px;
+          border-bottom: 1px solid #2d3748;
           display: flex;
           align-items: center;
           gap: 12px;
         }
 
-        .logo-icon {
-          width: 48px;
-          height: 48px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          border-radius: 14px;
+        .brand-logo {
+          width: 40px;
+          height: 40px;
+          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
-          position: relative;
-          overflow: hidden;
         }
 
-        .logo-icon::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: -100%;
-          width: 100%;
-          height: 100%;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-          transition: left 0.5s;
-        }
-
-        .logo-icon:hover::before {
-          left: 100%;
-        }
-
-        .logo-icon i {
-          font-size: 24px;
+        .brand-logo i {
+          font-size: 20px;
           color: white;
         }
 
-        .logo-text {
-          flex: 1;
-        }
-
-        .logo-title {
-          font-size: 18px;
-          font-weight: 700;
-          margin: 0 0 4px 0;
-          background: linear-gradient(135deg, #fff, #a78bfa);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-
-        .logo-badge {
-          font-size: 10px;
-          opacity: 0.6;
-          display: block;
-        }
-
-        /* User Section */
-        .user-section {
-          padding: 0 20px 20px;
-          margin-bottom: 20px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          position: relative;
-        }
-
-        .user-avatar {
-          position: relative;
-          width: 48px;
-          height: 48px;
-        }
-
-        .user-avatar i {
-          font-size: 48px;
-          color: #94a3b8;
-        }
-
-        .user-status {
-          position: absolute;
-          bottom: 2px;
-          right: 2px;
-          width: 12px;
-          height: 12px;
-          background: #10b981;
-          border: 2px solid #1e293b;
-          border-radius: 50%;
-        }
-
-        .user-status.online {
-          animation: pulse 2s infinite;
-        }
-
-        .user-info {
-          flex: 1;
-        }
-
-        .user-name {
-          font-size: 14px;
+        .brand-title {
+          font-size: 16px;
           font-weight: 600;
           color: white;
-          margin-bottom: 4px;
+          margin: 0 0 4px 0;
         }
 
-        .user-role {
-          display: flex;
-          align-items: center;
-          gap: 6px;
+        .brand-subtitle {
           font-size: 11px;
+          margin: 0;
           opacity: 0.7;
         }
 
-        .user-role i {
-          font-size: 11px;
+        /* Profile Section */
+        .profile-section {
+          padding: 20px;
+          border-bottom: 1px solid #2d3748;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          position: relative;
         }
 
-        .super-admin-badge {
+        .profile-avatar i {
+          font-size: 44px;
+          color: #718096;
+        }
+
+        .profile-details {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .profile-name {
+          font-size: 14px;
+          font-weight: 600;
+          color: white;
+          margin: 0 0 4px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .profile-role {
+          font-size: 11px;
+          margin: 0 0 2px 0;
+          opacity: 0.7;
+        }
+
+        .profile-email {
+          font-size: 10px;
+          margin: 0;
+          opacity: 0.5;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .super-admin-tag {
           position: absolute;
-          top: -5px;
-          right: 15px;
-          width: 24px;
-          height: 24px;
-          background: linear-gradient(135deg, #f59e0b, #d97706);
-          border-radius: 12px;
+          top: 16px;
+          right: 16px;
+          width: 22px;
+          height: 22px;
+          background: #f59e0b;
+          border-radius: 11px;
           display: flex;
           align-items: center;
           justify-content: center;
         }
 
-        .super-admin-badge i {
-          font-size: 12px;
+        .super-admin-tag i {
+          font-size: 11px;
           color: white;
         }
 
         /* Navigation Menu */
-        .nav-menu {
-          padding: 0 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
+        .navigation-menu {
+          padding: 16px 12px;
         }
 
-        .nav-item {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          padding: 12px 16px;
-          width: 100%;
-          background: transparent;
-          border: none;
-          border-radius: 14px;
-          color: #94a3b8;
-          transition: all 0.3s ease;
-          cursor: pointer;
-          position: relative;
-          text-align: left;
-        }
-
-        .nav-item:hover {
-          background: rgba(255, 255, 255, 0.08);
-          color: white;
-          transform: translateX(4px);
-        }
-
-        .nav-item.active {
-          background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
-          color: white;
-          border: 1px solid rgba(102, 126, 234, 0.3);
-        }
-
-        .nav-item.active::before {
-          content: '';
-          position: absolute;
-          left: -12px;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 3px;
-          height: 40px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          border-radius: 0 3px 3px 0;
-        }
-
-        .nav-icon-wrapper {
-          width: 40px;
-          height: 40px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 12px;
-          transition: all 0.3s ease;
-        }
-
-        .nav-icon-wrapper i {
-          font-size: 20px;
-          transition: all 0.3s ease;
-        }
-
-        .nav-item:hover .nav-icon-wrapper i {
-          transform: scale(1.1);
-        }
-
-        .nav-content {
-          flex: 1;
+        .menu-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
           display: flex;
           flex-direction: column;
           gap: 4px;
         }
 
-        .nav-label-wrapper {
+        .menu-item {
+          position: relative;
+        }
+
+        .menu-link {
           display: flex;
           align-items: center;
-          gap: 8px;
-        }
-
-        .nav-label {
-          font-size: 14px;
-          font-weight: 500;
-        }
-
-        .nav-badge {
-          font-size: 9px;
-          padding: 2px 6px;
-          background: linear-gradient(135deg, #f59e0b, #d97706);
+          gap: 14px;
+          padding: 10px 14px;
+          width: 100%;
+          background: transparent;
+          border: none;
           border-radius: 10px;
+          color: #a0aec0;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          text-align: left;
+          position: relative;
+        }
+
+        .menu-link:hover {
+          background: #2d3748;
           color: white;
-          text-transform: uppercase;
-          font-weight: 700;
         }
 
-        .nav-description {
-          font-size: 10px;
-          opacity: 0.5;
-          transition: all 0.3s ease;
+        .menu-link.active {
+          background: #2d3748;
+          color: white;
         }
 
-        .active-indicator {
-          width: 3px;
-          height: 30px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          border-radius: 2px;
+        .menu-link.active .menu-icon i {
+          color: #4f46e5;
         }
 
-        /* Tooltip for collapsed mode */
-        .nav-tooltip {
-          position: absolute;
-          left: 100%;
-          top: 50%;
-          transform: translateY(-50%);
-          margin-left: 12px;
-          background: #1e293b;
-          padding: 8px 12px;
-          border-radius: 12px;
-          white-space: nowrap;
-          z-index: 1100;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          border: 1px solid rgba(102, 126, 234, 0.3);
-          animation: fadeIn 0.2s ease;
-        }
-
-        .tooltip-icon {
+        .menu-icon {
           width: 32px;
           height: 32px;
           display: flex;
           align-items: center;
           justify-content: center;
+          font-size: 18px;
+          flex-shrink: 0;
+        }
+
+        .menu-text {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .menu-label {
+          display: block;
+          font-size: 13px;
+          font-weight: 500;
+          margin-bottom: 2px;
+        }
+
+        .menu-description {
+          display: block;
+          font-size: 10px;
+          opacity: 0.6;
+        }
+
+        .menu-active {
+          position: absolute;
+          left: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 3px;
+          height: 24px;
+          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+          border-radius: 0 2px 2px 0;
+        }
+
+        /* Tooltip for collapsed mode */
+        .menu-tooltip {
+          position: absolute;
+          left: 100%;
+          top: 50%;
+          transform: translateY(-50%);
+          margin-left: 12px;
+          background: #2d3748;
+          padding: 8px 12px;
           border-radius: 8px;
-        }
-
-        .tooltip-icon i {
-          font-size: 16px;
-        }
-
-        .tooltip-content {
+          white-space: nowrap;
+          z-index: 1100;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
           display: flex;
           flex-direction: column;
+          gap: 4px;
         }
 
-        .tooltip-content strong {
-          font-size: 13px;
+        .menu-tooltip strong {
+          font-size: 12px;
           color: white;
         }
 
-        .tooltip-content small {
+        .menu-tooltip span {
           font-size: 10px;
-          color: #94a3b8;
+          color: #a0aec0;
         }
 
         /* Sidebar Footer */
@@ -611,67 +510,37 @@ export default function AdminSidebar() {
           bottom: 0;
           left: 0;
           right: 0;
-          padding: 20px;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
-          background: linear-gradient(180deg, transparent, rgba(0,0,0,0.2));
+          padding: 16px 20px;
+          border-top: 1px solid #2d3748;
+          background: #1a1f2e;
         }
 
         .system-status {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 16px;
+          margin-bottom: 12px;
         }
 
         .status-indicator {
-          position: relative;
-          width: 40px;
-          height: 40px;
           display: flex;
           align-items: center;
-          justify-content: center;
+          gap: 8px;
         }
 
         .status-dot {
-          width: 10px;
-          height: 10px;
-          background-color: #10b981;
+          width: 8px;
+          height: 8px;
+          background: #10b981;
           border-radius: 50%;
-          position: relative;
-          z-index: 2;
-        }
-
-        .status-pulse {
-          position: absolute;
-          width: 30px;
-          height: 30px;
-          background-color: #10b981;
-          border-radius: 50%;
-          opacity: 0.4;
-          animation: pulse-ring 2s infinite;
-        }
-
-        .status-text {
-          flex: 1;
+          display: inline-block;
         }
 
         .status-label {
-          display: block;
-          font-size: 10px;
-          opacity: 0.5;
-          margin-bottom: 2px;
-        }
-
-        .status-value {
-          display: block;
-          font-size: 12px;
-          font-weight: 600;
-          color: #10b981;
+          font-size: 11px;
+          opacity: 0.7;
         }
 
         .footer-divider {
           height: 1px;
-          background: rgba(255, 255, 255, 0.08);
+          background: #2d3748;
           margin: 12px 0;
         }
 
@@ -679,39 +548,63 @@ export default function AdminSidebar() {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          font-size: 11px;
+          gap: 6px;
+          font-size: 10px;
           opacity: 0.5;
         }
 
         .version-info i {
-          font-size: 12px;
+          font-size: 11px;
         }
 
-        /* Collapse Toggle Button */
+        /* Collapse Toggle */
         .collapse-toggle {
           position: absolute;
           bottom: 20px;
-          right: -12px;
-          width: 24px;
-          height: 24px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
+          right: -10px;
+          width: 20px;
+          height: 20px;
+          background: #4f46e5;
           border: none;
-          border-radius: 12px;
+          border-radius: 10px;
           color: white;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: all 0.3s ease;
+          transition: all 0.2s ease;
           z-index: 1100;
+          font-size: 10px;
         }
 
         .collapse-toggle:hover {
+          background: #7c3aed;
           transform: scale(1.1);
         }
 
-        /* Sidebar Overlay for Mobile */
+        /* Mobile Toggle */
+        .sidebar-toggle {
+          position: fixed;
+          bottom: 20px;
+          right: 20px;
+          width: 48px;
+          height: 48px;
+          border-radius: 24px;
+          background: #4f46e5;
+          border: none;
+          color: white;
+          font-size: 20px;
+          z-index: 1100;
+          display: none;
+          cursor: pointer;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .sidebar-toggle:hover {
+          background: #7c3aed;
+        }
+
+        /* Sidebar Overlay */
         .sidebar-overlay {
           position: fixed;
           top: 0;
@@ -720,107 +613,64 @@ export default function AdminSidebar() {
           bottom: 0;
           background: rgba(0, 0, 0, 0.5);
           z-index: 999;
-          animation: fadeIn 0.3s ease;
         }
 
-        /* Sidebar Toggle Button for Mobile */
-        .sidebar-toggle {
-          position: fixed;
-          bottom: 20px;
-          right: 20px;
-          width: 56px;
-          height: 56px;
-          border-radius: 28px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          border: none;
-          color: white;
-          font-size: 24px;
-          z-index: 1100;
-          display: none;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
+        /* ============================================
+           COLLAPSED STATE STYLES
+           ============================================ */
 
-        .sidebar-toggle:hover {
-          transform: scale(1.05);
-        }
-
-        /* Animations */
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: 0.5;
-          }
-        }
-
-        @keyframes pulse-ring {
-          0% {
-            transform: scale(0.8);
-            opacity: 0.6;
-          }
-          100% {
-            transform: scale(1.5);
-            opacity: 0;
-          }
-        }
-
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-
-        /* Collapsed State Styles */
-        .sidebar.collapsed .logo-wrapper {
-          justify-content: center;
-        }
-
-        .sidebar.collapsed .logo-text,
-        .sidebar.collapsed .user-info,
-        .sidebar.collapsed .nav-description,
-        .sidebar.collapsed .status-text,
-        .sidebar.collapsed .version-info span,
-        .sidebar.collapsed .footer-divider {
+        .admin-sidebar.collapsed .brand-info,
+        .admin-sidebar.collapsed .profile-details,
+        .admin-sidebar.collapsed .menu-text,
+        .admin-sidebar.collapsed .status-label,
+        .admin-sidebar.collapsed .version-info span,
+        .admin-sidebar.collapsed .footer-divider {
           display: none;
         }
 
-        .sidebar.collapsed .user-section {
+        .admin-sidebar.collapsed .brand-section {
           justify-content: center;
-          padding: 0 20px 20px;
+          padding: 24px;
         }
 
-        .sidebar.collapsed .nav-item {
+        .admin-sidebar.collapsed .profile-section {
           justify-content: center;
-          padding: 12px;
+          padding: 20px;
         }
 
-        .sidebar.collapsed .nav-icon-wrapper {
+        .admin-sidebar.collapsed .profile-avatar i {
+          font-size: 36px;
+        }
+
+        .admin-sidebar.collapsed .menu-link {
+          justify-content: center;
+          padding: 10px;
+        }
+
+        .admin-sidebar.collapsed .menu-icon {
           margin: 0;
         }
 
-        .sidebar.collapsed .system-status {
+        .admin-sidebar.collapsed .system-status {
           justify-content: center;
         }
 
-        .sidebar.collapsed .collapse-toggle {
-          right: -12px;
+        .admin-sidebar.collapsed .sidebar-footer {
+          text-align: center;
         }
 
-        /* Responsive */
+        /* ============================================
+           RESPONSIVE STYLES
+           ============================================ */
+
         @media (max-width: 768px) {
-          .sidebar {
+          .admin-sidebar {
             transform: translateX(-100%);
             width: 280px;
             z-index: 1001;
           }
 
-          .sidebar.collapsed {
+          .admin-sidebar.collapsed {
             transform: translateX(0);
           }
 
@@ -834,30 +684,46 @@ export default function AdminSidebar() {
             display: none;
           }
 
-          .sidebar.collapsed .logo-text,
-          .sidebar.collapsed .user-info,
-          .sidebar.collapsed .nav-description,
-          .sidebar.collapsed .status-text,
-          .sidebar.collapsed .version-info span {
+          /* Show hidden content on mobile when expanded */
+          .admin-sidebar.collapsed .brand-info,
+          .admin-sidebar.collapsed .profile-details,
+          .admin-sidebar.collapsed .menu-text,
+          .admin-sidebar.collapsed .status-label,
+          .admin-sidebar.collapsed .version-info span,
+          .admin-sidebar.collapsed .footer-divider {
             display: block;
           }
 
-          .sidebar.collapsed .user-section {
+          .admin-sidebar.collapsed .brand-section {
+            justify-content: flex-start;
+            padding: 24px 20px;
+          }
+
+          .admin-sidebar.collapsed .profile-section {
             justify-content: flex-start;
           }
 
-          .sidebar.collapsed .nav-item {
+          .admin-sidebar.collapsed .menu-link {
+            justify-content: flex-start;
+            padding: 10px 14px;
+          }
+
+          .admin-sidebar.collapsed .menu-icon {
+            margin-right: 14px;
+          }
+
+          .admin-sidebar.collapsed .system-status {
             justify-content: flex-start;
           }
 
-          .sidebar.collapsed .system-status {
-            justify-content: flex-start;
+          .admin-sidebar.collapsed .sidebar-footer {
+            text-align: left;
           }
         }
 
-        /* Desktop hover effect */
+        /* Desktop styles */
         @media (min-width: 769px) {
-          .sidebar:not(.collapsed):hover {
+          .admin-sidebar:not(.collapsed):hover {
             width: 280px;
           }
         }
