@@ -56,63 +56,92 @@ export default function Advertisements() {
   }, [])
 
   const fetchAds = async () => {
-  try {
-    setLoading(true)
-    setError(null)
-    
-    // First, fetch advertisements without the join
-    let query = supabase
-      .from('advertisements')
-      .select('*')
-      .order('start_date', { ascending: false })
-
-    if (filter !== 'all') {
-      query = query.eq('status', filter.toUpperCase())
-    }
-
-    if (dateRange !== 'all') {
-      const now = new Date()
-      let startDate = new Date()
+    try {
+      setLoading(true)
+      setError(null)
       
-      switch(dateRange) {
-        case 'today':
-          startDate.setHours(0, 0, 0, 0)
-          break
-        case 'week':
-          startDate.setDate(startDate.getDate() - 7)
-          break
-        case 'month':
-          startDate.setMonth(startDate.getMonth() - 1)
-          break
+      // Build the query based on filters
+      let query = supabase
+        .from('advertisements')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (filter !== 'all') {
+        if (filter === 'expired') {
+          // For expired, we need to check both status and date
+          const now = new Date().toISOString()
+          query = query.or(`status.eq.EXPIRED,end_date.lt.${now}`)
+        } else {
+          query = query.eq('status', filter.toUpperCase())
+        }
       }
-      
-      query = query.gte('start_date', startDate.toISOString())
-    }
 
-    const { data, error } = await query
-
-    if (error) throw error
-
-    // Then fetch admin users separately to get user details
-    if (data && data.length > 0) {
-      const userIds = [...new Set(data.map(ad => ad.user_id).filter(id => id))]
-      
-      if (userIds.length > 0) {
-        const { data: adminUsers, error: usersError } = await supabase
-          .from('admin_users')
-          .select('admin_id, full_name, email')
-          .in('admin_id', userIds)
+      if (dateRange !== 'all') {
+        const now = new Date()
+        let startDate = new Date()
         
-        if (!usersError && adminUsers) {
-          // Merge user data into ads
+        switch(dateRange) {
+          case 'today':
+            startDate.setHours(0, 0, 0, 0)
+            break
+          case 'week':
+            startDate.setDate(startDate.getDate() - 7)
+            break
+          case 'month':
+            startDate.setMonth(startDate.getMonth() - 1)
+            break
+        }
+        
+        query = query.gte('created_at', startDate.toISOString())
+      }
+
+      const { data, error } = await query
+
+      if (error) throw error
+
+      // Fetch user information separately
+      if (data && data.length > 0) {
+        // Get unique user IDs
+        const userIds = [...new Set(data.map(ad => ad.user_id).filter(id => id))]
+        
+        if (userIds.length > 0) {
+          // Fetch admin users from the correct table (likely 'users' or 'profiles')
+          // Based on your schema, try 'users' first, if not then 'admin_users'
+          let adminUsers = []
+          let usersError = null
+          
+          // Try to fetch from 'users' table first
+          const { data: usersData, error: usersErrorResponse } = await supabase
+            .from('users')
+            .select('id, full_name, email')
+            .in('id', userIds)
+          
+          if (!usersErrorResponse && usersData) {
+            adminUsers = usersData
+          } else {
+            // Fallback to 'admin_users' table
+            const { data: adminUsersData, error: adminUsersError } = await supabase
+              .from('admin_users')
+              .select('admin_id, full_name, email')
+              .in('admin_id', userIds)
+            
+            if (!adminUsersError && adminUsersData) {
+              adminUsers = adminUsersData
+            }
+          }
+          
+          // Create a map for easy lookup
           const userMap = {}
           adminUsers.forEach(user => {
-            userMap[user.admin_id] = user
+            // Handle different ID field names
+            const userId = user.id || user.admin_id
+            userMap[userId] = user
           })
           
+          // Merge user data into ads
           const adsWithUsers = data.map(ad => ({
             ...ad,
-            admin_users: userMap[ad.user_id] || null
+            user_details: userMap[ad.user_id] || { full_name: 'Unknown User' }
           }))
           
           setAds(adsWithUsers)
@@ -122,20 +151,16 @@ export default function Advertisements() {
           calculateStats(data)
         }
       } else {
-        setAds(data)
-        calculateStats(data)
+        setAds([])
+        calculateStats([])
       }
-    } else {
-      setAds([])
-      calculateStats([])
+    } catch (err) {
+      console.error('Error fetching ads:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-  } catch (err) {
-    console.error('Error fetching ads:', err)
-    setError(err.message)
-  } finally {
-    setLoading(false)
   }
-}
 
   const fetchSubscriptionPlans = async () => {
     try {
@@ -200,8 +225,9 @@ export default function Advertisements() {
           end_date: endDate.toISOString(),
           status: formData.status,
           target_audience: formData.target_audience,
-          user_id: session?.admin?.admin_id,
-          created_at: new Date().toISOString()
+          user_id: session?.admin?.admin_id || session?.user?.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         })
 
       if (error) throw error
@@ -281,13 +307,14 @@ export default function Advertisements() {
     const now = new Date()
     const isExpired = endDate && new Date(endDate) <= now
     
-    if (isExpired) {
+    if (isExpired && status !== 'EXPIRED') {
       return <span className="status-badge expired"><i className="bi bi-clock-history"></i> Expired</span>
     }
     
     const badges = {
       'ACTIVE': <span className="status-badge active"><i className="bi bi-check-circle-fill"></i> Active</span>,
       'PENDING': <span className="status-badge pending"><i className="bi bi-clock-fill"></i> Pending</span>,
+      'EXPIRED': <span className="status-badge expired"><i className="bi bi-clock-history"></i> Expired</span>,
       'REJECTED': <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>
     }
     return badges[status] || <span className="status-badge default">{status}</span>
@@ -524,7 +551,7 @@ export default function Advertisements() {
                     </div>
                     <div className="meta-item">
                       <i className="bi bi-person"></i>
-                      {ad.users?.full_name || 'Admin'}
+                      {ad.user_details?.full_name || 'Admin'}
                     </div>
                   </div>
                 </div>
@@ -543,7 +570,7 @@ export default function Advertisements() {
                     <button className="btn-pause" onClick={() => updateAdStatus(ad.ad_id, 'EXPIRED')}>
                       <i className="bi bi-pause-circle"></i> Pause
                     </button>
-                  ) : (
+                  ) : ad.status !== 'EXPIRED' && (
                     <button className="btn-activate" onClick={() => updateAdStatus(ad.ad_id, 'ACTIVE')}>
                       <i className="bi bi-play-circle"></i> Activate
                     </button>
