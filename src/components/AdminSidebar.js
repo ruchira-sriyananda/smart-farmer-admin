@@ -10,8 +10,6 @@ export default function AdminSidebar() {
   const [hoveredItem, setHoveredItem] = useState(null)
   const [adminName, setAdminName] = useState('Administrator')
   const [adminEmail, setAdminEmail] = useState('')
-  const [isMobile, setIsMobile] = useState(false)
-  const [isTablet, setIsTablet] = useState(false)
 
   useEffect(() => {
     const getRole = () => {
@@ -29,24 +27,6 @@ export default function AdminSidebar() {
       }
     }
     getRole()
-
-    // Check screen size
-    const handleResize = () => {
-      const width = window.innerWidth
-      setIsMobile(width < 768)
-      setIsTablet(width >= 768 && width < 1024)
-      
-      // Auto collapse on mobile
-      if (width < 768) {
-        setCollapsed(true)
-      } else {
-        setCollapsed(false)
-      }
-    }
-    
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   // Menu items with permissions (Reports and Backup removed)
@@ -177,28 +157,24 @@ export default function AdminSidebar() {
     return roleMap[role] || role
   }
 
-  const toggleSidebar = () => {
-    setCollapsed(!collapsed)
-  }
-
   return (
     <>
-      {/* Mobile & Tablet Toggle Button */}
+      {/* Mobile Toggle Button */}
       <button 
-        className={`sidebar-toggle ${collapsed ? 'active' : ''}`}
-        onClick={toggleSidebar}
+        className="sidebar-toggle"
+        onClick={() => setCollapsed(!collapsed)}
         aria-label="Toggle Sidebar"
       >
         <i className={`bi ${collapsed ? 'bi-x-lg' : 'bi-list'}`}></i>
       </button>
 
-      {/* Sidebar Overlay for Mobile/Tablet */}
-      {collapsed && (isMobile || isTablet) && (
-        <div className="sidebar-overlay" onClick={toggleSidebar}></div>
+      {/* Sidebar Overlay */}
+      {collapsed && (
+        <div className="sidebar-overlay" onClick={() => setCollapsed(false)}></div>
       )}
 
       {/* Sidebar */}
-      <aside className={`admin-sidebar ${collapsed ? 'collapsed' : ''} ${isMobile ? 'mobile' : ''} ${isTablet ? 'tablet' : ''}`}>
+      <aside className={`admin-sidebar ${collapsed ? 'collapsed' : ''}`}>
         {/* Brand Section */}
         <div className="brand-section">
           <div className="brand-logo">
@@ -234,15 +210,9 @@ export default function AdminSidebar() {
               <li key={item.path} className="menu-item">
                 <button
                   className={`menu-link ${isActive(item.path) ? 'active' : ''}`}
-                  onClick={() => {
-                    router.push(item.path)
-                    // Close sidebar on mobile after navigation
-                    if (isMobile || isTablet) {
-                      setCollapsed(true)
-                    }
-                  }}
-                  onMouseEnter={() => !isMobile && setHoveredItem(item.path)}
-                  onMouseLeave={() => !isMobile && setHoveredItem(null)}
+                  onClick={() => router.push(item.path)}
+                  onMouseEnter={() => setHoveredItem(item.path)}
+                  onMouseLeave={() => setHoveredItem(null)}
                 >
                   <span 
                     className="menu-icon" 
@@ -260,8 +230,8 @@ export default function AdminSidebar() {
                   {isActive(item.path) && <span className="menu-active"></span>}
                 </button>
 
-                {/* Tooltip for collapsed mode - Desktop only */}
-                {!isMobile && collapsed && hoveredItem === item.path && (
+                {/* Tooltip for collapsed mode */}
+                {collapsed && hoveredItem === item.path && (
                   <div className="menu-tooltip">
                     <strong>{item.label}</strong>
                     <span>{item.description}</span>
@@ -272,39 +242,39 @@ export default function AdminSidebar() {
           </ul>
         </nav>
 
-        {/* Footer Section */}
+        {/* Footer Section - Enhanced Responsive */}
         <div className="sidebar-footer">
-          <div className="system-status">
-            <div className="status-indicator">
-              <span className="status-dot"></span>
-              <span className="status-label">System Operational</span>
+          <div className="footer-content">
+            <div className="system-status">
+              <div className="status-indicator">
+                <span className="status-dot"></span>
+                <span className="status-label">System Operational</span>
+              </div>
             </div>
-          </div>
-          <div className="footer-divider"></div>
-          <div className="version-info">
-            <i className="bi bi-code-square"></i>
-            <span>Version 3.0.0</span>
+            <div className="footer-divider"></div>
+            <div className="version-info">
+              <i className="bi bi-code-square"></i>
+              <span>Version 3.0.0</span>
+            </div>
           </div>
         </div>
 
-        {/* Collapse Toggle (Desktop only) */}
-        {!isMobile && !isTablet && (
-          <button 
-            className="collapse-toggle"
-            onClick={toggleSidebar}
-            aria-label={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          >
-            <i className={`bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-left'}`}></i>
-          </button>
-        )}
+        {/* Collapse Toggle (Desktop) */}
+        <button 
+          className="collapse-toggle"
+          onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+        >
+          <i className={`bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-left'}`}></i>
+        </button>
       </aside>
 
       <style jsx>{`
         /* ============================================
-           ADMIN SIDEBAR - FULLY RESPONSIVE
+           ADMIN SIDEBAR - PROFESSIONAL DESIGN
            ============================================ */
 
-        /* Base Sidebar Container */
+        /* Sidebar Container */
         .admin-sidebar {
           position: fixed;
           left: 0;
@@ -314,10 +284,14 @@ export default function AdminSidebar() {
           background: #0f172a;
           color: #94a3b8;
           z-index: 1000;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: width 0.3s ease;
           overflow-y: auto;
           overflow-x: hidden;
           box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .admin-sidebar.collapsed {
+          width: 80px;
         }
 
         /* Scrollbar */
@@ -334,15 +308,6 @@ export default function AdminSidebar() {
           border-radius: 2px;
         }
 
-        .admin-sidebar::-webkit-scrollbar-thumb:hover {
-          background: #64748b;
-        }
-
-        /* Collapsed State */
-        .admin-sidebar.collapsed {
-          width: 80px;
-        }
-
         /* Brand Section */
         .brand-section {
           padding: 24px 20px;
@@ -350,7 +315,6 @@ export default function AdminSidebar() {
           display: flex;
           align-items: center;
           gap: 12px;
-          transition: all 0.3s ease;
         }
 
         .brand-logo {
@@ -372,7 +336,6 @@ export default function AdminSidebar() {
         .brand-info {
           flex: 1;
           min-width: 0;
-          transition: opacity 0.3s ease;
         }
 
         .brand-title {
@@ -396,7 +359,6 @@ export default function AdminSidebar() {
           align-items: center;
           gap: 12px;
           position: relative;
-          transition: all 0.3s ease;
         }
 
         .profile-avatar {
@@ -406,13 +368,11 @@ export default function AdminSidebar() {
         .profile-avatar i {
           font-size: 44px;
           color: #64748b;
-          transition: all 0.3s ease;
         }
 
         .profile-details {
           flex: 1;
           min-width: 0;
-          transition: opacity 0.3s ease;
         }
 
         .profile-name {
@@ -461,6 +421,7 @@ export default function AdminSidebar() {
         /* Navigation Menu */
         .navigation-menu {
           padding: 16px 12px;
+          flex: 1;
         }
 
         .menu-list {
@@ -517,7 +478,6 @@ export default function AdminSidebar() {
         .menu-text {
           flex: 1;
           min-width: 0;
-          transition: opacity 0.3s ease;
         }
 
         .menu-label {
@@ -549,7 +509,7 @@ export default function AdminSidebar() {
           border-radius: 0 2px 2px 0;
         }
 
-        /* Tooltip for collapsed mode - Desktop only */
+        /* Tooltip for collapsed mode */
         .menu-tooltip {
           position: absolute;
           left: 100%;
@@ -566,7 +526,6 @@ export default function AdminSidebar() {
           flex-direction: column;
           gap: 4px;
           border: 1px solid #334155;
-          animation: fadeIn 0.2s ease;
         }
 
         .menu-tooltip strong {
@@ -579,20 +538,27 @@ export default function AdminSidebar() {
           color: #94a3b8;
         }
 
-        /* Sidebar Footer */
+        /* Sidebar Footer - Enhanced Responsive */
         .sidebar-footer {
-          position: absolute;
+          position: relative;
           bottom: 0;
           left: 0;
           right: 0;
+          width: 100%;
           padding: 16px 20px;
           border-top: 1px solid #1e293b;
           background: #0f172a;
-          transition: all 0.3s ease;
+          margin-top: auto;
+        }
+
+        .footer-content {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
         }
 
         .system-status {
-          margin-bottom: 12px;
+          width: 100%;
         }
 
         .status-indicator {
@@ -611,6 +577,15 @@ export default function AdminSidebar() {
           animation: pulse 2s infinite;
         }
 
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.5;
+          }
+        }
+
         .status-label {
           font-size: 11px;
           color: #94a3b8;
@@ -619,13 +594,13 @@ export default function AdminSidebar() {
         .footer-divider {
           height: 1px;
           background: #1e293b;
-          margin: 12px 0;
+          width: 100%;
         }
 
         .version-info {
           display: flex;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-start;
           gap: 6px;
           font-size: 10px;
           color: #64748b;
@@ -635,7 +610,7 @@ export default function AdminSidebar() {
           font-size: 11px;
         }
 
-        /* Collapse Toggle - Desktop only */
+        /* Collapse Toggle */
         .collapse-toggle {
           position: absolute;
           bottom: 20px;
@@ -660,31 +635,27 @@ export default function AdminSidebar() {
           transform: scale(1.1);
         }
 
-        /* Mobile & Tablet Toggle Button */
+        /* Mobile Toggle */
         .sidebar-toggle {
           position: fixed;
           bottom: 20px;
           right: 20px;
-          width: 56px;
-          height: 56px;
-          border-radius: 28px;
-          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+          width: 48px;
+          height: 48px;
+          border-radius: 24px;
+          background: #4f46e5;
           border: none;
           color: white;
-          font-size: 24px;
+          font-size: 20px;
           z-index: 1100;
+          display: none;
           cursor: pointer;
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-          transition: all 0.3s ease;
-          display: none;
         }
 
         .sidebar-toggle:hover {
+          background: #7c3aed;
           transform: scale(1.05);
-        }
-
-        .sidebar-toggle.active {
-          background: #ef4444;
         }
 
         /* Sidebar Overlay */
@@ -696,7 +667,6 @@ export default function AdminSidebar() {
           bottom: 0;
           background: rgba(0, 0, 0, 0.6);
           z-index: 999;
-          animation: fadeIn 0.3s ease;
         }
 
         /* ============================================
@@ -709,9 +679,7 @@ export default function AdminSidebar() {
         .admin-sidebar.collapsed .status-label,
         .admin-sidebar.collapsed .version-info span,
         .admin-sidebar.collapsed .footer-divider {
-          opacity: 0;
-          visibility: hidden;
-          width: 0;
+          display: none;
         }
 
         .admin-sidebar.collapsed .brand-section {
@@ -741,18 +709,52 @@ export default function AdminSidebar() {
           justify-content: center;
         }
 
+        .admin-sidebar.collapsed .version-info {
+          justify-content: center;
+        }
+
+        .admin-sidebar.collapsed .status-indicator {
+          justify-content: center;
+        }
+
         .admin-sidebar.collapsed .sidebar-footer {
           text-align: center;
+          padding: 16px 12px;
         }
 
         /* ============================================
-           MOBILE STYLES (< 768px)
+           RESPONSIVE STYLES
            ============================================ */
 
-        @media (max-width: 767px) {
+        /* Tablet Styles */
+        @media (max-width: 1024px) and (min-width: 769px) {
+          .admin-sidebar {
+            width: 260px;
+          }
+
+          .admin-sidebar.collapsed {
+            width: 70px;
+          }
+
+          .sidebar-footer {
+            padding: 14px 16px;
+          }
+
+          .status-label {
+            font-size: 10px;
+          }
+
+          .version-info {
+            font-size: 9px;
+          }
+        }
+
+        /* Mobile Styles */
+        @media (max-width: 768px) {
           .admin-sidebar {
             transform: translateX(-100%);
             width: 280px;
+            z-index: 1001;
           }
 
           .admin-sidebar.collapsed {
@@ -769,16 +771,14 @@ export default function AdminSidebar() {
             display: none;
           }
 
-          /* When sidebar is open on mobile, show all content */
+          /* Show hidden content on mobile when expanded */
           .admin-sidebar.collapsed .brand-info,
           .admin-sidebar.collapsed .profile-details,
           .admin-sidebar.collapsed .menu-text,
           .admin-sidebar.collapsed .status-label,
           .admin-sidebar.collapsed .version-info span,
           .admin-sidebar.collapsed .footer-divider {
-            opacity: 1;
-            visibility: visible;
-            width: auto;
+            display: block;
           }
 
           .admin-sidebar.collapsed .brand-section {
@@ -788,6 +788,10 @@ export default function AdminSidebar() {
 
           .admin-sidebar.collapsed .profile-section {
             justify-content: flex-start;
+          }
+
+          .admin-sidebar.collapsed .profile-avatar i {
+            font-size: 44px;
           }
 
           .admin-sidebar.collapsed .menu-link {
@@ -803,177 +807,82 @@ export default function AdminSidebar() {
             justify-content: flex-start;
           }
 
+          .admin-sidebar.collapsed .version-info {
+            justify-content: flex-start;
+          }
+
+          .admin-sidebar.collapsed .status-indicator {
+            justify-content: flex-start;
+          }
+
           .admin-sidebar.collapsed .sidebar-footer {
             text-align: left;
-          }
-
-          /* Adjust menu items for touch */
-          .menu-link {
-            padding: 12px 14px;
-          }
-
-          .menu-icon {
-            width: 40px;
-            height: 40px;
-          }
-
-          .menu-label {
-            font-size: 14px;
+            padding: 16px 20px;
           }
         }
 
-        /* ============================================
-           TABLET STYLES (768px - 1023px)
-           ============================================ */
-
-        @media (min-width: 768px) and (max-width: 1023px) {
+        /* Small Mobile Styles */
+        @media (max-width: 480px) {
           .admin-sidebar {
-            width: 240px;
+            width: 100%;
+            max-width: 280px;
           }
 
-          .admin-sidebar.collapsed {
-            width: 70px;
+          .sidebar-footer {
+            padding: 12px 16px;
           }
 
-          .sidebar-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: center;
+          .status-label {
+            font-size: 10px;
           }
 
-          .admin-sidebar:not(.collapsed) .brand-title {
-            font-size: 14px;
-          }
-
-          .admin-sidebar:not(.collapsed) .profile-name {
-            font-size: 13px;
-          }
-
-          .admin-sidebar:not(.collapsed) .menu-label {
-            font-size: 12px;
-          }
-
-          .admin-sidebar:not(.collapsed) .menu-description {
+          .version-info {
             font-size: 9px;
           }
 
-          /* Adjust collapsed state on tablet */
-          .admin-sidebar.collapsed .brand-info,
-          .admin-sidebar.collapsed .profile-details,
-          .admin-sidebar.collapsed .menu-text,
-          .admin-sidebar.collapsed .status-label,
-          .admin-sidebar.collapsed .version-info span {
-            opacity: 0;
-            visibility: hidden;
-          }
-
-          .admin-sidebar.collapsed .brand-section {
-            justify-content: center;
-            padding: 24px;
-          }
-
-          .admin-sidebar.collapsed .profile-section {
-            justify-content: center;
-          }
-
-          .admin-sidebar.collapsed .menu-link {
-            justify-content: center;
-          }
-
-          /* Touch-friendly tap targets */
-          .menu-link {
-            min-height: 44px;
+          .footer-content {
+            gap: 8px;
           }
         }
 
-        /* ============================================
-           DESKTOP STYLES (>= 1024px)
-           ============================================ */
-
-        @media (min-width: 1024px) {
+        /* Desktop styles */
+        @media (min-width: 769px) {
           .admin-sidebar:not(.collapsed):hover {
             width: 280px;
           }
-
-          /* Smooth transitions on hover */
-          .admin-sidebar:not(.collapsed):hover .brand-info,
-          .admin-sidebar:not(.collapsed):hover .profile-details,
-          .admin-sidebar:not(.collapsed):hover .menu-text {
-            opacity: 1;
-            visibility: visible;
-          }
-        }
-
-        /* ============================================
-           ANIMATIONS
-           ============================================ */
-
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.5;
-            transform: scale(1.2);
-          }
-        }
-
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-
-        /* ============================================
-           ACCESSIBILITY & UTILITIES
-           ============================================ */
-
-        /* Reduced motion preference */
-        @media (prefers-reduced-motion: reduce) {
-          .admin-sidebar,
-          .sidebar-toggle,
-          .menu-link,
-          .collapse-toggle {
-            transition: none;
-          }
           
-          .status-dot {
-            animation: none;
-          }
-        }
-
-        /* Focus styles for accessibility */
-        .menu-link:focus-visible {
-          outline: 2px solid #4f46e5;
-          outline-offset: 2px;
-        }
-
-        .sidebar-toggle:focus-visible,
-        .collapse-toggle:focus-visible {
-          outline: 2px solid white;
-          outline-offset: 2px;
-        }
-
-        /* High contrast mode support */
-        @media (prefers-contrast: high) {
+          /* Ensure footer stays at bottom */
           .admin-sidebar {
-            background: #000;
+            display: flex;
+            flex-direction: column;
           }
           
-          .brand-logo {
-            background: #fff;
+          .navigation-menu {
+            flex: 1;
           }
           
-          .brand-logo i {
-            color: #000;
+          .sidebar-footer {
+            margin-top: auto;
+            position: relative;
+          }
+        }
+
+        /* Height-based responsive adjustments */
+        @media (max-height: 600px) {
+          .sidebar-footer {
+            padding: 10px 16px;
           }
           
-          .menu-icon {
-            border: 1px solid currentColor;
+          .footer-content {
+            gap: 6px;
+          }
+          
+          .status-label {
+            font-size: 9px;
+          }
+          
+          .version-info {
+            font-size: 8px;
           }
         }
       `}</style>
