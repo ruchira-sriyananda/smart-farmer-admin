@@ -12,8 +12,6 @@ export default function Settings() {
   const [settings, setSettings] = useState({
     site_name: 'Smart Farmer',
     site_description: 'Agricultural Platform for Farmers',
-    site_logo: '',
-    favicon: '',
     admin_email: '',
     support_email: '',
     maintenance_mode: false,
@@ -31,7 +29,6 @@ export default function Settings() {
     smtp_password: '',
     default_language: 'en',
     timezone: 'Asia/Colombo',
-    date_format: 'YYYY-MM-DD',
     posts_per_page: 20,
     enable_notifications: true,
     backup_frequency: 'daily',
@@ -61,11 +58,14 @@ export default function Settings() {
 
   const fetchSettings = async () => {
     try {
+      setLoading(true)
       const { data, error } = await supabase
         .from('system_settings')
-        .select('*')
+        .select('setting_key, setting_value')
 
-      if (!error && data && data.length > 0) {
+      if (error) throw error
+
+      if (data && data.length > 0) {
         const settingsMap = {}
         data.forEach(setting => {
           let value = setting.setting_value
@@ -78,49 +78,45 @@ export default function Settings() {
       }
     } catch (err) {
       console.error('Error fetching settings:', err)
+      showMessage('error', 'Failed to load settings: ' + err.message)
     } finally {
       setLoading(false)
     }
   }
 
+  const showMessage = (type, text) => {
+    setMessage({ type, text })
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+  }
+
   const handleSave = async () => {
     setSaving(true)
-    setMessage({ type: '', text: '' })
-
+    
     try {
+      // Prepare updates
+      const updates = []
       for (const [key, value] of Object.entries(settings)) {
-        const { data: existing } = await supabase
-          .from('system_settings')
-          .select('setting_key')
-          .eq('setting_key', key)
-          .single()
-
         const stringValue = typeof value === 'boolean' ? String(value) : String(value)
-
-        if (existing) {
-          await supabase
-            .from('system_settings')
-            .update({ 
-              setting_value: stringValue,
-              updated_at: new Date().toISOString()
-            })
-            .eq('setting_key', key)
-        } else {
-          await supabase
-            .from('system_settings')
-            .insert({
-              setting_key: key,
-              setting_value: stringValue,
-              setting_description: `System setting for ${key}`,
-              updated_at: new Date().toISOString()
-            })
-        }
+        updates.push({
+          setting_key: key,
+          setting_value: stringValue,
+          updated_at: new Date().toISOString()
+        })
       }
 
-      setMessage({ type: 'success', text: 'Settings saved successfully!' })
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+      // Update each setting using upsert
+      for (const update of updates) {
+        const { error } = await supabase
+          .from('system_settings')
+          .upsert(update, { onConflict: 'setting_key' })
+        
+        if (error) throw error
+      }
+
+      showMessage('success', 'Settings saved successfully!')
     } catch (err) {
-      setMessage({ type: 'danger', text: 'Error saving settings: ' + err.message })
+      console.error('Error saving settings:', err)
+      showMessage('error', 'Error saving settings: ' + err.message)
     } finally {
       setSaving(false)
     }
@@ -129,8 +125,16 @@ export default function Settings() {
   const handleReset = async () => {
     if (confirm('Are you sure you want to reset all settings to default?')) {
       await fetchSettings()
-      setMessage({ type: 'info', text: 'Settings reset to defaults' })
+      showMessage('info', 'Settings reset to defaults')
     }
+  }
+
+  const handleTestEmail = async () => {
+    showMessage('info', 'Test email functionality will be available soon')
+  }
+
+  const handleBackupNow = async () => {
+    showMessage('info', 'Manual backup functionality will be available soon')
   }
 
   const tabs = [
@@ -199,7 +203,7 @@ export default function Settings() {
         {/* Message Alert */}
         {message.text && (
           <div className={`alert-custom alert-${message.type}`}>
-            <i className={`bi bi-${message.type === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill'}`}></i>
+            <i className={`bi bi-${message.type === 'success' ? 'check-circle-fill' : message.type === 'error' ? 'exclamation-triangle-fill' : 'info-circle-fill'}`}></i>
             <span>{message.text}</span>
             <button className="alert-close" onClick={() => setMessage({ type: '', text: '' })}>
               <i className="bi bi-x-lg"></i>
@@ -215,7 +219,7 @@ export default function Settings() {
               className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => setActiveTab(tab.id)}
             >
-              <i className={`${tab.icon}`}></i>
+              <i className={tab.icon}></i>
               <span>{tab.label}</span>
             </button>
           ))}
@@ -310,6 +314,8 @@ export default function Settings() {
                     <option value="Asia/Dubai">🇦🇪 Asia/Dubai (UAE)</option>
                     <option value="America/New_York">🇺🇸 America/New York (EST)</option>
                     <option value="Europe/London">🇬🇧 Europe/London (GMT)</option>
+                    <option value="Australia/Sydney">🇦🇺 Australia/Sydney (AEST)</option>
+                    <option value="Asia/Tokyo">🇯🇵 Asia/Tokyo (JST)</option>
                   </select>
                 </div>
 
@@ -329,11 +335,12 @@ export default function Settings() {
                       <option value="USD">US Dollar (USD)</option>
                       <option value="EUR">Euro (EUR)</option>
                       <option value="GBP">British Pound (GBP)</option>
+                      <option value="INR">Indian Rupee (INR)</option>
                     </select>
                     <input 
                       type="text" 
                       className="setting-input"
-                      style={{ width: '80px' }}
+                      style={{ width: '100px' }}
                       value={settings.currency_symbol}
                       onChange={(e) => setSettings({...settings, currency_symbol: e.target.value})}
                       placeholder="Symbol"
@@ -401,7 +408,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.max_login_attempts}
-                    onChange={(e) => setSettings({...settings, max_login_attempts: e.target.value})}
+                    onChange={(e) => setSettings({...settings, max_login_attempts: parseInt(e.target.value)})}
                     min="1"
                     max="10"
                   />
@@ -417,7 +424,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.session_timeout_minutes}
-                    onChange={(e) => setSettings({...settings, session_timeout_minutes: e.target.value})}
+                    onChange={(e) => setSettings({...settings, session_timeout_minutes: parseInt(e.target.value)})}
                     min="5"
                     max="120"
                   />
@@ -549,7 +556,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.posts_per_page}
-                    onChange={(e) => setSettings({...settings, posts_per_page: e.target.value})}
+                    onChange={(e) => setSettings({...settings, posts_per_page: parseInt(e.target.value)})}
                     min="5"
                     max="100"
                   />
@@ -608,7 +615,7 @@ export default function Settings() {
                     SMTP Port
                   </label>
                   <input 
-                    type="text" 
+                    type="number" 
                     className="setting-input" 
                     placeholder="587"
                     value={settings.smtp_port}
@@ -643,24 +650,7 @@ export default function Settings() {
                 </div>
 
                 <div className="setting-card">
-                  <div className="toggle-switch">
-                    <label className="toggle-label">
-                      <i className="bi bi-bell-fill"></i>
-                      Enable Email Notifications
-                    </label>
-                    <label className="toggle">
-                      <input 
-                        type="checkbox"
-                        checked={settings.enable_notifications}
-                        onChange={(e) => setSettings({...settings, enable_notifications: e.target.checked})}
-                      />
-                      <span className="toggle-slider"></span>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="setting-card">
-                  <button className="btn-test-email" onClick={() => alert('Test email functionality will be implemented')}>
+                  <button className="btn-test-email" onClick={handleTestEmail}>
                     <i className="bi bi-send"></i>
                     Send Test Email
                   </button>
@@ -720,7 +710,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.retention_days}
-                    onChange={(e) => setSettings({...settings, retention_days: e.target.value})}
+                    onChange={(e) => setSettings({...settings, retention_days: parseInt(e.target.value)})}
                     min="1"
                     max="365"
                   />
@@ -736,7 +726,7 @@ export default function Settings() {
                       <strong>Next Backup:</strong> {settings.backup_frequency !== 'never' ? 'Scheduled' : 'Not scheduled'}
                     </div>
                   </div>
-                  <button className="btn-backup-now" onClick={() => alert('Manual backup will be implemented')}>
+                  <button className="btn-backup-now" onClick={handleBackupNow}>
                     <i className="bi bi-cloud-upload"></i>
                     Backup Now
                   </button>
@@ -885,7 +875,7 @@ export default function Settings() {
                     Privacy Policy URL
                   </label>
                   <input 
-                    type="url" 
+                    type="text" 
                     className="setting-input" 
                     placeholder="/privacy-policy"
                     value={settings.privacy_policy_url}
@@ -899,7 +889,7 @@ export default function Settings() {
                     Terms of Service URL
                   </label>
                   <input 
-                    type="url" 
+                    type="text" 
                     className="setting-input" 
                     placeholder="/terms"
                     value={settings.terms_url}
@@ -910,494 +900,494 @@ export default function Settings() {
             </div>
           )}
         </div>
+      </div>
 
-        <style jsx>{`
+      <style jsx>{`
+        .settings-dashboard {
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 0 24px;
+        }
+
+        /* Hero Section */
+        .hero-section {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 28px;
+          padding: 40px 32px;
+          margin-bottom: 32px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .hero-section::before {
+          content: '';
+          position: absolute;
+          top: -50%;
+          right: -50%;
+          width: 200%;
+          height: 200%;
+          background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+          animation: pulse 10s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 0.5; }
+          50% { transform: scale(1.1); opacity: 0.8; }
+        }
+
+        .hero-content {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          position: relative;
+          z-index: 1;
+        }
+
+        .hero-title {
+          font-size: 28px;
+          font-weight: 700;
+          color: white;
+          margin: 0 0 8px 0;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .hero-title i {
+          font-size: 32px;
+        }
+
+        .hero-subtitle {
+          font-size: 14px;
+          color: rgba(255,255,255,0.9);
+          margin: 0;
+        }
+
+        .hero-actions {
+          display: flex;
+          gap: 12px;
+        }
+
+        .btn-reset, .btn-save {
+          padding: 10px 24px;
+          border-radius: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          border: none;
+        }
+
+        .btn-reset {
+          background: rgba(255,255,255,0.2);
+          color: white;
+          border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .btn-reset:hover {
+          background: rgba(255,255,255,0.3);
+          transform: translateY(-2px);
+        }
+
+        .btn-save {
+          background: white;
+          color: #667eea;
+        }
+
+        .btn-save:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+
+        .btn-save:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+
+        /* Alert Custom */
+        .alert-custom {
+          background: white;
+          border-radius: 16px;
+          padding: 16px 20px;
+          margin-bottom: 24px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          animation: slideDown 0.3s ease;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        .alert-success {
+          background: linear-gradient(135deg, #10b98120, #05966920);
+          border-left: 4px solid #10b981;
+          color: #065f46;
+        }
+
+        .alert-error {
+          background: linear-gradient(135deg, #ef444420, #dc262620);
+          border-left: 4px solid #ef4444;
+          color: #991b1b;
+        }
+
+        .alert-info {
+          background: linear-gradient(135deg, #3b82f620, #2563eb20);
+          border-left: 4px solid #3b82f6;
+          color: #1e40af;
+        }
+
+        .alert-close {
+          margin-left: auto;
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: inherit;
+          opacity: 0.7;
+        }
+
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        /* Tabs */
+        .tabs-container {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 32px;
+          background: white;
+          padding: 8px;
+          border-radius: 20px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+          flex-wrap: wrap;
+        }
+
+        .tab-btn {
+          padding: 12px 24px;
+          border: none;
+          background: transparent;
+          border-radius: 14px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: #6c757d;
+        }
+
+        .tab-btn i {
+          font-size: 18px;
+        }
+
+        .tab-btn:hover {
+          background: #f8f9fa;
+          color: #667eea;
+        }
+
+        .tab-btn.active {
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          color: white;
+        }
+
+        /* Tab Content */
+        .tab-content {
+          animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .fade-in {
+          animation: fadeIn 0.3s ease;
+        }
+
+        .settings-section {
+          background: white;
+          border-radius: 24px;
+          padding: 32px;
+        }
+
+        .section-header {
+          margin-bottom: 32px;
+          padding-bottom: 20px;
+          border-bottom: 2px solid #f0f0f0;
+        }
+
+        .section-header h2 {
+          font-size: 20px;
+          margin: 0 0 8px 0;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          color: #1f2937;
+        }
+
+        .section-header h2 i {
+          color: #667eea;
+        }
+
+        .section-header p {
+          margin: 0;
+          color: #6c757d;
+          font-size: 14px;
+        }
+
+        /* Settings Grid */
+        .settings-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+          gap: 24px;
+        }
+
+        .setting-card {
+          background: #f9fafb;
+          border-radius: 20px;
+          padding: 20px;
+          transition: all 0.3s ease;
+        }
+
+        .setting-card:hover {
+          box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+          transform: translateY(-2px);
+        }
+
+        .setting-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          color: #374151;
+          margin-bottom: 12px;
+        }
+
+        .setting-label i {
+          color: #667eea;
+        }
+
+        .setting-input, .setting-select, .setting-textarea {
+          width: 100%;
+          padding: 10px 14px;
+          border: 2px solid #e5e7eb;
+          border-radius: 12px;
+          font-size: 14px;
+          transition: all 0.3s ease;
+          background: white;
+        }
+
+        .setting-input:focus, .setting-select:focus, .setting-textarea:focus {
+          outline: none;
+          border-color: #667eea;
+          box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
+
+        .setting-textarea {
+          resize: vertical;
+        }
+
+        .setting-hint {
+          display: block;
+          margin-top: 8px;
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
+        .setting-row {
+          display: flex;
+          gap: 12px;
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+
+        .toggle-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: 600;
+          color: #374151;
+        }
+
+        .toggle-label i {
+          color: #667eea;
+        }
+
+        .toggle {
+          position: relative;
+          display: inline-block;
+          width: 52px;
+          height: 28px;
+        }
+
+        .toggle input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        .toggle-slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #cbd5e1;
+          transition: 0.3s;
+          border-radius: 34px;
+        }
+
+        .toggle-slider:before {
+          position: absolute;
+          content: "";
+          height: 22px;
+          width: 22px;
+          left: 3px;
+          bottom: 3px;
+          background-color: white;
+          transition: 0.3s;
+          border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+          background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+
+        input:checked + .toggle-slider:before {
+          transform: translateX(24px);
+        }
+
+        /* Buttons */
+        .btn-test-email, .btn-backup-now {
+          width: 100%;
+          padding: 10px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          color: white;
+          border: none;
+          border-radius: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+
+        .btn-test-email:hover, .btn-backup-now:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(102,126,234,0.3);
+        }
+
+        .backup-info {
+          background: #f3f4f6;
+          padding: 12px;
+          border-radius: 12px;
+          margin-bottom: 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-size: 13px;
+        }
+
+        .backup-info i {
+          font-size: 20px;
+          color: #667eea;
+        }
+
+        /* Loading Screen */
+        .loading-screen {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 500px;
+        }
+
+        .loading-content {
+          text-align: center;
+        }
+
+        .loading-animation {
+          display: flex;
+          gap: 12px;
+          justify-content: center;
+          margin-bottom: 24px;
+        }
+
+        .loading-circle {
+          width: 12px;
+          height: 12px;
+          background: #667eea;
+          border-radius: 50%;
+          animation: bounce 1.4s ease-in-out infinite;
+        }
+
+        .delay-1 { animation-delay: 0.2s; }
+        .delay-2 { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+          0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+          40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
           .settings-dashboard {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 0 24px;
+            padding: 0 16px;
           }
 
-          /* Hero Section */
           .hero-section {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 28px;
-            padding: 40px 32px;
-            margin-bottom: 32px;
-            position: relative;
-            overflow: hidden;
-          }
-
-          .hero-section::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            right: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-            animation: pulse 10s ease-in-out infinite;
-          }
-
-          @keyframes pulse {
-            0%, 100% { transform: scale(1); opacity: 0.5; }
-            50% { transform: scale(1.1); opacity: 0.8; }
+            padding: 24px 20px;
           }
 
           .hero-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: relative;
-            z-index: 1;
-          }
-
-          .hero-title {
-            font-size: 28px;
-            font-weight: 700;
-            color: white;
-            margin: 0 0 8px 0;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-          }
-
-          .hero-title i {
-            font-size: 32px;
-          }
-
-          .hero-subtitle {
-            font-size: 14px;
-            color: rgba(255,255,255,0.9);
-            margin: 0;
-          }
-
-          .hero-actions {
-            display: flex;
-            gap: 12px;
-          }
-
-          .btn-reset, .btn-save {
-            padding: 10px 24px;
-            border-radius: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: none;
-          }
-
-          .btn-reset {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: 1px solid rgba(255,255,255,0.3);
-          }
-
-          .btn-reset:hover {
-            background: rgba(255,255,255,0.3);
-            transform: translateY(-2px);
-          }
-
-          .btn-save {
-            background: white;
-            color: #667eea;
-          }
-
-          .btn-save:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-          }
-
-          .btn-save:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-          }
-
-          /* Alert Custom */
-          .alert-custom {
-            background: white;
-            border-radius: 16px;
-            padding: 16px 20px;
-            margin-bottom: 24px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            animation: slideDown 0.3s ease;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-          }
-
-          .alert-success {
-            background: linear-gradient(135deg, #10b98120, #05966920);
-            border-left: 4px solid #10b981;
-            color: #065f46;
-          }
-
-          .alert-danger {
-            background: linear-gradient(135deg, #ef444420, #dc262620);
-            border-left: 4px solid #ef4444;
-            color: #991b1b;
-          }
-
-          .alert-info {
-            background: linear-gradient(135deg, #3b82f620, #2563eb20);
-            border-left: 4px solid #3b82f6;
-            color: #1e40af;
-          }
-
-          .alert-close {
-            margin-left: auto;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: inherit;
-            opacity: 0.7;
-          }
-
-          @keyframes slideDown {
-            from {
-              opacity: 0;
-              transform: translateY(-20px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-
-          /* Tabs */
-          .tabs-container {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 32px;
-            background: white;
-            padding: 8px;
-            border-radius: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            flex-wrap: wrap;
-          }
-
-          .tab-btn {
-            padding: 12px 24px;
-            border: none;
-            background: transparent;
-            border-radius: 14px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #6c757d;
-          }
-
-          .tab-btn i {
-            font-size: 18px;
-          }
-
-          .tab-btn:hover {
-            background: #f8f9fa;
-            color: #667eea;
-          }
-
-          .tab-btn.active {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-          }
-
-          /* Tab Content */
-          .tab-content {
-            animation: fadeIn 0.3s ease;
-          }
-
-          @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-
-          .fade-in {
-            animation: fadeIn 0.3s ease;
-          }
-
-          .settings-section {
-            background: white;
-            border-radius: 24px;
-            padding: 32px;
-          }
-
-          .section-header {
-            margin-bottom: 32px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #f0f0f0;
-          }
-
-          .section-header h2 {
-            font-size: 20px;
-            margin: 0 0 8px 0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: #1f2937;
-          }
-
-          .section-header h2 i {
-            color: #667eea;
-          }
-
-          .section-header p {
-            margin: 0;
-            color: #6c757d;
-            font-size: 14px;
-          }
-
-          /* Settings Grid */
-          .settings-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-            gap: 24px;
-          }
-
-          .setting-card {
-            background: #f9fafb;
-            border-radius: 20px;
-            padding: 20px;
-            transition: all 0.3s ease;
-          }
-
-          .setting-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            transform: translateY(-2px);
-          }
-
-          .setting-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 12px;
-          }
-
-          .setting-label i {
-            color: #667eea;
-          }
-
-          .setting-input, .setting-select, .setting-textarea {
-            width: 100%;
-            padding: 10px 14px;
-            border: 2px solid #e5e7eb;
-            border-radius: 12px;
-            font-size: 14px;
-            transition: all 0.3s ease;
-            background: white;
-          }
-
-          .setting-input:focus, .setting-select:focus, .setting-textarea:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
-          }
-
-          .setting-textarea {
-            resize: vertical;
-          }
-
-          .setting-hint {
-            display: block;
-            margin-top: 8px;
-            font-size: 11px;
-            color: #9ca3af;
-          }
-
-          .setting-row {
-            display: flex;
-            gap: 12px;
-          }
-
-          /* Toggle Switch */
-          .toggle-switch {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-          }
-
-          .toggle-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 600;
-            color: #374151;
-          }
-
-          .toggle-label i {
-            color: #667eea;
-          }
-
-          .toggle {
-            position: relative;
-            display: inline-block;
-            width: 52px;
-            height: 28px;
-          }
-
-          .toggle input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-          }
-
-          .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #cbd5e1;
-            transition: 0.3s;
-            border-radius: 34px;
-          }
-
-          .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 22px;
-            width: 22px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: 0.3s;
-            border-radius: 50%;
-          }
-
-          input:checked + .toggle-slider {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-          }
-
-          input:checked + .toggle-slider:before {
-            transform: translateX(24px);
-          }
-
-          /* Buttons */
-          .btn-test-email, .btn-backup-now {
-            width: 100%;
-            padding: 10px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-          }
-
-          .btn-test-email:hover, .btn-backup-now:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102,126,234,0.3);
-          }
-
-          .backup-info {
-            background: #f3f4f6;
-            padding: 12px;
-            border-radius: 12px;
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 13px;
-          }
-
-          .backup-info i {
-            font-size: 20px;
-            color: #667eea;
-          }
-
-          /* Loading Screen */
-          .loading-screen {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 500px;
-          }
-
-          .loading-content {
+            flex-direction: column;
+            gap: 20px;
             text-align: center;
           }
 
-          .loading-animation {
-            display: flex;
-            gap: 12px;
+          .hero-title {
+            font-size: 24px;
             justify-content: center;
-            margin-bottom: 24px;
           }
 
-          .loading-circle {
-            width: 12px;
-            height: 12px;
-            background: #667eea;
-            border-radius: 50%;
-            animation: bounce 1.4s ease-in-out infinite;
+          .tabs-container {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            -webkit-overflow-scrolling: touch;
           }
 
-          .delay-1 { animation-delay: 0.2s; }
-          .delay-2 { animation-delay: 0.4s; }
-
-          @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
-            40% { transform: scale(1); opacity: 1; }
+          .tab-btn {
+            white-space: nowrap;
+            padding: 10px 16px;
           }
 
-          /* Responsive */
-          @media (max-width: 768px) {
-            .settings-dashboard {
-              padding: 0 16px;
-            }
-
-            .hero-section {
-              padding: 24px 20px;
-            }
-
-            .hero-content {
-              flex-direction: column;
-              gap: 20px;
-              text-align: center;
-            }
-
-            .hero-title {
-              font-size: 24px;
-              justify-content: center;
-            }
-
-            .tabs-container {
-              overflow-x: auto;
-              flex-wrap: nowrap;
-              -webkit-overflow-scrolling: touch;
-            }
-
-            .tab-btn {
-              white-space: nowrap;
-              padding: 10px 16px;
-            }
-
-            .settings-section {
-              padding: 20px;
-            }
-
-            .settings-grid {
-              grid-template-columns: 1fr;
-            }
-
-            .setting-row {
-              flex-direction: column;
-            }
+          .settings-section {
+            padding: 20px;
           }
-        `}</style>
-      </div>
+
+          .settings-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .setting-row {
+            flex-direction: column;
+          }
+        }
+      `}</style>
     </AdminLayout>
   )
 }
