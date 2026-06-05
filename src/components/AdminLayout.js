@@ -19,6 +19,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   const [profileName, setProfileName] = useState('')
   const [profileEmail, setProfileEmail] = useState('')
   const [profileRole, setProfileRole] = useState('')
+  const [deletingNotifications, setDeletingNotifications] = useState(false)
   const dropdownRef = useRef(null)
   const notificationRef = useRef(null)
 
@@ -177,8 +178,9 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       const { data: activities, error } = await supabase
         .from('admin_activity_logs')
         .select('*')
+        .eq('admin_id', userId)
         .order('created_at', { ascending: false })
-        .limit(20)
+        .limit(50)
 
       if (error) throw error
 
@@ -227,25 +229,20 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           table: 'admin_activity_logs'
         },
         async (payload) => {
-          const { data: newActivity, error } = await supabase
-            .from('admin_activity_logs')
-            .select('*')
-            .eq('log_id', payload.new.log_id)
-            .single()
-
-          if (!error && newActivity) {
+          // Only show notifications for the current admin
+          if (payload.new.admin_id === userId) {
             const newNotification = {
-              id: newActivity.log_id,
-              title: getNotificationTitle(newActivity.activity_type),
-              message: newActivity.activity_description,
+              id: payload.new.log_id,
+              title: getNotificationTitle(payload.new.activity_type),
+              message: payload.new.activity_description,
               time: 'Just now',
               read: false,
-              type: getNotificationType(newActivity.activity_type),
-              icon: getNotificationIcon(newActivity.activity_type),
-              createdAt: newActivity.created_at
+              type: getNotificationType(payload.new.activity_type),
+              icon: getNotificationIcon(payload.new.activity_type),
+              createdAt: payload.new.created_at
             }
             
-            setNotifications(prev => [newNotification, ...prev.slice(0, 19)])
+            setNotifications(prev => [newNotification, ...prev.slice(0, 49)])
             setUnreadCount(prev => prev + 1)
           }
         }
@@ -335,9 +332,68 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  const clearAllNotifications = () => {
-    setNotifications([])
-    setUnreadCount(0)
+  const clearAllNotifications = async () => {
+    if (!confirm('Are you sure you want to permanently delete all notifications? This action cannot be undone.')) {
+      return
+    }
+    
+    setDeletingNotifications(true)
+    
+    try {
+      // Delete all notifications for this admin from Supabase
+      const { error } = await supabase
+        .from('admin_activity_logs')
+        .delete()
+        .eq('admin_id', userId)
+
+      if (error) throw error
+
+      // Clear local storage
+      localStorage.removeItem('readNotifications')
+      
+      // Clear state
+      setNotifications([])
+      setUnreadCount(0)
+      
+      // Show success message
+      alert('All notifications have been permanently deleted.')
+    } catch (err) {
+      console.error('Error clearing notifications:', err)
+      alert('Failed to delete notifications. Please try again.')
+    } finally {
+      setDeletingNotifications(false)
+      setShowNotifications(false)
+    }
+  }
+
+  const clearSingleNotification = async (notificationId) => {
+    try {
+      // Delete single notification from Supabase
+      const { error } = await supabase
+        .from('admin_activity_logs')
+        .delete()
+        .eq('log_id', notificationId)
+        .eq('admin_id', userId)
+
+      if (error) throw error
+
+      // Remove from local state
+      setNotifications(prev => prev.filter(n => n.id !== notificationId))
+      
+      // Update unread count
+      const readIds = JSON.parse(localStorage.getItem('readNotifications') || '[]')
+      if (!readIds.includes(notificationId)) {
+        setUnreadCount(prev => Math.max(0, prev - 1))
+      }
+      
+      // Remove from localStorage if present
+      const updatedReadIds = readIds.filter(id => id !== notificationId)
+      localStorage.setItem('readNotifications', JSON.stringify(updatedReadIds))
+      
+    } catch (err) {
+      console.error('Error deleting notification:', err)
+      alert('Failed to delete notification. Please try again.')
+    }
   }
 
   const handleLogout = async () => {
@@ -447,8 +503,10 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                       <button 
                         className="btn btn-sm btn-link text-decoration-none text-danger p-0"
                         onClick={clearAllNotifications}
+                        disabled={deletingNotifications || notifications.length === 0}
                       >
-                        <i className="bi bi-trash me-1"></i> Clear all
+                        <i className="bi bi-trash me-1"></i> 
+                        {deletingNotifications ? 'Deleting...' : 'Clear all'}
                       </button>
                     </div>
 
@@ -464,14 +522,13 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                           <div 
                             key={notification.id} 
                             className={`notification-item ${!notification.read ? 'unread' : ''}`}
-                            onClick={() => markAsRead(notification.id)}
                           >
-                            <div className="notification-icon">
+                            <div className="notification-icon" onClick={() => markAsRead(notification.id)}>
                               <div className={`icon-bg bg-${notification.type} bg-opacity-10`}>
                                 <i className={`bi bi-${notification.icon} text-${notification.type}`}></i>
                               </div>
                             </div>
-                            <div className="notification-content">
+                            <div className="notification-content" onClick={() => markAsRead(notification.id)}>
                               <div className="d-flex justify-content-between align-items-start">
                                 <h6 className="notification-title">{notification.title}</h6>
                                 <small className="notification-time">{notification.time}</small>
@@ -479,6 +536,13 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                               <p className="notification-message">{notification.message}</p>
                             </div>
                             {!notification.read && <div className="notification-dot"></div>}
+                            <button 
+                              className="notification-delete"
+                              onClick={() => clearSingleNotification(notification.id)}
+                              title="Delete notification"
+                            >
+                              <i className="bi bi-x-lg"></i>
+                            </button>
                           </div>
                         ))
                       ) : (
@@ -673,7 +737,6 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           gap: 12px;
           padding: 14px 16px;
           border-bottom: 1px solid #e9ecef;
-          cursor: pointer;
           transition: all 0.2s ease;
           position: relative;
         }
@@ -688,6 +751,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         
         .notification-icon {
           flex-shrink: 0;
+          cursor: pointer;
         }
         
         .icon-bg {
@@ -702,6 +766,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         .notification-content {
           flex: 1;
           min-width: 0;
+          cursor: pointer;
         }
         
         .notification-title {
@@ -730,9 +795,37 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
           background-color: #3b82f6;
           border-radius: 50%;
           position: absolute;
-          right: 16px;
+          right: 40px;
           top: 50%;
           transform: translateY(-50%);
+        }
+        
+        .notification-delete {
+          position: absolute;
+          right: 8px;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 24px;
+          height: 24px;
+          border-radius: 6px;
+          border: none;
+          background: transparent;
+          color: #9ca3af;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          transition: all 0.2s ease;
+        }
+        
+        .notification-item:hover .notification-delete {
+          opacity: 1;
+        }
+        
+        .notification-delete:hover {
+          background-color: #fee2e2;
+          color: #ef4444;
         }
         
         .empty-notifications {

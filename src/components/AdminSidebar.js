@@ -105,7 +105,7 @@ export default function AdminSidebar() {
       description: 'System configuration'
     },
     { 
-      path: '/admin/activity-logs', 
+      path: '/admin/security/logs', 
       icon: 'bi-clock-history', 
       label: 'Activity Logs', 
       color: 'secondary',
