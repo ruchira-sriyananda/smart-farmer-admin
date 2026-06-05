@@ -3,232 +3,247 @@ import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 
-export default function UserManagement() {
+export default function ContentModeration() {
   const router = useRouter()
-  const [users, setUsers] = useState([])
+  const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
-  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState(null)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedRole, setSelectedRole] = useState('all')
-  const [selectedStatus, setSelectedStatus] = useState('all')
-  const [showFilter, setShowFilter] = useState(false)
-  const [selectedUser, setSelectedUser] = useState(null)
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [showStatusModal, setShowStatusModal] = useState(false)
-  const [currentAdmin, setCurrentAdmin] = useState(null)
-  const [currentAdminRole, setCurrentAdminRole] = useState('')
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
-  const [deleteProgress, setDeleteProgress] = useState(null)
+  const [filter, setFilter] = useState('PENDING')
+  const [selectedPost, setSelectedPost] = useState(null)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [showRejectModal, setShowRejectModal] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [customReason, setCustomReason] = useState('')
+  const [actionLoading, setActionLoading] = useState(false)
+  const [postDetails, setPostDetails] = useState(null)
+  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [showFullImage, setShowFullImage] = useState(false)
+  const [selectedImage, setSelectedImage] = useState(null)
   const [stats, setStats] = useState({
     total: 0,
-    active: 0,
-    inactive: 0,
-    superAdmins: 0
+    pending: 0,
+    approved: 0,
+    rejected: 0
   })
 
+  // Quick rejection reasons
+  const quickReasons = [
+    { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
+    { id: 2, reason: 'Spam or promotional', icon: 'bi-megaphone', color: '#f59e0b' },
+    { id: 3, reason: 'Misleading information', icon: 'bi-info-circle', color: '#f59e0b' },
+    { id: 4, reason: 'Copyright violation', icon: 'bi-c-circle', color: '#ef4444' },
+    { id: 5, reason: 'Offensive language', icon: 'bi-chat-dots', color: '#ef4444' },
+    { id: 6, reason: 'Duplicate content', icon: 'bi-files', color: '#6c757d' },
+    { id: 7, reason: 'Irrelevant to community', icon: 'bi-x-octagon', color: '#6c757d' },
+    { id: 8, reason: 'Harassment or bullying', icon: 'bi-shield-exclamation', color: '#dc2626' }
+  ]
+
   useEffect(() => {
-    fetchCurrentAdmin()
-    fetchUsers()
-  }, [])
+    fetchPosts()
+    fetchStats()
+  }, [filter])
 
-  const fetchCurrentAdmin = async () => {
-    const session = localStorage.getItem('adminSession')
-    if (session) {
-      const parsed = JSON.parse(session)
-      setCurrentAdmin(parsed.admin)
-      setCurrentAdminRole(parsed.role || 'SUPPORT_ADMIN')
-      setIsSuperAdmin(parsed.admin?.is_super_admin || false)
-    }
-  }
-
-  const fetchUsers = async () => {
+  const fetchPosts = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      const { data: usersData, error: usersError } = await supabase
-        .from('admin_users')
-        .select('*')
+      let query = supabase
+        .from('content_moderation')
+        .select(`
+          *,
+          reviewed_by_admin:admin_users!reviewed_by (
+            admin_id,
+            full_name,
+            email
+          )
+        `)
         .order('created_at', { ascending: false })
 
-      if (usersError) throw usersError
-
-      if (usersData && usersData.length > 0) {
-        const roleIds = [...new Set(usersData.map(u => u.role_id).filter(id => id))]
-        
-        let rolesMap = {}
-        if (roleIds.length > 0) {
-          const { data: rolesData, error: rolesError } = await supabase
-            .from('admin_roles')
-            .select('role_id, role_name, description')
-            .in('role_id', roleIds)
-
-          if (!rolesError && rolesData) {
-            rolesMap = rolesData.reduce((acc, role) => {
-              acc[role.role_id] = role
-              return acc
-            }, {})
-          }
-        }
-
-        const usersWithRoles = usersData.map(user => ({
-          ...user,
-          admin_roles: rolesMap[user.role_id] || null,
-          is_approved: user.is_approved !== undefined ? user.is_approved : true // Default to approved
-        }))
-
-        setUsers(usersWithRoles)
-        
-        setStats({
-          total: usersWithRoles.length,
-          active: usersWithRoles.filter(u => u.is_active && u.is_approved !== false).length,
-          inactive: usersWithRoles.filter(u => !u.is_active || u.is_approved === false).length,
-          superAdmins: usersWithRoles.filter(u => u.is_super_admin).length
-        })
-      } else {
-        setUsers([])
-        setStats({ total: 0, active: 0, inactive: 0, superAdmins: 0 })
+      if (filter !== 'ALL') {
+        query = query.eq('moderation_status', filter)
       }
+
+      const { data, error } = await query
+
+      if (error) throw error
+
+      setPosts(data || [])
     } catch (err) {
-      console.error('Error fetching users:', err)
+      console.error('Error fetching posts:', err)
       setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const isCurrentUser = (userId) => {
-    return currentAdmin?.admin_id === userId
-  }
-
-  const canDeleteUser = (user) => {
-    return isSuperAdmin && !isCurrentUser(user.admin_id)
-  }
-
-  const canDeactivateUser = (user) => {
-    if (isSuperAdmin && !isCurrentUser(user.admin_id)) return true
-    return false
-  }
-
-  const canEditUser = (user) => {
-    if (isSuperAdmin) return true
-    return isCurrentUser(user.admin_id)
-  }
-
-  const handleStatusToggle = (user) => {
-    if (!canDeactivateUser(user)) {
-      alert('You do not have permission to change this user\'s status')
-      return
-    }
-    setSelectedUser(user)
-    setShowStatusModal(true)
-  }
-
-  const confirmStatusChange = async () => {
-    if (!selectedUser) return
-    
-    setDeleting(true)
-    const newStatus = !selectedUser.is_active
-    
-    const { error } = await supabase
-      .from('admin_users')
-      .update({ is_active: newStatus })
-      .eq('admin_id', selectedUser.admin_id)
-
-    setDeleting(false)
-    
-    if (!error) {
-      fetchUsers()
-      setShowStatusModal(false)
-      setSelectedUser(null)
-      alert(`User ${newStatus ? 'activated' : 'deactivated'} successfully!`)
-    } else {
-      alert('Error updating user status: ' + error.message)
-    }
-  }
-
-  const handleDeleteClick = (user) => {
-    if (!canDeleteUser(user)) {
-      alert('You do not have permission to delete this user')
-      return
-    }
-    setSelectedUser(user)
-    setShowDeleteModal(true)
-  }
-
-  const confirmDelete = async () => {
-    if (!selectedUser) return
-    
-    setDeleting(true)
-    setDeleteProgress('Deleting user account...')
-    
+  const fetchStats = async () => {
     try {
-      setDeleteProgress('Removing from admin records...')
-      
-      const response = await fetch('/api/admin/delete-user', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          adminId: selectedUser.admin_id,
-          userId: selectedUser.admin_id,
-          userEmail: selectedUser.email,
-          isAdminUser: true
+      const { data, error } = await supabase
+        .from('content_moderation')
+        .select('moderation_status')
+
+      if (!error && data) {
+        setStats({
+          total: data.length,
+          pending: data.filter(p => p.moderation_status === 'PENDING').length,
+          approved: data.filter(p => p.moderation_status === 'APPROVED').length,
+          rejected: data.filter(p => p.moderation_status === 'REJECTED').length
         })
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        setDeleteProgress('Cleaning up associated data...')
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        alert(`✅ ${result.message}\n\nCleaned up: ${result.deletedTables?.join(', ') || 'All related data'}`)
-        fetchUsers()
-        setShowDeleteModal(false)
-        setSelectedUser(null)
-      } else {
-        alert('❌ Error deleting user: ' + result.error)
       }
     } catch (err) {
-      console.error('Delete error:', err)
-      alert('❌ Error deleting user: ' + err.message)
+      console.error('Error fetching stats:', err)
+    }
+  }
+
+  const fetchPostDetails = async (contentId, contentType) => {
+    setLoadingDetails(true)
+    try {
+      let details = null
+      
+      if (contentType === 'POST') {
+        const { data, error } = await supabase
+          .from('posts')
+          .select(`
+            *,
+            users!posts_user_id_fkey (
+              user_id,
+              full_name,
+              email,
+              profile_image
+            ),
+            post_categories!posts_category_id_fkey (
+              category_name
+            ),
+            post_images!post_id (
+              image_id,
+              image_url,
+              image_order
+            )
+          `)
+          .eq('post_id', contentId)
+          .single()
+        
+        if (!error && data) {
+          // Fetch additional images if they exist in a separate table
+          const { data: images, error: imagesError } = await supabase
+            .from('post_images')
+            .select('*')
+            .eq('post_id', contentId)
+            .order('image_order', { ascending: true })
+          
+          if (!imagesError && images && images.length > 0) {
+            data.images = images
+          } else if (data.image_url) {
+            // If single image URL exists, add it to images array
+            data.images = [{ image_url: data.image_url, image_order: 0 }]
+          }
+          details = data
+        }
+      } else if (contentType === 'COMMENT') {
+        const { data, error } = await supabase
+          .from('comments')
+          .select(`
+            *,
+            users!comments_user_id_fkey (
+              user_id,
+              full_name,
+              email,
+              profile_image
+            ),
+            posts!comments_post_id_fkey (
+              post_id,
+              title,
+              image_url
+            )
+          `)
+          .eq('comment_id', contentId)
+          .single()
+        
+        if (!error && data) details = data
+      }
+      
+      setPostDetails(details)
+    } catch (err) {
+      console.error('Error fetching post details:', err)
     } finally {
-      setDeleting(false)
-      setDeleteProgress(null)
+      setLoadingDetails(false)
     }
   }
 
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          user.email?.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesRole = selectedRole === 'all' || user.admin_roles?.role_name === selectedRole
-    const matchesStatus = selectedStatus === 'all' || 
-                          (selectedStatus === 'active' && user.is_active && user.is_approved !== false) ||
-                          (selectedStatus === 'inactive' && (!user.is_active || user.is_approved === false))
-    return matchesSearch && matchesRole && matchesStatus
-  })
+  const handleReject = async () => {
+    const finalReason = customReason || rejectReason
+    if (!finalReason.trim()) {
+      alert('Please provide a reason for rejection')
+      return
+    }
+    
+    setActionLoading(true)
+    const session = JSON.parse(localStorage.getItem('adminSession'))
+    
+    const updateData = {
+      moderation_status: 'REJECTED',
+      reviewed_by: session?.admin?.admin_id,
+      reviewed_at: new Date().toISOString(),
+      moderation_reason: finalReason
+    }
 
-  const getRoleBadge = (roleName) => {
+    const { error } = await supabase
+      .from('content_moderation')
+      .update(updateData)
+      .eq('moderation_id', selectedPost.moderation_id)
+
+    setActionLoading(false)
+
+    if (!error) {
+      fetchPosts()
+      fetchStats()
+      setShowRejectModal(false)
+      setRejectReason('')
+      setCustomReason('')
+      setSelectedPost(null)
+      if (showDetailsModal) setShowDetailsModal(false)
+    } else {
+      alert(`Error rejecting content: ${error.message}`)
+    }
+  }
+
+  const viewDetails = async (post) => {
+    setSelectedPost(post)
+    await fetchPostDetails(post.content_id, post.content_type)
+    setShowDetailsModal(true)
+  }
+
+  const openFullImage = (imageUrl) => {
+    setSelectedImage(imageUrl)
+    setShowFullImage(true)
+  }
+
+  const getStatusBadge = (status) => {
     const badges = {
-      'SUPER_ADMIN': <span className="badge-super-admin"><i className="bi bi-star-fill me-1"></i>Super Admin</span>,
-      'CONTENT_ADMIN': <span className="badge-content-admin"><i className="bi bi-file-post me-1"></i>Content Admin</span>,
-      'SECURITY_ADMIN': <span className="badge-security-admin"><i className="bi bi-shield-lock me-1"></i>Security Admin</span>,
-      'SUPPORT_ADMIN': <span className="badge-support-admin"><i className="bi bi-headset me-1"></i>Support Admin</span>
+      'PENDING': <span className="status-badge pending"><i className="bi bi-clock-history"></i> Pending Review</span>,
+      'APPROVED': <span className="status-badge approved"><i className="bi bi-check-circle-fill"></i> Approved</span>,
+      'REJECTED': <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>
     }
-    return badges[roleName] || <span className="badge-default"><i className="bi bi-person me-1"></i>{roleName || 'No Role'}</span>
+    return badges[status] || <span className="status-badge default">{status}</span>
   }
 
-  const uniqueRoles = [...new Set(users.map(u => u.admin_roles?.role_name).filter(Boolean))]
+  const getContentTypeIcon = (type) => {
+    const icons = {
+      'POST': 'bi-file-post',
+      'COMMENT': 'bi-chat',
+      'IMAGE': 'bi-image',
+      'VIDEO': 'bi-camera-reels'
+    }
+    return icons[type] || 'bi-file-text'
+  }
 
   if (loading) {
     return (
-      <AdminLayout title="User Management">
+      <AdminLayout title="Content Moderation">
         <div className="loading-container">
           <div className="loading-spinner"></div>
-          <p>Loading users...</p>
+          <p>Loading content...</p>
         </div>
         <style jsx>{`
           .loading-container {
@@ -257,431 +272,421 @@ export default function UserManagement() {
 
   if (error) {
     return (
-      <AdminLayout title="User Management">
+      <AdminLayout title="Content Moderation">
         <div className="error-container">
-          <i className="bi bi-exclamation-triangle-fill"></i>
-          <h3>Failed to Load Users</h3>
+          <i className="bi bi-shield-exclamation"></i>
+          <h3>Access Denied</h3>
           <p>{error}</p>
-          <button className="retry-btn" onClick={fetchUsers}>
-            <i className="bi bi-arrow-repeat"></i> Try Again
-          </button>
+          <button className="btn-primary" onClick={fetchPosts}>Retry</button>
         </div>
-        <style jsx>{`
-          .error-container {
-            text-align: center;
-            padding: 60px 20px;
-            background: white;
-            border-radius: 24px;
-            margin: 40px auto;
-            max-width: 500px;
-          }
-          .error-container i {
-            font-size: 48px;
-            color: #dc3545;
-            margin-bottom: 16px;
-          }
-          .error-container h3 {
-            margin-bottom: 8px;
-            color: #1f2937;
-          }
-          .error-container p {
-            color: #6c757d;
-            margin-bottom: 24px;
-          }
-          .retry-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            padding: 10px 24px;
-            border-radius: 12px;
-            color: white;
-            font-weight: 500;
-          }
-        `}</style>
       </AdminLayout>
     )
   }
 
   return (
-    <AdminLayout title="User Management">
-      <div className="user-management-container">
-        {/* Header Section */}
+    <AdminLayout title="Content Moderation">
+      <div className="moderation-container">
+        {/* Header */}
         <div className="page-header">
           <div className="header-content">
             <div className="header-icon">
-              <i className="bi bi-people-fill"></i>
-              <span className="header-badge">{stats.total}</span>
+              <i className="bi bi-shield-check"></i>
             </div>
             <div>
-              <h1 className="header-title">Administrators</h1>
-              <p className="header-subtitle">Manage system administrators and their permissions</p>
+              <h1 className="header-title">Content Moderation</h1>
+              <p className="header-subtitle">Review and manage user-generated content (Posts are auto-approved by default)</p>
             </div>
-          </div>
-          {isSuperAdmin && (
-            <button className="create-btn" onClick={() => router.push('/admin/users/create')}>
-              <i className="bi bi-person-plus-fill"></i>
-              <span>Add Admin</span>
-            </button>
-          )}
-        </div>
-
-        {/* Role Info Banner */}
-        <div className="role-info-banner">
-          <i className="bi bi-shield-check"></i>
-          <div>
-            <strong>Your Role: {currentAdminRole}</strong>
-            <span>
-              {isSuperAdmin 
-                ? 'You have full access to manage all users.' 
-                : 'You can only edit your own profile.'}
-            </span>
           </div>
         </div>
 
         {/* Stats Cards */}
         <div className="stats-grid">
-          <div className="stat-card stat-total">
-            <div className="stat-icon"><i className="bi bi-people-fill"></i></div>
+          <div className="stat-card total">
+            <div className="stat-icon"><i className="bi bi-files"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Total Admins</span>
+              <span className="stat-label">Total Content</span>
               <h2 className="stat-value">{stats.total}</h2>
             </div>
           </div>
-          <div className="stat-card stat-active">
-            <div className="stat-icon"><i className="bi bi-check-circle-fill"></i></div>
+          <div className="stat-card pending">
+            <div className="stat-icon"><i className="bi bi-hourglass-split"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Active</span>
-              <h2 className="stat-value">{stats.active}</h2>
+              <span className="stat-label">Pending Review</span>
+              <h2 className="stat-value text-warning">{stats.pending}</h2>
             </div>
           </div>
-          <div className="stat-card stat-inactive">
-            <div className="stat-icon"><i className="bi bi-x-circle-fill"></i></div>
+          <div className="stat-card approved">
+            <div className="stat-icon"><i className="bi bi-check-circle"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Inactive</span>
-              <h2 className="stat-value">{stats.inactive}</h2>
+              <span className="stat-label">Approved</span>
+              <h2 className="stat-value text-success">{stats.approved}</h2>
             </div>
           </div>
-          <div className="stat-card stat-super">
-            <div className="stat-icon"><i className="bi bi-star-fill"></i></div>
+          <div className="stat-card rejected">
+            <div className="stat-icon"><i className="bi bi-x-circle"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Super Admins</span>
-              <h2 className="stat-value">{stats.superAdmins}</h2>
+              <span className="stat-label">Rejected</span>
+              <h2 className="stat-value text-danger">{stats.rejected}</h2>
             </div>
           </div>
         </div>
 
-        {/* Search and Filter Bar */}
-        <div className="search-filter-bar">
-          <div className="search-wrapper">
-            <i className="bi bi-search"></i>
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Search by name or email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            {searchTerm && (
-              <button className="clear-search" onClick={() => setSearchTerm('')}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            )}
-          </div>
-          <button className="filter-btn" onClick={() => setShowFilter(!showFilter)}>
-            <i className="bi bi-funnel-fill"></i>
-            <span>Filter</span>
-            {(selectedRole !== 'all' || selectedStatus !== 'all') && (
-              <span className="filter-badge"></span>
-            )}
+        {/* Filter Tabs */}
+        <div className="filter-tabs">
+          <button className={`filter-tab ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>
+            <i className="bi bi-grid"></i> All Content
+            <span className="tab-count">{stats.total}</span>
+          </button>
+          <button className={`filter-tab ${filter === 'PENDING' ? 'active' : ''}`} onClick={() => setFilter('PENDING')}>
+            <i className="bi bi-hourglass-split"></i> Pending
+            <span className="tab-count pending">{stats.pending}</span>
+          </button>
+          <button className={`filter-tab ${filter === 'APPROVED' ? 'active' : ''}`} onClick={() => setFilter('APPROVED')}>
+            <i className="bi bi-check-circle"></i> Approved
+            <span className="tab-count approved">{stats.approved}</span>
+          </button>
+          <button className={`filter-tab ${filter === 'REJECTED' ? 'active' : ''}`} onClick={() => setFilter('REJECTED')}>
+            <i className="bi bi-x-circle"></i> Rejected
+            <span className="tab-count rejected">{stats.rejected}</span>
           </button>
         </div>
 
-        {/* Filter Panel */}
-        {showFilter && (
-          <div className="filter-panel">
-            <div className="filter-group">
-              <label className="filter-label">Role</label>
-              <select className="filter-select" value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)}>
-                <option value="all">All Roles</option>
-                {uniqueRoles.map(role => (
-                  <option key={role} value={role}>{role}</option>
-                ))}
-              </select>
+        {/* Content Cards Grid */}
+        <div className="content-grid">
+          {posts.length > 0 ? (
+            posts.map((post) => (
+              <div key={post.moderation_id} className="content-card">
+                <div className="content-card-header">
+                  <div className="content-type">
+                    <i className={`bi ${getContentTypeIcon(post.content_type)}`}></i>
+                    <span>{post.content_type || 'CONTENT'}</span>
+                  </div>
+                  {getStatusBadge(post.moderation_status)}
+                </div>
+                
+                <div className="content-card-body">
+                  <div className="content-id">
+                    <i className="bi bi-hash"></i>
+                    {post.content_id?.slice(0, 12)}...
+                  </div>
+                  <div className="content-date">
+                    <i className="bi bi-calendar3"></i>
+                    {new Date(post.created_at).toLocaleString()}
+                  </div>
+                  {post.moderation_reason && (
+                    <div className="rejection-reason">
+                      <i className="bi bi-exclamation-triangle-fill"></i>
+                      <span>{post.moderation_reason}</span>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="content-card-footer">
+                  {post.moderation_status === 'PENDING' ? (
+                    <div className="action-buttons">
+                      <button className="btn-reject" onClick={() => {
+                        setSelectedPost(post)
+                        setShowRejectModal(true)
+                      }} disabled={actionLoading}>
+                        <i className="bi bi-x-lg"></i> Reject
+                      </button>
+                      <button className="btn-view" onClick={() => viewDetails(post)}>
+                        <i className="bi bi-eye"></i> Details
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="reviewed-info">
+                      <i className="bi bi-person-check"></i>
+                      Reviewed by {post.reviewed_by_admin?.full_name || 'System'}
+                      <br />
+                      <small>{post.reviewed_at ? new Date(post.reviewed_at).toLocaleString() : 'Auto-approved'}</small>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">
+              <i className="bi bi-inbox"></i>
+              <h4>No content found</h4>
+              <p>There are no {filter.toLowerCase()} content items to display.</p>
             </div>
-            <div className="filter-group">
-              <label className="filter-label">Status</label>
-              <select className="filter-select" value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}>
-                <option value="all">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-            <button className="filter-reset" onClick={() => {
-              setSelectedRole('all')
-              setSelectedStatus('all')
-            }}>
-              <i className="bi bi-arrow-repeat"></i> Reset
-            </button>
-          </div>
-        )}
-
-        {/* Users Table */}
-        <div className="users-table-container">
-          <div className="table-header-info">
-            <span className="result-count">
-              <i className="bi bi-database"></i>
-              {filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''} found
-            </span>
-          </div>
-          
-          <div className="table-responsive">
-            <table className="users-table">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Contact</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Last Login</th>
-                  <th>Created</th>
-                  <th className="actions-col">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredUsers.length > 0 ? (
-                  filteredUsers.map((user) => {
-                    const isSelf = isCurrentUser(user.admin_id)
-                    const showDelete = canDeleteUser(user)
-                    const showDeactivate = canDeactivateUser(user)
-                    const showEdit = canEditUser(user)
-                    
-                    return (
-                      <tr key={user.admin_id} className={`user-row ${isSelf ? 'current-user-row' : ''}`}>
-                        <td className="user-cell-wrapper">
-                          <div className="user-cell">
-                            <div className="user-avatar">
-                              {user.profile_image ? (
-                                <img src={user.profile_image} alt={user.full_name} />
-                              ) : (
-                                <span>{user.full_name?.charAt(0) || 'A'}</span>
-                              )}
-                              {user.is_super_admin && (
-                                <div className="super-badge">
-                                  <i className="bi bi-star-fill"></i>
-                                </div>
-                              )}
-                              {isSelf && (
-                                <div className="current-badge">
-                                  <i className="bi bi-person-check-fill"></i>
-                                </div>
-                              )}
-                            </div>
-                            <div className="user-info">
-                              <div className="user-name">
-                                {user.full_name}
-                                {isSelf && <span className="current-label">(You)</span>}
-                              </div>
-                              <div className="user-id">ID: {user.admin_id?.slice(0, 8)}...</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="contact-cell">
-                          <div className="contact-email">
-                            <i className="bi bi-envelope"></i>
-                            {user.email}
-                          </div>
-                          {user.phone_number && (
-                            <div className="contact-phone">
-                              <i className="bi bi-telephone"></i>
-                              {user.phone_number}
-                            </div>
-                          )}
-                        </td>
-                        <td>{getRoleBadge(user.admin_roles?.role_name)}</td>
-                        <td>
-                          <div className="status-cell">
-                            <span className={`status-badge ${user.is_active ? 'status-active' : 'status-inactive'}`}>
-                              <span className="status-dot"></span>
-                              {user.is_active ? 'Active' : 'Inactive'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="date-cell">
-                          {user.last_login ? (
-                            <>
-                              <i className="bi bi-clock"></i>
-                              {new Date(user.last_login).toLocaleDateString()}
-                              <small>{new Date(user.last_login).toLocaleTimeString()}</small>
-                            </>
-                          ) : (
-                            <span className="text-muted">Never</span>
-                          )}
-                        </td>
-                        <td className="date-cell">
-                          <i className="bi bi-calendar3"></i>
-                          {new Date(user.created_at).toLocaleDateString()}
-                        </td>
-                        <td>
-                          <div className="action-buttons">
-                            <button 
-                              className="action-btn view-btn" 
-                              onClick={() => router.push(`/admin/users/${user.admin_id}`)}
-                              title="View Details"
-                            >
-                              <i className="bi bi-eye"></i>
-                            </button>
-                            
-                            {showEdit && (
-                              <button 
-                                className="action-btn edit-btn" 
-                                onClick={() => router.push(`/admin/users/${user.admin_id}/edit`)}
-                                title="Edit User"
-                              >
-                                <i className="bi bi-pencil"></i>
-                              </button>
-                            )}
-                            
-                            {showDeactivate && (
-                              <button 
-                                className={`action-btn status-btn ${user.is_active ? 'deactivate' : 'activate'}`}
-                                onClick={() => handleStatusToggle(user)}
-                                title={user.is_active ? 'Deactivate' : 'Activate'}
-                              >
-                                <i className={`bi ${user.is_active ? 'bi-ban' : 'bi-check-circle'}`}></i>
-                              </button>
-                            )}
-                            
-                            {showDelete && (
-                              <button 
-                                className="action-btn delete-btn"
-                                onClick={() => handleDeleteClick(user)}
-                                title="Delete User"
-                              >
-                                <i className="bi bi-trash"></i>
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })
-                ) : (
-                  <tr className="empty-row">
-                    <td colSpan="7">
-                      <div className="empty-state">
-                        <i className="bi bi-people"></i>
-                        <h4>No users found</h4>
-                        <p>Click "Add Admin" to create your first administrator.</p>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Status Confirmation Modal */}
-      {showStatusModal && selectedUser && (
-        <div className="modal-overlay" onClick={() => setShowStatusModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header warning">
-              <div className="modal-icon">
-                <i className={`bi ${selectedUser.is_active ? 'bi-ban' : 'bi-check-circle'}`}></i>
-              </div>
-              <h3>{selectedUser.is_active ? 'Deactivate Admin' : 'Activate Admin'}</h3>
-              <button className="modal-close" onClick={() => setShowStatusModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
+      {/* Details Modal with Full Content and Image Viewer */}
+      {showDetailsModal && selectedPost && (
+        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
+          <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header info">
+              <div className="modal-icon"><i className="bi bi-info-circle-fill"></i></div>
+              <h3>Content Details</h3>
+              <button className="modal-close" onClick={() => setShowDetailsModal(false)}><i className="bi bi-x-lg"></i></button>
             </div>
             <div className="modal-body">
-              <p>
-                Are you sure you want to <strong>{selectedUser.is_active ? 'deactivate' : 'activate'}</strong>
-                <br />
-                <span className="user-highlight">{selectedUser.full_name}</span>?
-              </p>
-              {selectedUser.is_active && (
-                <div className="warning-message">
-                  <i className="bi bi-exclamation-triangle-fill"></i>
-                  Deactivated users will lose access to the admin panel immediately.
+              {loadingDetails ? (
+                <div className="text-center py-5">
+                  <div className="spinner-border text-primary"></div>
+                  <p className="mt-2">Loading content details...</p>
                 </div>
+              ) : (
+                <>
+                  {/* Content Metadata */}
+                  <div className="details-section">
+                    <h4><i className="bi bi-info-circle"></i> Content Information</h4>
+                    <div className="details-grid">
+                      <div className="detail-item">
+                        <label>Content ID</label>
+                        <code>{selectedPost.content_id}</code>
+                      </div>
+                      <div className="detail-item">
+                        <label>Content Type</label>
+                        <span className="badge bg-secondary">{selectedPost.content_type}</span>
+                      </div>
+                      <div className="detail-item">
+                        <label>Status</label>
+                        {getStatusBadge(selectedPost.moderation_status)}
+                      </div>
+                      <div className="detail-item">
+                        <label>Created At</label>
+                        <span>{new Date(selectedPost.created_at).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Author Information */}
+                  {postDetails && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-person-badge"></i> Author Information</h4>
+                      <div className="author-info">
+                        <div className="author-avatar">
+                          {postDetails.users?.profile_image ? (
+                            <img src={postDetails.users.profile_image} alt={postDetails.users.full_name} />
+                          ) : (
+                            <i className="bi bi-person-circle"></i>
+                          )}
+                        </div>
+                        <div className="author-details">
+                          <div className="author-name">{postDetails.users?.full_name || 'Unknown User'}</div>
+                          <div className="author-email">{postDetails.users?.email || 'No email'}</div>
+                          {postDetails.users?.user_id && (
+                            <div className="author-id">ID: {postDetails.users.user_id.slice(0, 8)}...</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Post Content with Images */}
+                  {selectedPost.content_type === 'POST' && postDetails && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-file-text"></i> Post Content</h4>
+                      <div className="post-title">{postDetails.title}</div>
+                      <div className="post-content">{postDetails.content}</div>
+                      
+                      {/* Display Images */}
+                      {postDetails.images && postDetails.images.length > 0 && (
+                        <div className="post-images">
+                          <label className="images-label">
+                            <i className="bi bi-images"></i> 
+                            Attached Images ({postDetails.images.length})
+                          </label>
+                          <div className="images-grid">
+                            {postDetails.images.map((img, idx) => (
+                              <div 
+                                key={idx} 
+                                className="image-item"
+                                onClick={() => openFullImage(img.image_url)}
+                              >
+                                <img src={img.image_url} alt={`Post image ${idx + 1}`} />
+                                <div className="image-overlay">
+                                  <i className="bi bi-zoom-in"></i>
+                                  <span>Click to enlarge</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Single image fallback */}
+                      {!postDetails.images && postDetails.image_url && (
+                        <div className="post-images">
+                          <label className="images-label">
+                            <i className="bi bi-image"></i> 
+                            Attached Image
+                          </label>
+                          <div className="images-grid">
+                            <div 
+                              className="image-item single"
+                              onClick={() => openFullImage(postDetails.image_url)}
+                            >
+                              <img src={postDetails.image_url} alt={postDetails.title} />
+                              <div className="image-overlay">
+                                <i className="bi bi-zoom-in"></i>
+                                <span>Click to enlarge</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {postDetails.post_categories?.category_name && (
+                        <div className="post-category">
+                          <i className="bi bi-tag"></i> Category: {postDetails.post_categories.category_name}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Comment Content */}
+                  {selectedPost.content_type === 'COMMENT' && postDetails && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-chat"></i> Comment Content</h4>
+                      <div className="comment-post">
+                        <i className="bi bi-file-post"></i> On Post: {postDetails.posts?.title || 'Unknown Post'}
+                      </div>
+                      <div className="comment-text">{postDetails.comment_text}</div>
+                      
+                      {/* Comment images if any */}
+                      {postDetails.image_url && (
+                        <div className="post-images">
+                          <label className="images-label">
+                            <i className="bi bi-image"></i> 
+                            Attached Image
+                          </label>
+                          <div className="images-grid">
+                            <div 
+                              className="image-item single"
+                              onClick={() => openFullImage(postDetails.image_url)}
+                            >
+                              <img src={postDetails.image_url} alt="Comment attachment" />
+                              <div className="image-overlay">
+                                <i className="bi bi-zoom-in"></i>
+                                <span>Click to enlarge</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Moderation Info */}
+                  {selectedPost.moderation_reason && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
+                      <div className="rejection-box">{selectedPost.moderation_reason}</div>
+                    </div>
+                  )}
+
+                  {selectedPost.reviewed_by_admin && (
+                    <div className="details-section">
+                      <h4><i className="bi bi-person-check"></i> Moderation Info</h4>
+                      <div className="moderation-info">
+                        <div>Reviewed by: {selectedPost.reviewed_by_admin?.full_name}</div>
+                        <div>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowStatusModal(false)}>Cancel</button>
-              <button className={`btn-primary ${selectedUser.is_active ? 'danger' : 'success'}`} onClick={confirmStatusChange} disabled={deleting}>
-                {deleting ? (
-                  <>
-                    <span className="spinner-border spinner-border-sm me-2"></span>
-                    Processing...
-                  </>
-                ) : (
-                  selectedUser.is_active ? 'Deactivate' : 'Activate'
-                )}
-              </button>
+              {selectedPost.moderation_status === 'PENDING' && (
+                <button className="btn-reject-modal" onClick={() => {
+                  setShowDetailsModal(false)
+                  setShowRejectModal(true)
+                }}>
+                  <i className="bi bi-x-lg"></i> Reject
+                </button>
+              )}
+              <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && selectedUser && (
-        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header danger">
-              <div className="modal-icon">
-                <i className="bi bi-trash-fill"></i>
-              </div>
-              <h3>Delete Admin User</h3>
-              <button className="modal-close" onClick={() => setShowDeleteModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
+      {/* Full Image Modal */}
+      {showFullImage && selectedImage && (
+        <div className="modal-overlay" onClick={() => setShowFullImage(false)}>
+          <div className="full-image-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="close-image-btn" onClick={() => setShowFullImage(false)}>
+              <i className="bi bi-x-lg"></i>
+            </button>
+            <img src={selectedImage} alt="Full size" />
+            <button 
+              className="download-image-btn" 
+              onClick={() => window.open(selectedImage, '_blank')}
+            >
+              <i className="bi bi-download"></i> Open in new tab
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Reject Modal with Preset Reasons */}
+      {showRejectModal && selectedPost && (
+        <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
+          <div className="modal-container modal-reject" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header warning">
+              <div className="modal-icon"><i className="bi bi-exclamation-triangle-fill"></i></div>
+              <h3>Reject Content</h3>
+              <button className="modal-close" onClick={() => setShowRejectModal(false)}><i className="bi bi-x-lg"></i></button>
             </div>
             <div className="modal-body">
-              <p>
-                Are you sure you want to permanently delete <br />
-                <span className="user-highlight">{selectedUser.full_name}</span>?
-              </p>
+              <p>Select a reason for rejecting this content:</p>
               
-              {deleteProgress && (
-                <div className="delete-progress">
-                  <div className="spinner-border spinner-border-sm text-primary me-2"></div>
-                  {deleteProgress}
+              {/* Quick Reason Buttons */}
+              <div className="quick-reasons">
+                {quickReasons.map((reason) => (
+                  <button
+                    key={reason.id}
+                    className={`quick-reason-btn ${rejectReason === reason.reason ? 'selected' : ''}`}
+                    onClick={() => setRejectReason(reason.reason)}
+                    style={{ '--reason-color': reason.color }}
+                  >
+                    <i className={`bi ${reason.icon}`}></i>
+                    <span>{reason.reason}</span>
+                    {rejectReason === reason.reason && <i className="bi bi-check-circle-fill check-icon"></i>}
+                  </button>
+                ))}
+              </div>
+
+              {/* Custom Reason */}
+              <div className="custom-reason">
+                <label className="form-label">Or provide a custom reason:</label>
+                <textarea
+                  className="form-textarea"
+                  rows="3"
+                  placeholder="Enter custom rejection reason..."
+                  value={customReason}
+                  onChange={(e) => {
+                    setCustomReason(e.target.value)
+                    setRejectReason('')
+                  }}
+                />
+              </div>
+
+              {!rejectReason && !customReason && (
+                <div className="warning-message">
+                  <i className="bi bi-info-circle"></i>
+                  Please select a reason or provide a custom reason before rejecting.
                 </div>
               )}
-              
-              <div className="warning-message danger">
-                <i className="bi bi-exclamation-triangle-fill"></i>
-                <strong>This will permanently remove:</strong>
-                <ul className="mt-2 mb-0">
-                  <li>✓ User from admin_users table</li>
-                  <li>✓ User from authentication system</li>
-                  <li>✓ All activity logs by this user</li>
-                  <li>✓ All admin sessions</li>
-                  <li>✓ References in security alerts</li>
-                  <li>✓ References in system reports</li>
-                  <li>✓ References in content moderation</li>
-                </ul>
-              </div>
-              <div className="warning-message mt-2">
-                <i className="bi bi-info-circle-fill"></i>
-                This action cannot be undone. All associated data will be permanently deleted.
-              </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+              <button className="btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
               <button 
                 className="btn-primary danger" 
-                onClick={confirmDelete}
-                disabled={deleting}
+                onClick={handleReject}
+                disabled={actionLoading || (!rejectReason && !customReason)}
               >
-                {deleting ? (
-                  <>
-                    <span className="spinner-border spinner-border-sm me-2"></span>
-                    Deleting...
-                  </>
+                {actionLoading ? (
+                  <><span className="spinner-border spinner-border-sm me-2"></span>Processing...</>
                 ) : (
-                  'Delete Permanently'
+                  'Confirm Rejection'
                 )}
               </button>
             </div>
@@ -690,691 +695,161 @@ export default function UserManagement() {
       )}
 
       <style jsx>{`
-        .user-management-container {
-          max-width: 1400px;
-          margin: 0 auto;
-        }
-
-        .page-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-          flex-wrap: wrap;
-          gap: 16px;
-        }
-
-        .header-content {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-        }
-
-        .header-icon {
-          position: relative;
-          width: 60px;
-          height: 60px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .header-icon i {
-          font-size: 28px;
-          color: white;
-        }
-
-        .header-badge {
-          position: absolute;
-          top: -8px;
-          right: -8px;
-          background: #ef4444;
-          color: white;
-          font-size: 12px;
-          font-weight: 600;
-          padding: 2px 6px;
-          border-radius: 12px;
-        }
-
-        .header-title {
-          font-size: 24px;
-          font-weight: 700;
-          color: #1f2937;
-          margin: 0 0 4px 0;
-        }
-
-        .header-subtitle {
-          color: #6c757d;
-          margin: 0;
-          font-size: 14px;
-        }
-
-        .create-btn {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 12px 24px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border: none;
-          border-radius: 14px;
-          color: white;
-          font-weight: 600;
-          font-size: 14px;
-          transition: all 0.3s ease;
-          cursor: pointer;
-        }
-
-        .create-btn:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
-        }
-
-        .role-info-banner {
-          background: #e7f1ff;
-          border-radius: 12px;
-          padding: 12px 20px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 24px;
-        }
-
-        .role-info-banner i {
-          font-size: 24px;
-          color: #4f46e5;
-        }
-
-        .role-info-banner strong {
-          display: block;
-          font-size: 14px;
-        }
-
-        .role-info-banner span {
-          font-size: 12px;
-          color: #6c757d;
-        }
-
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 20px;
-          margin-bottom: 28px;
-        }
-
-        .stat-card {
-          background: white;
-          border-radius: 20px;
-          padding: 20px;
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          transition: all 0.3s ease;
-          cursor: pointer;
-        }
-
-        .stat-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
-        }
-
-        .stat-icon {
-          width: 52px;
-          height: 52px;
-          border-radius: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .stat-total .stat-icon { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
-        .stat-active .stat-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .stat-inactive .stat-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .stat-super .stat-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-
+        .moderation-container { max-width: 1400px; margin: 0 auto; }
+        .page-header { margin-bottom: 28px; }
+        .header-content { display: flex; align-items: center; gap: 20px; }
+        .header-icon { width: 60px; height: 60px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 20px; display: flex; align-items: center; justify-content: center; }
+        .header-icon i { font-size: 28px; color: white; }
+        .header-title { font-size: 24px; font-weight: 700; color: #1f2937; margin: 0 0 4px 0; }
+        .header-subtitle { color: #6c757d; margin: 0; font-size: 14px; }
+        
+        /* Stats Cards */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 28px; }
+        .stat-card { background: white; border-radius: 20px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: all 0.3s ease; }
+        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
+        .stat-card.total .stat-icon { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
+        .stat-card.pending .stat-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .stat-card.approved .stat-icon { background: rgba(16,185,129,0.1); color: #10b981; }
+        .stat-card.rejected .stat-icon { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .stat-icon { width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; }
         .stat-icon i { font-size: 24px; }
-
         .stat-info { flex: 1; }
         .stat-label { font-size: 13px; color: #6c757d; margin-bottom: 4px; display: block; }
-        .stat-value { font-size: 28px; font-weight: 700; color: #1f2937; margin: 0; }
-
-        .search-filter-bar {
-          display: flex;
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .search-wrapper {
-          flex: 1;
-          position: relative;
-        }
-
-        .search-wrapper i {
-          position: absolute;
-          left: 16px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: #9ca3af;
-        }
-
-        .search-input {
-          width: 100%;
-          padding: 12px 40px 12px 44px;
-          border: 2px solid #e9ecef;
-          border-radius: 14px;
-          font-size: 14px;
-          transition: all 0.3s ease;
-        }
-
-        .search-input:focus {
-          outline: none;
-          border-color: #667eea;
-          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .clear-search {
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-          background: none;
-          border: none;
-          color: #9ca3af;
-          cursor: pointer;
-        }
-
-        .filter-btn {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 0 20px;
-          background: white;
-          border: 2px solid #e9ecef;
-          border-radius: 14px;
-          font-weight: 500;
-          color: #495057;
-          position: relative;
-          cursor: pointer;
-        }
-
-        .filter-badge {
-          position: absolute;
-          top: -4px;
-          right: -4px;
-          width: 10px;
-          height: 10px;
-          background: #667eea;
-          border-radius: 50%;
-        }
-
-        .filter-panel {
-          background: white;
-          border-radius: 16px;
-          padding: 16px;
-          margin-bottom: 20px;
-          display: flex;
-          gap: 16px;
-          align-items: flex-end;
-          flex-wrap: wrap;
-          border: 1px solid #e9ecef;
-        }
-
-        .filter-group {
-          flex: 1;
-          min-width: 150px;
-        }
-
-        .filter-label {
-          display: block;
-          font-size: 12px;
-          font-weight: 600;
-          color: #6c757d;
-          margin-bottom: 6px;
-        }
-
-        .filter-select {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #e9ecef;
-          border-radius: 10px;
-          font-size: 14px;
-        }
-
-        .filter-reset {
-          padding: 10px 16px;
-          background: #f8f9fa;
-          border: none;
-          border-radius: 10px;
-          color: #6c757d;
-          font-size: 13px;
-          cursor: pointer;
-        }
-
-        .users-table-container {
-          background: white;
-          border-radius: 24px;
-          overflow: hidden;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        }
-
-        .table-header-info {
-          padding: 16px 20px;
-          border-bottom: 1px solid #e9ecef;
-          background: #fafbfc;
-        }
-
-        .result-count {
-          font-size: 13px;
-          color: #6c757d;
-        }
-
-        .result-count i {
-          margin-right: 6px;
-        }
-
-        .users-table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-
-        .users-table th {
-          text-align: left;
-          padding: 16px 20px;
-          background: #f8f9fa;
-          font-weight: 600;
-          font-size: 13px;
-          color: #495057;
-          border-bottom: 1px solid #e9ecef;
-        }
-
-        .users-table td {
-          padding: 16px 20px;
-          border-bottom: 1px solid #e9ecef;
-          vertical-align: middle;
-        }
-
-        .user-row:hover {
-          background: #fafbfc;
-        }
-
-        .current-user-row {
-          background: #e7f1ff;
-        }
-
-        .user-cell {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .user-avatar {
-          position: relative;
-          width: 44px;
-          height: 44px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-weight: 600;
-          font-size: 16px;
-          overflow: hidden;
-        }
-
-        .user-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .super-badge {
-          position: absolute;
-          bottom: -4px;
-          right: -4px;
-          background: #f59e0b;
-          border-radius: 50%;
-          width: 18px;
-          height: 18px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 10px;
-          border: 2px solid white;
-        }
-
-        .current-badge {
-          position: absolute;
-          top: -4px;
-          left: -4px;
-          background: #10b981;
-          border-radius: 50%;
-          width: 18px;
-          height: 18px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 10px;
-          border: 2px solid white;
-        }
-
-        .user-info {
-          flex: 1;
-        }
-
-        .user-name {
-          font-weight: 600;
-          color: #1f2937;
-          margin-bottom: 4px;
-        }
-
-        .current-label {
-          font-size: 11px;
-          font-weight: normal;
-          color: #10b981;
-          margin-left: 6px;
-        }
-
-        .user-id {
-          font-size: 11px;
-          color: #9ca3af;
-          font-family: monospace;
-        }
-
-        .contact-cell {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .contact-email, .contact-phone {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 13px;
-        }
-
-        .contact-email i, .contact-phone i {
-          color: #9ca3af;
-          font-size: 12px;
-        }
-
-        .role-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 5px 12px;
-          border-radius: 30px;
-          font-size: 12px;
-          font-weight: 500;
-        }
-
-        .badge-super-admin { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .badge-content-admin { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        .badge-security-admin { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .badge-support-admin { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .badge-default { background: #f8f9fa; color: #6c757d; }
-
-        .status-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 5px 12px;
-          border-radius: 30px;
-          font-size: 12px;
-          font-weight: 500;
-        }
-
-        .status-active {
-          background: rgba(16, 185, 129, 0.1);
-          color: #10b981;
-        }
-
-        .status-inactive {
-          background: rgba(239, 68, 68, 0.1);
-          color: #ef4444;
-        }
-
-        .status-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: currentColor;
-          animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-
-        .date-cell {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          font-size: 12px;
-          color: #6c757d;
-        }
-
-        .date-cell i {
-          font-size: 11px;
-          margin-right: 4px;
-        }
-
-        .action-buttons {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .action-btn {
-          width: 32px;
-          height: 32px;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: none;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .view-btn { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        .edit-btn { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .status-btn.deactivate { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .status-btn.activate { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .delete-btn { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-
-        .action-btn:hover {
-          transform: translateY(-2px);
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 60px 20px;
-        }
-
-        .empty-state i {
-          font-size: 48px;
-          color: #cbd5e1;
-          margin-bottom: 16px;
-        }
-
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1100;
-          animation: fadeIn 0.2s ease;
-        }
-
-        .modal-container {
-          background: white;
-          border-radius: 24px;
-          width: 90%;
-          max-width: 500px;
-          animation: slideUp 0.3s ease;
-        }
-
-        .modal-header {
-          padding: 24px 24px 16px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          position: relative;
-        }
-
-        .modal-header.warning .modal-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .modal-header.danger .modal-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-
-        .modal-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 24px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
+        .stat-value { font-size: 28px; font-weight: 700; margin: 0; }
+        .text-warning { color: #f59e0b; }
+        .text-success { color: #10b981; }
+        .text-danger { color: #ef4444; }
+        
+        /* Filter Tabs */
+        .filter-tabs { display: flex; gap: 12px; margin-bottom: 28px; background: white; padding: 6px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .filter-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 20px; background: transparent; border: none; border-radius: 12px; font-size: 14px; font-weight: 500; color: #6c757d; transition: all 0.3s ease; cursor: pointer; }
+        .filter-tab:hover { background: #f8f9fa; }
+        .filter-tab.active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .tab-count { background: rgba(0,0,0,0.1); padding: 2px 8px; border-radius: 20px; font-size: 11px; margin-left: 6px; }
+        .filter-tab.active .tab-count { background: rgba(255,255,255,0.2); }
+        
+        /* Content Grid */
+        .content-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 24px; }
+        .content-card { background: white; border-radius: 20px; overflow: hidden; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .content-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
+        .content-card-header { padding: 16px 20px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; display: flex; justify-content: space-between; align-items: center; }
+        .content-type { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #6c757d; }
+        .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+        .status-badge.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .status-badge.approved { background: rgba(16,185,129,0.1); color: #10b981; }
+        .status-badge.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .content-card-body { padding: 16px 20px; border-bottom: 1px solid #e9ecef; }
+        .content-id { font-family: monospace; font-size: 12px; color: #6c757d; margin-bottom: 8px; }
+        .content-date { font-size: 11px; color: #9ca3af; margin-bottom: 8px; }
+        .rejection-reason { background: #fef3c7; padding: 8px 12px; border-radius: 8px; font-size: 12px; color: #92400e; display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+        .content-card-footer { padding: 16px 20px; }
+        .action-buttons { display: flex; gap: 12px; }
+        .btn-reject, .btn-view { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border: none; border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; }
+        .btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .btn-reject:hover { background: #ef4444; color: white; }
+        .btn-view { background: rgba(79,70,229,0.1); color: #4f46e5; }
+        .btn-view:hover { background: #4f46e5; color: white; }
+        .reviewed-info { font-size: 11px; color: #6c757d; text-align: center; }
+        .empty-state { text-align: center; padding: 80px 20px; background: white; border-radius: 24px; }
+        .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
+        
+        /* Images Grid */
+        .post-images { margin-top: 20px; }
+        .images-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 12px; }
+        .images-label i { color: #667eea; }
+        .images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+        .image-item { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; cursor: pointer; border: 2px solid #e9ecef; transition: all 0.3s ease; }
+        .image-item:hover { transform: scale(1.02); border-color: #667eea; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .image-item img { width: 100%; height: 100%; object-fit: cover; }
+        .image-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; opacity: 0; transition: opacity 0.3s ease; color: white; }
+        .image-item:hover .image-overlay { opacity: 1; }
+        .image-overlay i { font-size: 24px; }
+        .image-overlay span { font-size: 11px; }
+        .image-item.single { grid-column: span 2; max-width: 300px; }
+        
+        /* Full Image Modal */
+        .full-image-modal { position: relative; max-width: 90vw; max-height: 90vh; background: white; border-radius: 12px; overflow: hidden; animation: slideUp 0.3s ease; }
+        .full-image-modal img { max-width: 100%; max-height: 85vh; display: block; margin: 0 auto; }
+        .close-image-btn { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; background: rgba(0,0,0,0.7); border: none; border-radius: 50%; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+        .close-image-btn:hover { background: rgba(0,0,0,0.9); transform: rotate(90deg); }
+        .download-image-btn { position: absolute; bottom: 16px; right: 16px; padding: 8px 16px; background: rgba(0,0,0,0.7); border: none; border-radius: 8px; color: white; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 13px; transition: all 0.3s ease; }
+        .download-image-btn:hover { background: rgba(0,0,0,0.9); }
+        
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
+        .modal-container { background: white; border-radius: 24px; width: 90%; max-width: 550px; animation: slideUp 0.3s ease; overflow: hidden; max-height: 90vh; overflow-y: auto; }
+        .modal-container.modal-lg { max-width: 800px; }
+        .modal-container.modal-reject { max-width: 600px; }
+        .modal-header { padding: 24px 24px 16px; display: flex; align-items: center; gap: 12px; position: relative; border-bottom: 1px solid #e9ecef; }
+        .modal-header.warning .modal-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .modal-header.info .modal-icon { background: rgba(59,130,246,0.1); color: #3b82f6; }
+        .modal-icon { width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; }
         .modal-icon i { font-size: 24px; }
-
-        .modal-header h3 {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 600;
-        }
-
-        .modal-close {
-          position: absolute;
-          right: 20px;
-          top: 20px;
-          background: none;
-          border: none;
-          font-size: 18px;
-          cursor: pointer;
-          color: #9ca3af;
-        }
-
-        .modal-body {
-          padding: 0 24px 24px;
-        }
-
-        .modal-body p {
-          margin: 0 0 16px;
-          line-height: 1.5;
-          color: #4b5563;
-        }
-
-        .user-highlight {
-          font-weight: 600;
-          color: #1f2937;
-          display: inline-block;
-          margin-top: 4px;
-        }
-
-        .delete-progress {
-          background: #e7f1ff;
-          padding: 12px;
-          border-radius: 12px;
-          margin-bottom: 16px;
-          display: flex;
-          align-items: center;
-        }
-
-        .warning-message {
-          background: #fff3cd;
-          padding: 12px;
-          border-radius: 12px;
-          margin-bottom: 12px;
-          font-size: 13px;
-          color: #856404;
-        }
-
-        .warning-message ul {
-          padding-left: 20px;
-          margin: 8px 0 0 0;
-        }
-
-        .warning-message.danger {
-          background: #f8d7da;
-          color: #721c24;
-        }
-
-        .modal-footer {
-          padding: 16px 24px 24px;
-          display: flex;
-          justify-content: flex-end;
-          gap: 12px;
-        }
-
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-        }
-
-        .btn-primary {
-          padding: 10px 24px;
-          border: none;
-          border-radius: 10px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
+        .modal-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+        .modal-close { position: absolute; right: 20px; top: 20px; background: none; border: none; font-size: 18px; cursor: pointer; color: #9ca3af; }
+        .modal-body { padding: 24px; }
+        
+        /* Details Section */
+        .details-section { margin-bottom: 28px; }
+        .details-section h4 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #1f2937; }
+        .details-section h4 i { margin-right: 8px; color: #4f46e5; }
+        .details-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .detail-item label { font-size: 11px; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block; }
+        .detail-item code { background: #f8f9fa; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+        
+        /* Author Info */
+        .author-info { display: flex; gap: 16px; padding: 16px; background: #f8f9fa; border-radius: 16px; }
+        .author-avatar { width: 60px; height: 60px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .author-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .author-avatar i { font-size: 32px; color: white; }
+        .author-name { font-weight: 600; font-size: 16px; color: #1f2937; margin-bottom: 4px; }
+        .author-email { font-size: 12px; color: #6c757d; margin-bottom: 2px; }
+        .author-id { font-size: 10px; color: #9ca3af; font-family: monospace; }
+        
+        /* Post Content */
+        .post-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #1f2937; }
+        .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; margin-bottom: 16px; line-height: 1.6; color: #4b5563; }
+        .post-category { font-size: 12px; color: #6c757d; margin-top: 12px; }
+        .comment-text { background: #f8f9fa; padding: 16px; border-radius: 12px; line-height: 1.6; color: #4b5563; }
+        .comment-post { background: #e7f1ff; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: #0d6efd; }
+        .rejection-box { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
+        .moderation-info { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+        
+        /* Quick Reasons */
+        .quick-reasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
+        .quick-reason-btn { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 12px; cursor: pointer; transition: all 0.3s ease; position: relative; }
+        .quick-reason-btn:hover { background: #e9ecef; transform: translateY(-2px); }
+        .quick-reason-btn.selected { background: #fef3c7; border-color: #f59e0b; }
+        .quick-reason-btn i { font-size: 18px; color: var(--reason-color); }
+        .quick-reason-btn .check-icon { position: absolute; right: 12px; top: 12px; color: #10b981; font-size: 16px; }
+        .custom-reason { margin-top: 20px; }
+        .form-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #374151; }
+        .form-textarea { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
+        .form-textarea:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+        .warning-message { background: #fff3cd; padding: 12px; border-radius: 12px; margin-top: 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #856404; }
+        
+        /* Modal Footer Buttons */
+        .modal-footer { padding: 16px 24px 24px; display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid #e9ecef; }
+        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; font-weight: 500; }
+        .btn-primary { padding: 10px 24px; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; }
         .btn-primary.danger { background: #ef4444; color: white; }
-        .btn-primary.success { background: #10b981; color: white; }
-
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @media (max-width: 1024px) {
-          .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-
+        .btn-primary.danger:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
         @media (max-width: 768px) {
-          .stats-grid {
-            grid-template-columns: 1fr;
-          }
-          .page-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          .filter-panel {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          .users-table {
-            display: block;
-            overflow-x: auto;
-          }
-          .action-buttons {
-            flex-wrap: wrap;
-          }
+          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .filter-tabs { flex-wrap: wrap; }
+          .filter-tab { flex: auto; }
+          .content-grid { grid-template-columns: 1fr; }
+          .details-grid { grid-template-columns: 1fr; }
+          .quick-reasons { grid-template-columns: 1fr; }
+          .author-info { flex-direction: column; text-align: center; }
+          .images-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+          .full-image-modal { max-width: 95vw; }
+          .download-image-btn span { display: none; }
         }
       `}</style>
     </AdminLayout>
