@@ -74,16 +74,15 @@ export default function UserManagement() {
 
         const usersWithRoles = usersData.map(user => ({
           ...user,
-          admin_roles: rolesMap[user.role_id] || null,
-          is_approved: user.is_approved !== undefined ? user.is_approved : true // Default to approved
+          admin_roles: rolesMap[user.role_id] || null
         }))
 
         setUsers(usersWithRoles)
         
         setStats({
           total: usersWithRoles.length,
-          active: usersWithRoles.filter(u => u.is_active && u.is_approved !== false).length,
-          inactive: usersWithRoles.filter(u => !u.is_active || u.is_approved === false).length,
+          active: usersWithRoles.filter(u => u.is_active).length,
+          inactive: usersWithRoles.filter(u => !u.is_active).length,
           superAdmins: usersWithRoles.filter(u => u.is_super_admin).length
         })
       } else {
@@ -206,8 +205,8 @@ export default function UserManagement() {
                           user.email?.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesRole = selectedRole === 'all' || user.admin_roles?.role_name === selectedRole
     const matchesStatus = selectedStatus === 'all' || 
-                          (selectedStatus === 'active' && user.is_active && user.is_approved !== false) ||
-                          (selectedStatus === 'inactive' && (!user.is_active || user.is_approved === false))
+                          (selectedStatus === 'active' && user.is_active) ||
+                          (selectedStatus === 'inactive' && !user.is_active)
     return matchesSearch && matchesRole && matchesStatus
   })
 
@@ -624,7 +623,7 @@ export default function UserManagement() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal - Enhanced */}
       {showDeleteModal && selectedUser && (
         <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
@@ -763,7 +762,6 @@ export default function UserManagement() {
           font-weight: 600;
           font-size: 14px;
           transition: all 0.3s ease;
-          cursor: pointer;
         }
 
         .create-btn:hover {
@@ -811,7 +809,6 @@ export default function UserManagement() {
           align-items: center;
           gap: 16px;
           transition: all 0.3s ease;
-          cursor: pointer;
         }
 
         .stat-card:hover {
@@ -881,7 +878,6 @@ export default function UserManagement() {
           background: none;
           border: none;
           color: #9ca3af;
-          cursor: pointer;
         }
 
         .filter-btn {
@@ -895,7 +891,6 @@ export default function UserManagement() {
           font-weight: 500;
           color: #495057;
           position: relative;
-          cursor: pointer;
         }
 
         .filter-badge {
@@ -948,7 +943,6 @@ export default function UserManagement() {
           border-radius: 10px;
           color: #6c757d;
           font-size: 13px;
-          cursor: pointer;
         }
 
         .users-table-container {
@@ -1299,7 +1293,6 @@ export default function UserManagement() {
 
         .warning-message ul {
           padding-left: 20px;
-          margin: 8px 0 0 0;
         }
 
         .warning-message.danger {
