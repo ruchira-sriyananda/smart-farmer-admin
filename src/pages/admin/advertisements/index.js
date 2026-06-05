@@ -1,4 +1,3 @@
-// pages/admin/advertisements/index.js
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
@@ -21,6 +20,7 @@ export default function Advertisements() {
   const [showFilters, setShowFilters] = useState(false)
   const [packages, setPackages] = useState([])
   const [editingPackage, setEditingPackage] = useState(null)
+  const [subscriptions, setSubscriptions] = useState([])
   
   const [formData, setFormData] = useState({
     title: '',
@@ -47,6 +47,7 @@ export default function Advertisements() {
     active: 0,
     expired: 0,
     pending: 0,
+    rejected: 0,
     clicks: 0,
     impressions: 0,
     ctr: 0,
@@ -55,19 +56,30 @@ export default function Advertisements() {
   })
 
   useEffect(() => {
-    fetchAds()
-    fetchPackages()
+    fetchAllData()
     
     const subscription = supabase
-      .channel('ads_changes')
+      .channel('advertisements_changes')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'mobile_advertisements' },
-        () => fetchAds()
+        () => fetchAllData()
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'subscription_packages' },
+        () => fetchPackages()
       )
       .subscribe()
 
     return () => subscription.unsubscribe()
   }, [])
+
+  const fetchAllData = async () => {
+    await Promise.all([
+      fetchAds(),
+      fetchPackages(),
+      fetchSubscriptions()
+    ])
+  }
 
   const fetchPackages = async () => {
     try {
@@ -83,6 +95,31 @@ export default function Advertisements() {
     }
   }
 
+  const fetchSubscriptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_subscriptions')
+        .select(`
+          *,
+          users!user_subscriptions_user_id_fkey (
+            full_name,
+            email
+          ),
+          subscription_packages!user_subscriptions_package_id_fkey (
+            package_name,
+            price
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (error) throw error
+      setSubscriptions(data || [])
+    } catch (err) {
+      console.error('Error fetching subscriptions:', err)
+    }
+  }
+
   const fetchAds = async () => {
     try {
       setLoading(true)
@@ -92,8 +129,20 @@ export default function Advertisements() {
         .from('mobile_advertisements')
         .select(`
           *,
-          subscription_packages (*),
-          user_subscriptions (*)
+          subscription_packages!mobile_advertisements_package_id_fkey (
+            package_id,
+            package_name,
+            price,
+            duration_days,
+            ad_type,
+            features
+          ),
+          user_subscriptions!mobile_advertisements_subscription_id_fkey (
+            subscription_id,
+            status,
+            payment_status,
+            amount_paid
+          )
         `)
         .order('created_at', { ascending: false })
 
@@ -139,6 +188,7 @@ export default function Advertisements() {
     const active = adsData.filter(ad => ad.status === 'ACTIVE' && new Date(ad.end_date) > now).length
     const expired = adsData.filter(ad => ad.status === 'EXPIRED' || (ad.end_date && new Date(ad.end_date) <= now)).length
     const pending = adsData.filter(ad => ad.status === 'PENDING').length
+    const rejected = adsData.filter(ad => ad.status === 'REJECTED').length
     const totalClicks = adsData.reduce((sum, ad) => sum + (ad.clicks || 0), 0)
     const totalImpressions = adsData.reduce((sum, ad) => sum + (ad.impressions || 0), 0)
     const totalRevenue = adsData.reduce((sum, ad) => sum + (ad.amount_paid || 0), 0)
@@ -148,6 +198,7 @@ export default function Advertisements() {
       active: active,
       expired: expired,
       pending: pending,
+      rejected: rejected,
       clicks: totalClicks,
       impressions: totalImpressions,
       ctr: totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : 0,
@@ -157,6 +208,11 @@ export default function Advertisements() {
   }
 
   const createPackage = async () => {
+    if (!packageFormData.package_name || !packageFormData.price) {
+      alert('Please fill in all required fields')
+      return
+    }
+
     setActionLoading(true)
     
     try {
@@ -170,7 +226,8 @@ export default function Advertisements() {
           ad_type: packageFormData.ad_type,
           features: packageFormData.features,
           is_active: packageFormData.is_active,
-          display_order: packageFormData.display_order
+          display_order: parseInt(packageFormData.display_order),
+          created_at: new Date().toISOString()
         })
 
       if (error) throw error
@@ -188,6 +245,11 @@ export default function Advertisements() {
   }
 
   const updatePackage = async () => {
+    if (!packageFormData.package_name || !packageFormData.price) {
+      alert('Please fill in all required fields')
+      return
+    }
+
     setActionLoading(true)
     
     try {
@@ -201,7 +263,7 @@ export default function Advertisements() {
           ad_type: packageFormData.ad_type,
           features: packageFormData.features,
           is_active: packageFormData.is_active,
-          display_order: packageFormData.display_order,
+          display_order: parseInt(packageFormData.display_order),
           updated_at: new Date().toISOString()
         })
         .eq('package_id', editingPackage.package_id)
@@ -305,6 +367,55 @@ export default function Advertisements() {
     }
   }
 
+  const pauseAd = async (adId) => {
+    if (!confirm('Are you sure you want to pause this ad?')) return
+    
+    setActionLoading(true)
+    
+    try {
+      const { error } = await supabase
+        .from('mobile_advertisements')
+        .update({ 
+          status: 'EXPIRED',
+          updated_at: new Date().toISOString()
+        })
+        .eq('ad_id', adId)
+
+      if (error) throw error
+
+      alert('Ad paused successfully!')
+      fetchAds()
+    } catch (err) {
+      console.error('Error pausing ad:', err)
+      alert('Error pausing ad: ' + err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const deleteAd = async (adId) => {
+    if (!confirm('Are you sure you want to delete this ad permanently?')) return
+    
+    setActionLoading(true)
+    
+    try {
+      const { error } = await supabase
+        .from('mobile_advertisements')
+        .delete()
+        .eq('ad_id', adId)
+
+      if (error) throw error
+
+      alert('Ad deleted successfully!')
+      fetchAds()
+    } catch (err) {
+      console.error('Error deleting ad:', err)
+      alert('Error deleting ad: ' + err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const resetPackageForm = () => {
     setPackageFormData({
       package_name: '',
@@ -379,6 +490,7 @@ export default function Advertisements() {
             <button className="filter-toggle-btn" onClick={() => setShowFilters(!showFilters)}>
               <i className="bi bi-funnel-fill"></i>
               <span>Filters</span>
+              {(filter !== 'all' || dateRange !== 'all') && <span className="active-badge"></span>}
             </button>
             <button className="btn-packages" onClick={() => setShowPackageListModal(true)}>
               <i className="bi bi-tags"></i>
@@ -520,10 +632,18 @@ export default function Advertisements() {
                       <i className="bi bi-calendar3"></i>
                       {new Date(ad.created_at).toLocaleDateString()}
                     </div>
-                    <div className="meta-item">
-                      <i className="bi bi-person"></i>
-                      User
-                    </div>
+                    {ad.start_date && (
+                      <div className="meta-item">
+                        <i className="bi bi-play-circle"></i>
+                        {new Date(ad.start_date).toLocaleDateString()}
+                      </div>
+                    )}
+                    {ad.end_date && (
+                      <div className="meta-item">
+                        <i className="bi bi-stop-circle"></i>
+                        {new Date(ad.end_date).toLocaleDateString()}
+                      </div>
+                    )}
                   </div>
                 </div>
                 
@@ -533,20 +653,20 @@ export default function Advertisements() {
                   </button>
                   {ad.status === 'PENDING' && (
                     <>
-                      <button className="btn-approve" onClick={() => approveAd(ad.ad_id)}>
+                      <button className="btn-approve" onClick={() => approveAd(ad.ad_id)} disabled={actionLoading}>
                         <i className="bi bi-check-lg"></i> Approve
                       </button>
-                      <button className="btn-reject" onClick={() => rejectAd(ad.ad_id)}>
+                      <button className="btn-reject" onClick={() => rejectAd(ad.ad_id)} disabled={actionLoading}>
                         <i className="bi bi-x-lg"></i> Reject
                       </button>
                     </>
                   )}
                   {ad.status === 'ACTIVE' && (
-                    <button className="btn-pause" onClick={() => updateAdStatus(ad.ad_id, 'EXPIRED')}>
+                    <button className="btn-pause" onClick={() => pauseAd(ad.ad_id)} disabled={actionLoading}>
                       <i className="bi bi-pause-circle"></i> Pause
                     </button>
                   )}
-                  <button className="btn-delete" onClick={() => deleteAd(ad.ad_id)}>
+                  <button className="btn-delete" onClick={() => deleteAd(ad.ad_id)} disabled={actionLoading}>
                     <i className="bi bi-trash"></i>
                   </button>
                 </div>
@@ -681,6 +801,7 @@ export default function Advertisements() {
                     type="number"
                     className="form-input"
                     placeholder="29.99"
+                    step="0.01"
                     value={packageFormData.price}
                     onChange={(e) => setPackageFormData({...packageFormData, price: e.target.value})}
                   />
@@ -736,6 +857,7 @@ export default function Advertisements() {
                     features: e.target.value.split(',').map(f => f.trim()).filter(f => f)
                   })}
                 />
+                <small className="form-hint">Separate each feature with a comma</small>
               </div>
               
               <div className="form-group">
@@ -836,6 +958,7 @@ export default function Advertisements() {
           cursor: pointer;
           transition: all 0.3s ease;
           border: none;
+          position: relative;
         }
 
         .filter-toggle-btn {
@@ -846,6 +969,16 @@ export default function Advertisements() {
 
         .filter-toggle-btn:hover {
           background: #e9ecef;
+        }
+
+        .active-badge {
+          position: absolute;
+          top: -4px;
+          right: -4px;
+          width: 10px;
+          height: 10px;
+          background: #4f46e5;
+          border-radius: 50%;
         }
 
         .btn-packages {
@@ -1062,6 +1195,7 @@ export default function Advertisements() {
           gap: 10px;
           font-size: 12px;
           margin-bottom: 12px;
+          flex-wrap: wrap;
         }
 
         .package-price {
@@ -1077,6 +1211,7 @@ export default function Advertisements() {
           border-top: 1px solid #e9ecef;
           border-bottom: 1px solid #e9ecef;
           margin-bottom: 12px;
+          flex-wrap: wrap;
         }
 
         .ad-stat {
@@ -1092,6 +1227,8 @@ export default function Advertisements() {
           justify-content: space-between;
           font-size: 11px;
           color: #9ca3af;
+          flex-wrap: wrap;
+          gap: 8px;
         }
 
         .ad-footer {
@@ -1127,6 +1264,11 @@ export default function Advertisements() {
         .btn-pause:hover { background: #f59e0b; color: white; }
         .btn-delete { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
         .btn-delete:hover { background: #ef4444; color: white; }
+
+        .btn-view:disabled, .btn-approve:disabled, .btn-reject:disabled, .btn-pause:disabled, .btn-delete:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
 
         .empty-state {
           text-align: center;
@@ -1313,6 +1455,13 @@ export default function Advertisements() {
         .form-checkbox input {
           width: auto;
           cursor: pointer;
+        }
+
+        .form-hint {
+          display: block;
+          font-size: 11px;
+          color: #9ca3af;
+          margin-top: 4px;
         }
 
         .modal-overlay {
@@ -1512,6 +1661,9 @@ export default function Advertisements() {
           }
           .filter-group {
             width: 100%;
+          }
+          .packages-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
