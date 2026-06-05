@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { createClient } from '@supabase/supabase-js'
 import AdminLayout from '@/components/AdminLayout'
-import toast, { Toaster } from 'react-hot-toast'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -35,9 +34,7 @@ export default function Advertisements() {
     smtp_user: '',
     smtp_port: '587'
   })
-  const [sortBy, setSortBy] = useState('created_at')
-  const [sortOrder, setSortOrder] = useState('desc')
-  const [chartData, setChartData] = useState(null)
+  const [hoveredCard, setHoveredCard] = useState(null)
   
   const [formData, setFormData] = useState({
     title: '',
@@ -142,7 +139,7 @@ export default function Advertisements() {
       let query = supabase
         .from('mobile_advertisements')
         .select('*')
-        .order(sortBy, { ascending: sortOrder === 'asc' })
+        .order('created_at', { ascending: false })
 
       if (filter !== 'all') {
         query = query.eq('status', filter.toUpperCase())
@@ -161,9 +158,6 @@ export default function Advertisements() {
             break
           case 'month':
             startDate.setMonth(startDate.getMonth() - 1)
-            break
-          case 'year':
-            startDate.setFullYear(startDate.getFullYear() - 1)
             break
         }
         
@@ -201,7 +195,6 @@ export default function Advertisements() {
         
         setAds(adsWithPackages)
         calculateStats(adsWithPackages)
-        prepareChartData(adsWithPackages)
       } else {
         setAds([])
         calculateStats([])
@@ -238,26 +231,6 @@ export default function Advertisements() {
     })
   }
 
-  const prepareChartData = (adsData) => {
-    const last7Days = [...Array(7)].map((_, i) => {
-      const date = new Date()
-      date.setDate(date.getDate() - i)
-      return date.toISOString().split('T')[0]
-    }).reverse()
-
-    const clicksByDay = last7Days.map(day => {
-      return adsData.filter(ad => ad.created_at?.split('T')[0] === day)
-        .reduce((sum, ad) => sum + (ad.clicks || 0), 0)
-    })
-
-    const impressionsByDay = last7Days.map(day => {
-      return adsData.filter(ad => ad.created_at?.split('T')[0] === day)
-        .reduce((sum, ad) => sum + (ad.impressions || 0), 0)
-    })
-
-    setChartData({ clicksByDay, impressionsByDay, last7Days })
-  }
-
   const sendEmailNotification = async (type, recipientEmail, data) => {
     if (!emailSettings.enable_notifications) {
       console.log('Email notifications are disabled')
@@ -285,7 +258,7 @@ export default function Advertisements() {
 
       const result = await response.json()
       if (result.success) {
-        toast.success(`Notification sent to ${recipientEmail}`)
+        console.log(`${type} notification sent to ${recipientEmail}`)
         return true
       } else {
         console.error('Failed to send email:', result.error)
@@ -299,7 +272,7 @@ export default function Advertisements() {
 
   const createPackage = async () => {
     if (!packageFormData.package_name || !packageFormData.price) {
-      toast.error('Please fill in all required fields')
+      alert('Please fill in all required fields')
       return
     }
 
@@ -321,13 +294,13 @@ export default function Advertisements() {
 
       if (error) throw error
 
-      toast.success('Package created successfully!')
+      alert('Package created successfully!')
       setShowPackageModal(false)
       resetPackageForm()
       fetchPackages()
     } catch (err) {
       console.error('Error creating package:', err)
-      toast.error('Error creating package: ' + err.message)
+      alert('Error creating package: ' + err.message)
     } finally {
       setActionLoading(false)
     }
@@ -335,7 +308,7 @@ export default function Advertisements() {
 
   const updatePackage = async () => {
     if (!packageFormData.package_name || !packageFormData.price) {
-      toast.error('Please fill in all required fields')
+      alert('Please fill in all required fields')
       return
     }
 
@@ -358,21 +331,21 @@ export default function Advertisements() {
 
       if (error) throw error
 
-      toast.success('Package updated successfully!')
+      alert('Package updated successfully!')
       setShowPackageModal(false)
       resetPackageForm()
       setEditingPackage(null)
       fetchPackages()
     } catch (err) {
       console.error('Error updating package:', err)
-      toast.error('Error updating package: ' + err.message)
+      alert('Error updating package: ' + err.message)
     } finally {
       setActionLoading(false)
     }
   }
 
   const deletePackage = async (packageId) => {
-    if (!confirm('⚠️ Are you sure you want to delete this package?\n\nThis may affect existing subscriptions.')) return
+    if (!confirm('Are you sure you want to delete this package? This may affect existing subscriptions.')) return
     
     setActionLoading(true)
     
@@ -384,11 +357,11 @@ export default function Advertisements() {
 
       if (error) throw error
 
-      toast.success('Package deleted successfully!')
+      alert('Package deleted successfully!')
       fetchPackages()
     } catch (err) {
       console.error('Error deleting package:', err)
-      toast.error('Error deleting package: ' + err.message)
+      alert('Error deleting package: ' + err.message)
     } finally {
       setActionLoading(false)
     }
@@ -396,7 +369,7 @@ export default function Advertisements() {
 
   const createCampaign = async () => {
     if (!formData.title || !formData.package_id) {
-      toast.error('Please fill in all required fields')
+      alert('Please fill in all required fields')
       return
     }
 
@@ -428,13 +401,13 @@ export default function Advertisements() {
 
       if (error) throw error
 
-      toast.success('Campaign created successfully! Pending approval.')
+      alert('Campaign created successfully! Pending approval.')
       setShowCreateModal(false)
       resetForm()
       fetchAds()
     } catch (err) {
       console.error('Error creating campaign:', err)
-      toast.error('Error creating campaign: ' + err.message)
+      alert('Error creating campaign: ' + err.message)
     } finally {
       setActionLoading(false)
     }
@@ -467,18 +440,18 @@ export default function Advertisements() {
         endDate: endDate.toISOString()
       })
       
-      toast.success('Campaign approved! Notification sent.')
+      alert('Campaign approved successfully! Notification sent to user.')
       await fetchAds()
     } catch (err) {
       console.error('Error approving ad:', err)
-      toast.error('Error approving ad: ' + err.message)
+      alert('Error approving ad: ' + err.message)
     } finally {
       setActionLoading(false)
     }
   }
 
   const rejectAd = async (adId) => {
-    const reason = prompt('📝 Please provide a reason for rejection:')
+    const reason = prompt('Please provide a reason for rejection:')
     if (!reason) return
     
     setActionLoading(true)
@@ -501,18 +474,18 @@ export default function Advertisements() {
         reason: reason
       })
       
-      toast.success('Campaign rejected! Notification sent.')
+      alert('Campaign rejected! Notification sent to user.')
       await fetchAds()
     } catch (err) {
       console.error('Error rejecting ad:', err)
-      toast.error('Error rejecting ad: ' + err.message)
+      alert('Error rejecting ad: ' + err.message)
     } finally {
       setActionLoading(false)
     }
   }
 
   const deleteAd = async (adId) => {
-    if (!confirm('⚠️ Are you sure you want to delete this ad permanently?\n\nThis action cannot be undone.')) return
+    if (!confirm('Are you sure you want to delete this ad permanently?')) return
     
     setActionLoading(true)
     try {
@@ -522,11 +495,11 @@ export default function Advertisements() {
         .eq('ad_id', adId)
 
       if (error) throw error
-      toast.success('Campaign deleted successfully!')
+      alert('Campaign deleted successfully!')
       await fetchAds()
     } catch (err) {
       console.error('Error deleting ad:', err)
-      toast.error('Error deleting ad: ' + err.message)
+      alert('Error deleting ad: ' + err.message)
     } finally {
       setActionLoading(false)
     }
@@ -605,7 +578,7 @@ export default function Advertisements() {
   }
 
   const bulkDelete = async () => {
-    if (!confirm(`⚠️ Delete ${selectedAds.length} campaigns?\n\nThis action cannot be undone.`)) return
+    if (!confirm(`Delete ${selectedAds.length} ads?`)) return
     
     setActionLoading(true)
     try {
@@ -615,35 +588,22 @@ export default function Advertisements() {
       await fetchAds()
       setSelectedAds([])
       setShowBulkActions(false)
-      toast.success(`${selectedAds.length} campaigns deleted!`)
+      alert('Selected campaigns deleted!')
     } catch (err) {
       console.error('Error bulk deleting:', err)
-      toast.error('Error deleting campaigns')
+      alert('Error deleting campaigns')
     } finally {
       setActionLoading(false)
     }
   }
 
-  const StatCard = ({ title, value, icon, color, trend, trendValue }) => (
-    <div className={`stat-card ${color}`}>
-      <div className="stat-card-inner">
-        <div className="stat-icon-wrapper">
-          <i className={`bi ${icon}`}></i>
-        </div>
-        <div className="stat-content">
-          <span className="stat-title">{title}</span>
-          <h2 className="stat-number">{value.toLocaleString()}</h2>
-          {trend && (
-            <div className="stat-trend">
-              <i className={`bi bi-arrow-${trend === 'up' ? 'up' : 'down'}-short`}></i>
-              <span>{trendValue}</span>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="stat-bg-icon">
-        <i className={`bi ${icon}`}></i>
-      </div>
+  const EmailNotificationBadge = () => (
+    <div className={`email-notification-badge ${emailSettings.enable_notifications ? 'enabled' : 'disabled'}`}>
+      <i className={`bi ${emailSettings.enable_notifications ? 'bi-envelope-check-fill' : 'bi-envelope-slash-fill'}`}></i>
+      <span>Email Notifications {emailSettings.enable_notifications ? 'Enabled' : 'Disabled'}</span>
+      {!emailSettings.enable_notifications && (
+        <small>Configure in Settings to enable</small>
+      )}
     </div>
   )
 
@@ -657,7 +617,7 @@ export default function Advertisements() {
               <div className="loading-circle delay-1"></div>
               <div className="loading-circle delay-2"></div>
             </div>
-            <h3>Loading your campaigns...</h3>
+            <h3>Loading advertisements...</h3>
             <p>Please wait while we fetch your data</p>
           </div>
         </div>
@@ -667,25 +627,24 @@ export default function Advertisements() {
 
   return (
     <AdminLayout title="Advertisements">
-      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
-      
       <div className="ads-dashboard">
-        {/* Hero Section */}
+        {/* Animated Hero Section */}
         <div className="hero-section">
           <div className="hero-content">
             <div className="hero-text">
-              <div className="hero-badge">
+              <div className="hero-icon-wrapper">
                 <i className="bi bi-megaphone-fill"></i>
-                <span>Campaign Manager</span>
               </div>
-              <h1 className="hero-title">
-                Advertisement Management
-              </h1>
-              <p className="hero-subtitle">
-                Create, monitor, and optimize your advertising campaigns in one place
-              </p>
+              <div>
+                <h1 className="hero-title">
+                  Advertisement Management
+                  <span className="hero-badge">Real-time</span>
+                </h1>
+                <p className="hero-subtitle">Monitor, manage, and optimize your advertising campaigns</p>
+              </div>
             </div>
             <div className="hero-actions">
+              <EmailNotificationBadge />
               <button className="btn-analytics" onClick={() => setShowAnalyticsModal(true)}>
                 <i className="bi bi-graph-up"></i>
                 Analytics
@@ -700,26 +659,112 @@ export default function Advertisements() {
               </button>
             </div>
           </div>
+          <div className="hero-decoration">
+            <div className="decoration-circle"></div>
+            <div className="decoration-circle-2"></div>
+          </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="stats-grid">
-          <StatCard title="Total Campaigns" value={stats.total} icon="bi-megaphone" color="primary" trend="up" trendValue="+12%" />
-          <StatCard title="Active Now" value={stats.active} icon="bi-check-circle" color="success" trend="up" trendValue="+8%" />
-          <StatCard title="Pending Review" value={stats.pending} icon="bi-hourglass-split" color="warning" trend="down" trendValue="-3%" />
-          <StatCard title="Total Clicks" value={stats.clicks} icon="bi-mouse" color="info" trend="up" trendValue="+23%" />
-          <StatCard title="Revenue" value={`$${stats.revenue}`} icon="bi-currency-dollar" color="danger" trend="up" trendValue="+15%" />
-          <StatCard title="CTR Average" value={`${stats.ctr}%`} icon="bi-graph-up" color="purple" trend="up" trendValue="+2.1%" />
+        {/* Animated Stats Cards */}
+        <div className="stats-wrapper">
+          <div className="stats-grid">
+            <div className="stat-card stat-total">
+              <div className="stat-icon">
+                <i className="bi bi-megaphone"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Total Campaigns</span>
+                <h3 className="stat-value">{stats.total}</h3>
+                <span className="stat-trend">
+                  <i className="bi bi-arrow-up"></i>
+                  +12% this month
+                </span>
+              </div>
+              <div className="stat-bg-icon">
+                <i className="bi bi-megaphone"></i>
+              </div>
+            </div>
+
+            <div className="stat-card stat-active">
+              <div className="stat-icon">
+                <i className="bi bi-check-circle"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Active Now</span>
+                <h3 className="stat-value">{stats.active}</h3>
+                <span className="stat-trend">{stats.total > 0 ? ((stats.active/stats.total)*100).toFixed(0) : 0}% of total</span>
+              </div>
+              <div className="stat-bg-icon">
+                <i className="bi bi-check-circle"></i>
+              </div>
+            </div>
+
+            <div className="stat-card stat-pending">
+              <div className="stat-icon">
+                <i className="bi bi-hourglass-split"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Pending Review</span>
+                <h3 className="stat-value">{stats.pending}</h3>
+                <span className="stat-trend">Awaiting approval</span>
+              </div>
+              <div className="stat-bg-icon">
+                <i className="bi bi-hourglass-split"></i>
+              </div>
+            </div>
+
+            <div className="stat-card stat-clicks">
+              <div className="stat-icon">
+                <i className="bi bi-mouse"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Total Clicks</span>
+                <h3 className="stat-value">{stats.clicks.toLocaleString()}</h3>
+                <span className="stat-trend">CTR: {stats.ctr}%</span>
+              </div>
+              <div className="stat-bg-icon">
+                <i className="bi bi-mouse"></i>
+              </div>
+            </div>
+
+            <div className="stat-card stat-revenue">
+              <div className="stat-icon">
+                <i className="bi bi-currency-dollar"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Revenue</span>
+                <h3 className="stat-value">${stats.revenue.toLocaleString()}</h3>
+                <span className="stat-trend">+23% growth</span>
+              </div>
+              <div className="stat-bg-icon">
+                <i className="bi bi-currency-dollar"></i>
+              </div>
+            </div>
+
+            <div className="stat-card stat-ctr">
+              <div className="stat-icon">
+                <i className="bi bi-graph-up"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">CTR Average</span>
+                <h3 className="stat-value">{stats.ctr}%</h3>
+                <span className="stat-trend">Above industry avg</span>
+              </div>
+              <div className="stat-bg-icon">
+                <i className="bi bi-graph-up"></i>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Controls Bar */}
+        {/* Enhanced Controls Bar */}
         <div className="controls-bar">
           <div className="controls-left">
             <div className="search-box">
               <i className="bi bi-search"></i>
               <input 
                 type="text" 
-                placeholder="Search by title or description..." 
+                placeholder="Search campaigns by title or description..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -731,10 +776,10 @@ export default function Advertisements() {
             </div>
             
             <div className="filter-group">
-              <button className={`filter-trigger ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters(!showFilters)}>
+              <button className={`filter-btn ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters(!showFilters)}>
                 <i className="bi bi-funnel"></i>
                 Filters
-                {(filter !== 'all' || dateRange !== 'all') && <span className="filter-active-dot"></span>}
+                {(filter !== 'all' || dateRange !== 'all') && <span className="filter-badge"></span>}
               </button>
               
               {showFilters && (
@@ -743,10 +788,10 @@ export default function Advertisements() {
                     <label>Status</label>
                     <select value={filter} onChange={(e) => setFilter(e.target.value)}>
                       <option value="all">All Status</option>
-                      <option value="active">✅ Active</option>
-                      <option value="pending">⏳ Pending</option>
-                      <option value="expired">⏰ Expired</option>
-                      <option value="rejected">❌ Rejected</option>
+                      <option value="active">Active</option>
+                      <option value="pending">Pending</option>
+                      <option value="expired">Expired</option>
+                      <option value="rejected">Rejected</option>
                     </select>
                   </div>
                   <div className="filter-section">
@@ -756,37 +801,17 @@ export default function Advertisements() {
                       <option value="today">Today</option>
                       <option value="week">Last 7 Days</option>
                       <option value="month">Last 30 Days</option>
-                      <option value="year">Last Year</option>
                     </select>
                   </div>
-                  <button className="reset-filters" onClick={() => {
+                  <button className="reset-filters-btn" onClick={() => {
                     setFilter('all')
                     setDateRange('all')
                     setShowFilters(false)
                   }}>
-                    <i className="bi bi-arrow-repeat"></i> Reset Filters
+                    Reset Filters
                   </button>
                 </div>
               )}
-            </div>
-
-            <div className="sort-group">
-              <select 
-                className="sort-select" 
-                value={`${sortBy}-${sortOrder}`}
-                onChange={(e) => {
-                  const [newSortBy, newSortOrder] = e.target.value.split('-')
-                  setSortBy(newSortBy)
-                  setSortOrder(newSortOrder)
-                  fetchAds()
-                }}
-              >
-                <option value="created_at-desc">Newest First</option>
-                <option value="created_at-asc">Oldest First</option>
-                <option value="clicks-desc">Most Clicks</option>
-                <option value="impressions-desc">Most Impressions</option>
-                <option value="amount_paid-desc">Highest Budget</option>
-              </select>
             </div>
           </div>
 
@@ -799,52 +824,56 @@ export default function Advertisements() {
                 <i className="bi bi-list-ul"></i>
               </button>
             </div>
-            <div className="campaign-count">
-              <i className="bi bi-camera-reels"></i>
-              <span>{filteredAds.length} campaigns</span>
+            <div className="stats-info">
+              <i className="bi bi-info-circle"></i>
+              Showing {filteredAds.length} of {ads.length} campaigns
             </div>
           </div>
         </div>
 
         {/* Bulk Actions Bar */}
         {showBulkActions && selectedAds.length > 0 && (
-          <div className="bulk-actions-bar slide-down">
+          <div className="bulk-actions-bar">
             <div className="bulk-info">
-              <i className="bi bi-check2-square"></i>
-              <span>{selectedAds.length} campaign{selectedAds.length !== 1 ? 's' : ''} selected</span>
+              <i className="bi bi-check2-circle"></i>
+              <span>{selectedAds.length} items selected</span>
             </div>
             <div className="bulk-actions">
               <button className="bulk-select-all" onClick={selectAll}>
                 {selectedAds.length === filteredAds.length ? 'Deselect All' : 'Select All'}
               </button>
               <button className="bulk-delete" onClick={bulkDelete}>
-                <i className="bi bi-trash"></i> Delete
+                <i className="bi bi-trash"></i> Delete Selected
               </button>
             </div>
           </div>
         )}
 
-        {/* Ads Grid/List View */}
+        {/* Enhanced Ads Grid */}
         {filteredAds.length > 0 ? (
           <div className={`ads-container ${viewMode}`}>
             {filteredAds.map((ad, index) => (
-              <div key={ad.ad_id} className={`ad-card fade-in-up`} style={{animationDelay: `${index * 0.05}s`}}>
+              <div 
+                key={ad.ad_id} 
+                className={`ad-card fade-in-up`} 
+                style={{animationDelay: `${index * 0.05}s`}}
+                onMouseEnter={() => setHoveredCard(ad.ad_id)}
+                onMouseLeave={() => setHoveredCard(null)}
+              >
                 <div className="ad-card-inner">
                   <div className="ad-select">
                     <input 
                       type="checkbox" 
                       checked={selectedAds.includes(ad.ad_id)}
                       onChange={() => toggleSelectAd(ad.ad_id)}
-                      id={`select-${ad.ad_id}`}
                     />
-                    <label htmlFor={`select-${ad.ad_id}`}></label>
                   </div>
 
                   {ad.image_url && (
                     <div className="ad-image-wrapper">
-                      <img src={ad.image_url} alt={ad.title} loading="lazy" />
-                      <div className="ad-image-overlay">
-                        <button className="quick-view-btn" onClick={() => viewAdDetails(ad)}>
+                      <img src={ad.image_url} alt={ad.title} />
+                      <div className="ad-overlay">
+                        <button className="quick-view" onClick={() => viewAdDetails(ad)}>
                           <i className="bi bi-eye"></i> Quick View
                         </button>
                       </div>
@@ -853,36 +882,34 @@ export default function Advertisements() {
 
                   <div className="ad-content">
                     <div className="ad-header">
-                      <div className="ad-badges">
-                        <span className="ad-type-badge">
-                          <i className={`bi ${ad.subscription_packages?.ad_type === 'PREMIUM' ? 'bi-star-fill' : 
-                                            ad.subscription_packages?.ad_type === 'FEATURED' ? 'bi-gem' : 'bi-megaphone'}`}>
-                          </i>
-                          {ad.subscription_packages?.package_name || 'Standard'}
-                        </span>
-                        {getStatusBadge(ad.status, ad.end_date)}
+                      <div className="ad-type-badge">
+                        <i className={`bi ${ad.ad_type === 'PREMIUM' ? 'bi-star-fill' : 
+                                          ad.ad_type === 'FEATURED' ? 'bi-gem' : 'bi-megaphone'}`}>
+                        </i>
+                        <span>{ad.subscription_packages?.package_name || 'Standard'}</span>
                       </div>
+                      {getStatusBadge(ad.status, ad.end_date)}
                     </div>
 
                     <h3 className="ad-title">{ad.title}</h3>
-                    <p className="ad-description">{ad.description?.substring(0, 100)}...</p>
+                    <p className="ad-description">{ad.description?.substring(0, 120)}...</p>
 
                     <div className="ad-metrics">
-                      <div className="metric-item">
+                      <div className="metric">
                         <i className="bi bi-eye"></i>
                         <div>
                           <span className="metric-value">{ad.impressions?.toLocaleString() || 0}</span>
                           <span className="metric-label">Impressions</span>
                         </div>
                       </div>
-                      <div className="metric-item">
+                      <div className="metric">
                         <i className="bi bi-mouse"></i>
                         <div>
                           <span className="metric-value">{ad.clicks?.toLocaleString() || 0}</span>
                           <span className="metric-label">Clicks</span>
                         </div>
                       </div>
-                      <div className="metric-item">
+                      <div className="metric">
                         <i className="bi bi-graph-up"></i>
                         <div>
                           <span className="metric-value">
@@ -891,11 +918,11 @@ export default function Advertisements() {
                           <span className="metric-label">CTR</span>
                         </div>
                       </div>
-                      <div className="metric-item">
+                      <div className="metric">
                         <i className="bi bi-currency-dollar"></i>
                         <div>
                           <span className="metric-value">${ad.amount_paid || 0}</span>
-                          <span className="metric-label">Budget</span>
+                          <span className="metric-label">Amount</span>
                         </div>
                       </div>
                     </div>
@@ -908,14 +935,17 @@ export default function Advertisements() {
                       <div className="ad-actions">
                         <button className="action-btn view" onClick={() => viewAdDetails(ad)}>
                           <i className="bi bi-eye"></i>
+                          <span>View</span>
                         </button>
                         {ad.status === 'PENDING' && (
                           <>
                             <button className="action-btn approve" onClick={() => approveAd(ad.ad_id)} disabled={actionLoading}>
                               <i className="bi bi-check-lg"></i>
+                              <span>Approve</span>
                             </button>
                             <button className="action-btn reject" onClick={() => rejectAd(ad.ad_id)} disabled={actionLoading}>
                               <i className="bi bi-x-lg"></i>
+                              <span>Reject</span>
                             </button>
                           </>
                         )}
@@ -927,10 +957,12 @@ export default function Advertisements() {
                             }
                           }}>
                             <i className="bi bi-pause-circle"></i>
+                            <span>Pause</span>
                           </button>
                         )}
                         <button className="action-btn delete" onClick={() => deleteAd(ad.ad_id)} disabled={actionLoading}>
                           <i className="bi bi-trash"></i>
+                          <span>Delete</span>
                         </button>
                       </div>
                     </div>
@@ -941,12 +973,12 @@ export default function Advertisements() {
           </div>
         ) : (
           <div className="empty-state">
-            <div className="empty-state-illustration">
+            <div className="empty-state-icon">
               <i className="bi bi-megaphone-slash"></i>
             </div>
             <h3>No Campaigns Found</h3>
             <p>Get started by creating your first advertising campaign</p>
-            <button className="create-first-btn" onClick={() => setShowCreateModal(true)}>
+            <button className="btn-create-first" onClick={() => setShowCreateModal(true)}>
               <i className="bi bi-plus-circle"></i>
               Create Your First Campaign
             </button>
@@ -954,8 +986,8 @@ export default function Advertisements() {
         )}
       </div>
 
-      {/* Modals remain the same with improved styling */}
-      {/* Create Campaign Modal */}
+      {/* Rest of the modals remain the same but with enhanced styling */}
+      {/* Create Campaign Modal with Enhanced Design */}
       {showCreateModal && (
         <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -965,7 +997,7 @@ export default function Advertisements() {
                   <i className="bi bi-megaphone"></i>
                 </div>
                 <div>
-                  <h2>Create New Campaign</h2>
+                  <h2>Create Campaign</h2>
                   <p>Set up a new advertising campaign</p>
                 </div>
               </div>
@@ -976,16 +1008,19 @@ export default function Advertisements() {
             <div className="modal-body">
               {!emailSettings.enable_notifications && (
                 <div className="notification-warning">
-                  <i className="bi bi-envelope-slash"></i>
+                  <i className="bi bi-envelope-slash-fill"></i>
                   <div>
                     <strong>Email notifications are disabled</strong>
-                    <p>Users won't receive email updates about their campaigns.</p>
+                    <p>Users won't receive email updates about their campaigns. Enable in <a href="/admin/settings">Settings</a>.</p>
                   </div>
                 </div>
               )}
               
               <div className="form-group">
-                <label>Campaign Title <span className="required">*</span></label>
+                <label className="form-label">
+                  <i className="bi bi-type"></i>
+                  Campaign Title *
+                </label>
                 <input
                   type="text"
                   className="form-input"
@@ -996,7 +1031,10 @@ export default function Advertisements() {
               </div>
 
               <div className="form-group">
-                <label>Description</label>
+                <label className="form-label">
+                  <i className="bi bi-file-text"></i>
+                  Description
+                </label>
                 <textarea
                   className="form-textarea"
                   rows="4"
@@ -1007,7 +1045,10 @@ export default function Advertisements() {
               </div>
 
               <div className="form-group">
-                <label>Image URL</label>
+                <label className="form-label">
+                  <i className="bi bi-image"></i>
+                  Image URL
+                </label>
                 <input
                   type="text"
                   className="form-input"
@@ -1019,7 +1060,10 @@ export default function Advertisements() {
               </div>
 
               <div className="form-group">
-                <label>Select Package <span className="required">*</span></label>
+                <label className="form-label">
+                  <i className="bi bi-box"></i>
+                  Select Package *
+                </label>
                 <select
                   className="form-select"
                   value={formData.package_id}
@@ -1035,15 +1079,18 @@ export default function Advertisements() {
               </div>
 
               <div className="form-group">
-                <label>Target Audience</label>
+                <label className="form-label">
+                  <i className="bi bi-people"></i>
+                  Target Audience
+                </label>
                 <select
                   className="form-select"
                   value={formData.target_audience}
                   onChange={(e) => setFormData({...formData, target_audience: e.target.value})}
                 >
-                  <option value="ALL">🌍 All Users</option>
-                  <option value="FARMERS">🌾 Farmers Only</option>
-                  <option value="VENDORS">🛒 Vendors Only</option>
+                  <option value="ALL">All Users</option>
+                  <option value="FARMERS">Farmers Only</option>
+                  <option value="VENDORS">Vendors Only</option>
                 </select>
               </div>
             </div>
@@ -1057,7 +1104,7 @@ export default function Advertisements() {
                   </>
                 ) : (
                   <>
-                    <i className="bi bi-check-lg"></i>
+                    <i className="bi bi-plus-circle"></i>
                     Create Campaign
                   </>
                 )}
@@ -1067,6 +1114,7 @@ export default function Advertisements() {
         </div>
       )}
 
+      {/* Other modals remain similar with enhanced styling */}
       {/* View Campaign Modal */}
       {showViewModal && selectedAd && (
         <div className="modal-overlay" onClick={() => setShowViewModal(false)}>
@@ -1097,53 +1145,53 @@ export default function Advertisements() {
                 <p className="view-description">{selectedAd.description}</p>
               </div>
 
-              <div className="info-grid">
-                <div className="info-item">
+              <div className="view-grid">
+                <div className="view-item">
                   <label>Status</label>
                   <div>{getStatusBadge(selectedAd.status, selectedAd.end_date)}</div>
                 </div>
-                <div className="info-item">
+                <div className="view-item">
                   <label>Package</label>
                   <span>{selectedAd.subscription_packages?.package_name || 'Standard'}</span>
                 </div>
-                <div className="info-item">
+                <div className="view-item">
                   <label>Target Audience</label>
                   <span>{selectedAd.target_audience}</span>
                 </div>
-                <div className="info-item">
-                  <label>Budget</label>
+                <div className="view-item">
+                  <label>Amount Paid</label>
                   <span>${selectedAd.amount_paid || 0}</span>
                 </div>
-                <div className="info-item">
+                <div className="view-item">
                   <label>Impressions</label>
                   <span>{selectedAd.impressions?.toLocaleString() || 0}</span>
                 </div>
-                <div className="info-item">
+                <div className="view-item">
                   <label>Clicks</label>
                   <span>{selectedAd.clicks?.toLocaleString() || 0}</span>
                 </div>
-                <div className="info-item">
+                <div className="view-item">
                   <label>CTR</label>
                   <span>{selectedAd.impressions > 0 ? ((selectedAd.clicks / selectedAd.impressions) * 100).toFixed(2) : 0}%</span>
                 </div>
-                <div className="info-item">
+                <div className="view-item">
                   <label>Created</label>
                   <span>{new Date(selectedAd.created_at).toLocaleDateString()}</span>
                 </div>
                 {selectedAd.start_date && (
-                  <div className="info-item">
+                  <div className="view-item">
                     <label>Start Date</label>
                     <span>{new Date(selectedAd.start_date).toLocaleDateString()}</span>
                   </div>
                 )}
                 {selectedAd.end_date && (
-                  <div className="info-item">
+                  <div className="view-item">
                     <label>End Date</label>
                     <span>{new Date(selectedAd.end_date).toLocaleDateString()}</span>
                   </div>
                 )}
                 {selectedAd.rejection_reason && (
-                  <div className="info-item full-width">
+                  <div className="view-item full-width">
                     <label>Rejection Reason</label>
                     <span className="rejection-reason">{selectedAd.rejection_reason}</span>
                   </div>
@@ -1157,14 +1205,14 @@ export default function Advertisements() {
         </div>
       )}
 
-      {/* Packages List Modal */}
+      {/* Packages List Modal with Enhanced Design */}
       {showPackageListModal && (
         <div className="modal-overlay" onClick={() => setShowPackageListModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-header-content">
                 <div className="modal-icon-wrapper">
-                  <i className="bi bi-tags"></i>
+                  <i className="bi bi-tags-fill"></i>
                 </div>
                 <div>
                   <h2>Subscription Packages</h2>
@@ -1189,8 +1237,8 @@ export default function Advertisements() {
               <div className="packages-grid">
                 {packages.length > 0 ? (
                   packages.map((pkg) => (
-                    <div key={pkg.package_id} className="package-card">
-                      <div className="package-badge" style={{background: pkg.ad_type === 'FEATURED' ? 'linear-gradient(135deg, #667eea, #764ba2)' : '#f3f4f6'}}>
+                    <div key={pkg.package_id} className="package-card-modern">
+                      <div className="package-badge" style={{background: pkg.ad_type === 'FEATURED' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#f3f4f6', color: pkg.ad_type === 'FEATURED' ? 'white' : '#8b5cf6'}}>
                         {pkg.ad_type}
                       </div>
                       <h3 className="package-name">{pkg.package_name}</h3>
@@ -1202,7 +1250,7 @@ export default function Advertisements() {
                       <p className="package-description">{pkg.description}</p>
                       <div className="package-features">
                         {pkg.features?.slice(0, 4).map((feature, idx) => (
-                          <div key={idx} className="feature-item">
+                          <div key={idx} className="feature">
                             <i className="bi bi-check-circle-fill"></i>
                             <span>{feature}</span>
                           </div>
@@ -1234,8 +1282,7 @@ export default function Advertisements() {
                   ))
                 ) : (
                   <div className="empty-packages">
-                    <i className="bi bi-box-seam"></i>
-                    <p>No packages created yet</p>
+                    <p>No packages created yet.</p>
                     <button className="btn-add-package" onClick={() => {
                       setShowPackageListModal(false)
                       setEditingPackage(null)
@@ -1280,7 +1327,7 @@ export default function Advertisements() {
             </div>
             <div className="modal-body">
               <div className="form-group">
-                <label>Package Name <span className="required">*</span></label>
+                <label className="form-label">Package Name *</label>
                 <input
                   type="text"
                   className="form-input"
@@ -1291,7 +1338,7 @@ export default function Advertisements() {
               </div>
               
               <div className="form-group">
-                <label>Description</label>
+                <label className="form-label">Description</label>
                 <textarea
                   className="form-textarea"
                   rows="3"
@@ -1303,7 +1350,7 @@ export default function Advertisements() {
               
               <div className="form-row">
                 <div className="form-group">
-                  <label>Price ($) <span className="required">*</span></label>
+                  <label className="form-label">Price ($) *</label>
                   <input
                     type="number"
                     className="form-input"
@@ -1315,7 +1362,7 @@ export default function Advertisements() {
                 </div>
                 
                 <div className="form-group">
-                  <label>Duration (Days) <span className="required">*</span></label>
+                  <label className="form-label">Duration (Days) *</label>
                   <input
                     type="number"
                     className="form-input"
@@ -1328,7 +1375,7 @@ export default function Advertisements() {
               
               <div className="form-row">
                 <div className="form-group">
-                  <label>Ad Type</label>
+                  <label className="form-label">Ad Type</label>
                   <select
                     className="form-select"
                     value={packageFormData.ad_type}
@@ -1341,7 +1388,7 @@ export default function Advertisements() {
                 </div>
                 
                 <div className="form-group">
-                  <label>Display Order</label>
+                  <label className="form-label">Display Order</label>
                   <input
                     type="number"
                     className="form-input"
@@ -1353,7 +1400,7 @@ export default function Advertisements() {
               </div>
               
               <div className="form-group">
-                <label>Features (comma separated)</label>
+                <label className="form-label">Features (comma separated)</label>
                 <input
                   type="text"
                   className="form-input"
@@ -1389,14 +1436,7 @@ export default function Advertisements() {
                 onClick={editingPackage ? updatePackage : createPackage} 
                 disabled={actionLoading}
               >
-                {actionLoading ? (
-                  <>
-                    <span className="spinner-border spinner-border-sm me-2"></span>
-                    Saving...
-                  </>
-                ) : (
-                  editingPackage ? 'Update Package' : 'Create Package'
-                )}
+                {actionLoading ? 'Saving...' : (editingPackage ? 'Update Package' : 'Create Package')}
               </button>
             </div>
           </div>
@@ -1404,7 +1444,7 @@ export default function Advertisements() {
       )}
 
       {/* Analytics Modal */}
-      {showAnalyticsModal && chartData && (
+      {showAnalyticsModal && (
         <div className="modal-overlay" onClick={() => setShowAnalyticsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
@@ -1422,7 +1462,7 @@ export default function Advertisements() {
               </button>
             </div>
             <div className="modal-body">
-              <div className="analytics-summary">
+              <div className="analytics-grid">
                 <div className="analytics-card">
                   <div className="analytics-icon">
                     <i className="bi bi-eye"></i>
@@ -1430,10 +1470,9 @@ export default function Advertisements() {
                   <div className="analytics-data">
                     <span className="analytics-label">Total Impressions</span>
                     <h2>{stats.impressions.toLocaleString()}</h2>
-                    <span className="analytics-trend positive">↑ 15.3% vs last period</span>
+                    <span className="analytics-trend">Lifetime views</span>
                   </div>
                 </div>
-                
                 <div className="analytics-card">
                   <div className="analytics-icon">
                     <i className="bi bi-mouse"></i>
@@ -1441,10 +1480,9 @@ export default function Advertisements() {
                   <div className="analytics-data">
                     <span className="analytics-label">Total Clicks</span>
                     <h2>{stats.clicks.toLocaleString()}</h2>
-                    <span className="analytics-trend positive">↑ 23.1% vs last period</span>
+                    <span className="analytics-trend">User interactions</span>
                   </div>
                 </div>
-                
                 <div className="analytics-card">
                   <div className="analytics-icon">
                     <i className="bi bi-graph-up"></i>
@@ -1452,10 +1490,9 @@ export default function Advertisements() {
                   <div className="analytics-data">
                     <span className="analytics-label">Click-Through Rate</span>
                     <h2>{stats.ctr}%</h2>
-                    <span className="analytics-trend positive">↑ 2.1% vs last period</span>
+                    <span className="analytics-trend">Engagement rate</span>
                   </div>
                 </div>
-                
                 <div className="analytics-card">
                   <div className="analytics-icon">
                     <i className="bi bi-currency-dollar"></i>
@@ -1463,29 +1500,28 @@ export default function Advertisements() {
                   <div className="analytics-data">
                     <span className="analytics-label">Total Revenue</span>
                     <h2>${stats.revenue.toLocaleString()}</h2>
-                    <span className="analytics-trend positive">↑ 18.7% vs last period</span>
+                    <span className="analytics-trend">Total earnings</span>
                   </div>
                 </div>
-              </div>
-
-              <div className="analytics-chart">
-                <h3>Performance Overview (Last 7 Days)</h3>
-                <div className="chart-bars">
-                  {chartData.last7Days.map((day, i) => (
-                    <div key={day} className="chart-bar-group">
-                      <div className="chart-bar impressions" style={{height: `${(chartData.impressionsByDay[i] / Math.max(...chartData.impressionsByDay, 1)) * 100}%`}}>
-                        <span>{chartData.impressionsByDay[i]}</span>
-                      </div>
-                      <div className="chart-bar clicks" style={{height: `${(chartData.clicksByDay[i] / Math.max(...chartData.clicksByDay, 1)) * 100}%`}}>
-                        <span>{chartData.clicksByDay[i]}</span>
-                      </div>
-                      <div className="chart-label">{new Date(day).toLocaleDateString('en-US', { weekday: 'short' })}</div>
-                    </div>
-                  ))}
+                <div className="analytics-card">
+                  <div className="analytics-icon">
+                    <i className="bi bi-trophy"></i>
+                  </div>
+                  <div className="analytics-data">
+                    <span className="analytics-label">Best Performing</span>
+                    <h2>{ads.filter(a => a.status === 'ACTIVE').sort((a,b) => (b.clicks/b.impressions) - (a.clicks/a.impressions))[0]?.title || 'N/A'}</h2>
+                    <span className="analytics-trend">Highest CTR</span>
+                  </div>
                 </div>
-                <div className="chart-legend">
-                  <span><i className="bi bi-eye"></i> Impressions</span>
-                  <span><i className="bi bi-mouse"></i> Clicks</span>
+                <div className="analytics-card">
+                  <div className="analytics-icon">
+                    <i className="bi bi-megaphone"></i>
+                  </div>
+                  <div className="analytics-data">
+                    <span className="analytics-label">Active Campaigns</span>
+                    <h2>{stats.active}</h2>
+                    <span className="analytics-trend">Currently running</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1494,14 +1530,14 @@ export default function Advertisements() {
       )}
 
       <style jsx>{`
-        /* Modern CSS with animations and gradients */
+        /* Modern UI/UX Styles */
         .ads-dashboard {
           max-width: 1600px;
           margin: 0 auto;
           padding: 0 24px;
         }
 
-        /* Hero Section */
+        /* Enhanced Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border-radius: 28px;
@@ -1509,6 +1545,7 @@ export default function Advertisements() {
           margin-bottom: 32px;
           position: relative;
           overflow: hidden;
+          box-shadow: 0 20px 40px -12px rgba(0,0,0,0.1);
         }
 
         .hero-section::before {
@@ -1535,29 +1572,48 @@ export default function Advertisements() {
           z-index: 1;
         }
 
-        .hero-badge {
-          display: inline-flex;
+        .hero-text {
+          display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 6px 12px;
+          gap: 20px;
+        }
+
+        .hero-icon-wrapper {
+          width: 70px;
+          height: 70px;
           background: rgba(255,255,255,0.2);
+          border-radius: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           backdrop-filter: blur(10px);
-          border-radius: 40px;
-          font-size: 13px;
-          font-weight: 500;
-          margin-bottom: 16px;
+        }
+
+        .hero-icon-wrapper i {
+          font-size: 36px;
           color: white;
         }
 
         .hero-title {
-          font-size: 36px;
+          font-size: 32px;
           font-weight: 700;
           color: white;
-          margin: 0 0 12px 0;
+          margin: 0 0 8px 0;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .hero-badge {
+          font-size: 12px;
+          background: rgba(255,255,255,0.2);
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-weight: 500;
         }
 
         .hero-subtitle {
-          font-size: 16px;
+          font-size: 14px;
           color: rgba(255,255,255,0.9);
           margin: 0;
         }
@@ -1567,55 +1623,58 @@ export default function Advertisements() {
           gap: 12px;
         }
 
-        .btn-analytics, .btn-packages, .btn-create-campaign {
-          padding: 12px 24px;
-          border-radius: 14px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          border: none;
-          font-size: 14px;
+        .hero-decoration {
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          overflow: hidden;
         }
 
-        .btn-analytics, .btn-packages {
-          background: rgba(255,255,255,0.2);
-          backdrop-filter: blur(10px);
-          color: white;
-          border: 1px solid rgba(255,255,255,0.3);
+        .decoration-circle {
+          position: absolute;
+          width: 300px;
+          height: 300px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.05);
+          bottom: -150px;
+          right: -100px;
         }
 
-        .btn-analytics:hover, .btn-packages:hover {
-          background: rgba(255,255,255,0.3);
-          transform: translateY(-2px);
+        .decoration-circle-2 {
+          position: absolute;
+          width: 200px;
+          height: 200px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.05);
+          top: -100px;
+          left: -100px;
         }
 
-        .btn-create-campaign {
-          background: white;
-          color: #667eea;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        /* Enhanced Stats Cards */
+        .stats-wrapper {
+          margin-bottom: 32px;
         }
 
-        .btn-create-campaign:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-        }
-
-        /* Stats Grid */
         .stats-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          grid-template-columns: repeat(6, 1fr);
           gap: 20px;
-          margin-bottom: 32px;
         }
 
         .stat-card {
           background: white;
           border-radius: 24px;
-          padding: 24px;
+          padding: 20px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
           position: relative;
           overflow: hidden;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: all 0.3s ease;
           cursor: pointer;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
 
         .stat-card:hover {
@@ -1623,15 +1682,7 @@ export default function Advertisements() {
           box-shadow: 0 12px 24px rgba(0,0,0,0.1);
         }
 
-        .stat-card-inner {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          position: relative;
-          z-index: 1;
-        }
-
-        .stat-icon-wrapper {
+        .stat-icon {
           width: 56px;
           height: 56px;
           border-radius: 18px;
@@ -1639,20 +1690,22 @@ export default function Advertisements() {
           align-items: center;
           justify-content: center;
           font-size: 24px;
+          z-index: 1;
         }
 
-        .stat-card.primary .stat-icon-wrapper { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
-        .stat-card.success .stat-icon-wrapper { background: linear-gradient(135deg, #10b981, #059669); color: white; }
-        .stat-card.warning .stat-icon-wrapper { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
-        .stat-card.info .stat-icon-wrapper { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
-        .stat-card.danger .stat-icon-wrapper { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
-        .stat-card.purple .stat-icon-wrapper { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; }
+        .stat-total .stat-icon { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .stat-active .stat-icon { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+        .stat-pending .stat-icon { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+        .stat-clicks .stat-icon { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+        .stat-revenue .stat-icon { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+        .stat-ctr .stat-icon { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; }
 
-        .stat-content {
+        .stat-info {
           flex: 1;
+          z-index: 1;
         }
 
-        .stat-title {
+        .stat-label {
           font-size: 13px;
           color: #6c757d;
           font-weight: 500;
@@ -1660,19 +1713,23 @@ export default function Advertisements() {
           margin-bottom: 8px;
         }
 
-        .stat-number {
-          font-size: 32px;
+        .stat-value {
+          font-size: 28px;
           font-weight: 700;
           color: #1f2937;
           margin: 0 0 4px 0;
         }
 
         .stat-trend {
+          font-size: 11px;
+          color: #10b981;
           display: flex;
           align-items: center;
           gap: 4px;
-          font-size: 12px;
-          color: #10b981;
+        }
+
+        .stat-trend i {
+          font-size: 10px;
         }
 
         .stat-bg-icon {
@@ -1681,14 +1738,13 @@ export default function Advertisements() {
           bottom: 16px;
           font-size: 80px;
           opacity: 0.05;
-          z-index: 0;
         }
 
-        /* Controls Bar */
+        /* Enhanced Controls Bar */
         .controls-bar {
           background: white;
           border-radius: 20px;
-          padding: 16px 20px;
+          padding: 16px 24px;
           margin-bottom: 24px;
           display: flex;
           justify-content: space-between;
@@ -1708,8 +1764,8 @@ export default function Advertisements() {
 
         .search-box {
           position: relative;
-          min-width: 300px;
           flex: 1;
+          max-width: 400px;
         }
 
         .search-box i {
@@ -1722,9 +1778,9 @@ export default function Advertisements() {
 
         .search-box input {
           width: 100%;
-          padding: 10px 40px 10px 40px;
+          padding: 12px 40px 12px 40px;
           border: 2px solid #e9ecef;
-          border-radius: 12px;
+          border-radius: 14px;
           font-size: 14px;
           transition: all 0.3s ease;
         }
@@ -1750,7 +1806,7 @@ export default function Advertisements() {
           position: relative;
         }
 
-        .filter-trigger {
+        .filter-btn {
           padding: 10px 20px;
           background: #f8f9fa;
           border: 2px solid #e9ecef;
@@ -1760,22 +1816,24 @@ export default function Advertisements() {
           align-items: center;
           gap: 8px;
           font-weight: 500;
+          position: relative;
           transition: all 0.3s ease;
         }
 
-        .filter-trigger.active {
+        .filter-btn.active {
           border-color: #667eea;
           background: rgba(102,126,234,0.05);
+          color: #667eea;
         }
 
-        .filter-active-dot {
+        .filter-badge {
+          position: absolute;
+          top: -4px;
+          right: -4px;
           width: 8px;
           height: 8px;
           background: #ef4444;
           border-radius: 50%;
-          position: absolute;
-          top: -2px;
-          right: -2px;
         }
 
         .filter-dropdown {
@@ -1786,7 +1844,7 @@ export default function Advertisements() {
           background: white;
           border-radius: 16px;
           padding: 20px;
-          min-width: 260px;
+          min-width: 240px;
           box-shadow: 0 12px 24px rgba(0,0,0,0.1);
           z-index: 100;
           animation: fadeInDown 0.2s ease;
@@ -1822,7 +1880,7 @@ export default function Advertisements() {
           border-radius: 10px;
         }
 
-        .reset-filters {
+        .reset-filters-btn {
           width: 100%;
           padding: 8px;
           background: #f8f9fa;
@@ -1833,21 +1891,8 @@ export default function Advertisements() {
           transition: all 0.3s ease;
         }
 
-        .reset-filters:hover {
+        .reset-filters-btn:hover {
           background: #e9ecef;
-        }
-
-        .sort-group {
-          min-width: 160px;
-        }
-
-        .sort-select {
-          width: 100%;
-          padding: 10px 12px;
-          border: 2px solid #e9ecef;
-          border-radius: 12px;
-          background: white;
-          cursor: pointer;
         }
 
         .controls-right {
@@ -1879,15 +1924,12 @@ export default function Advertisements() {
           color: #667eea;
         }
 
-        .campaign-count {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 16px;
-          background: #f8f9fa;
-          border-radius: 12px;
+        .stats-info {
           font-size: 13px;
           color: #6c757d;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
 
         /* Bulk Actions */
@@ -1899,10 +1941,6 @@ export default function Advertisements() {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          animation: slideDown 0.3s ease;
-        }
-
-        .slide-down {
           animation: slideDown 0.3s ease;
         }
 
@@ -1947,9 +1985,17 @@ export default function Advertisements() {
           color: white;
         }
 
+        .bulk-select-all:hover {
+          background: rgba(255,255,255,0.3);
+        }
+
         .bulk-delete {
           background: #ef4444;
           color: white;
+        }
+
+        .bulk-delete:hover {
+          background: #dc2626;
         }
 
         /* Ads Container */
@@ -1969,7 +2015,7 @@ export default function Advertisements() {
           background: white;
           border-radius: 20px;
           overflow: hidden;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: all 0.3s ease;
           box-shadow: 0 2px 8px rgba(0,0,0,0.04);
           animation: fadeInUp 0.5s ease backwards;
         }
@@ -2009,28 +2055,26 @@ export default function Advertisements() {
           width: 20px;
           height: 20px;
           cursor: pointer;
-          margin: 0;
         }
 
         .ad-image-wrapper {
           position: relative;
           height: 200px;
           overflow: hidden;
-          background: #f8f9fa;
         }
 
         .ad-image-wrapper img {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          transition: transform 0.5s ease;
+          transition: transform 0.3s ease;
         }
 
         .ad-card:hover .ad-image-wrapper img {
           transform: scale(1.05);
         }
 
-        .ad-image-overlay {
+        .ad-overlay {
           position: absolute;
           top: 0;
           left: 0;
@@ -2044,11 +2088,11 @@ export default function Advertisements() {
           transition: opacity 0.3s ease;
         }
 
-        .ad-card:hover .ad-image-overlay {
+        .ad-card:hover .ad-overlay {
           opacity: 1;
         }
 
-        .quick-view-btn {
+        .quick-view {
           padding: 8px 20px;
           background: white;
           border: none;
@@ -2058,10 +2102,10 @@ export default function Advertisements() {
           display: flex;
           align-items: center;
           gap: 8px;
-          transition: transform 0.3s ease;
+          transition: all 0.3s ease;
         }
 
-        .quick-view-btn:hover {
+        .quick-view:hover {
           transform: scale(1.05);
         }
 
@@ -2070,15 +2114,10 @@ export default function Advertisements() {
         }
 
         .ad-header {
-          margin-bottom: 16px;
-        }
-
-        .ad-badges {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          flex-wrap: wrap;
-          gap: 8px;
+          margin-bottom: 16px;
         }
 
         .ad-type-badge {
@@ -2132,18 +2171,18 @@ export default function Advertisements() {
           margin-bottom: 16px;
         }
 
-        .metric-item {
+        .metric {
           display: flex;
           align-items: center;
           gap: 8px;
         }
 
-        .metric-item i {
+        .metric i {
           font-size: 20px;
           color: #9ca3af;
         }
 
-        .metric-item div {
+        .metric div {
           display: flex;
           flex-direction: column;
         }
@@ -2182,25 +2221,24 @@ export default function Advertisements() {
           padding: 6px 12px;
           border: none;
           border-radius: 8px;
-          font-size: 14px;
+          font-size: 12px;
           cursor: pointer;
           transition: all 0.3s ease;
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          background: transparent;
         }
 
         .action-btn.view { background: rgba(79,70,229,0.1); color: #4f46e5; }
-        .action-btn.view:hover { background: #4f46e5; color: white; }
+        .action-btn.view:hover:not(:disabled) { background: #4f46e5; color: white; }
         .action-btn.approve { background: rgba(16,185,129,0.1); color: #10b981; }
-        .action-btn.approve:hover { background: #10b981; color: white; }
+        .action-btn.approve:hover:not(:disabled) { background: #10b981; color: white; }
         .action-btn.reject { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .action-btn.reject:hover { background: #ef4444; color: white; }
+        .action-btn.reject:hover:not(:disabled) { background: #ef4444; color: white; }
         .action-btn.pause { background: rgba(245,158,11,0.1); color: #f59e0b; }
-        .action-btn.pause:hover { background: #f59e0b; color: white; }
+        .action-btn.pause:hover:not(:disabled) { background: #f59e0b; color: white; }
         .action-btn.delete { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .action-btn.delete:hover { background: #ef4444; color: white; }
+        .action-btn.delete:hover:not(:disabled) { background: #ef4444; color: white; }
 
         .action-btn:disabled {
           opacity: 0.5;
@@ -2215,7 +2253,7 @@ export default function Advertisements() {
           border-radius: 24px;
         }
 
-        .empty-state-illustration {
+        .empty-state-icon {
           font-size: 80px;
           color: #cbd5e1;
           margin-bottom: 24px;
@@ -2232,9 +2270,9 @@ export default function Advertisements() {
           margin-bottom: 32px;
         }
 
-        .create-first-btn {
+        .btn-create-first {
           padding: 12px 32px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border: none;
           border-radius: 12px;
           color: white;
@@ -2246,7 +2284,7 @@ export default function Advertisements() {
           transition: all 0.3s ease;
         }
 
-        .create-first-btn:hover {
+        .btn-create-first:hover {
           transform: translateY(-2px);
           box-shadow: 0 8px 20px rgba(102,126,234,0.3);
         }
@@ -2334,7 +2372,7 @@ export default function Advertisements() {
           width: 56px;
           height: 56px;
           background: linear-gradient(135deg, #667eea20, #764ba220);
-          border-radius: 20px;
+          border-radius: 18px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2363,9 +2401,6 @@ export default function Advertisements() {
           border-radius: 50%;
           cursor: pointer;
           transition: all 0.3s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
         }
 
         .modal-close:hover {
@@ -2387,29 +2422,30 @@ export default function Advertisements() {
 
         /* Form Styles */
         .form-group {
-          margin-bottom: 20px;
+          margin-bottom: 24px;
         }
 
-        .form-group label {
-          display: block;
+        .form-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
           font-size: 13px;
           font-weight: 600;
           margin-bottom: 8px;
           color: #374151;
         }
 
-        .required {
-          color: #ef4444;
+        .form-label i {
+          color: #667eea;
         }
 
         .form-input, .form-select, .form-textarea {
           width: 100%;
-          padding: 10px 14px;
+          padding: 12px 14px;
           border: 2px solid #e9ecef;
           border-radius: 12px;
           font-size: 14px;
           transition: all 0.3s ease;
-          background: white;
         }
 
         .form-input:focus, .form-select:focus, .form-textarea:focus {
@@ -2422,23 +2458,23 @@ export default function Advertisements() {
           resize: vertical;
         }
 
-        .form-hint {
-          display: block;
-          font-size: 11px;
-          color: #9ca3af;
-          margin-top: 4px;
-        }
-
         .form-row {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 16px;
         }
 
+        .form-hint {
+          display: block;
+          margin-top: 8px;
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
         .checkbox-label {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 10px;
           cursor: pointer;
         }
 
@@ -2447,7 +2483,110 @@ export default function Advertisements() {
           cursor: pointer;
         }
 
-        /* Notification Warning */
+        /* Buttons */
+        .btn-analytics, .btn-packages, .btn-create-campaign, .btn-add-package {
+          padding: 10px 20px;
+          border-radius: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          border: none;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .btn-analytics, .btn-packages {
+          background: rgba(255,255,255,0.2);
+          color: white;
+          border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .btn-analytics:hover, .btn-packages:hover {
+          background: rgba(255,255,255,0.3);
+          transform: translateY(-2px);
+        }
+
+        .btn-create-campaign {
+          background: white;
+          color: #667eea;
+        }
+
+        .btn-create-campaign:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+
+        .btn-primary {
+          padding: 10px 24px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(102,126,234,0.3);
+        }
+
+        .btn-secondary {
+          padding: 10px 20px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 500;
+          transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+          background: #e9ecef;
+        }
+
+        .btn-primary:disabled, .btn-secondary:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        /* Email Notification Badge */
+        .email-notification-badge {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 16px;
+          border-radius: 12px;
+          font-size: 13px;
+          font-weight: 500;
+          background: white;
+          color: #667eea;
+        }
+
+        .email-notification-badge.enabled {
+          background: rgba(16,185,129,0.1);
+          color: #10b981;
+        }
+
+        .email-notification-badge.disabled {
+          background: rgba(239,68,68,0.1);
+          color: #ef4444;
+        }
+
+        .email-notification-badge i {
+          font-size: 18px;
+        }
+
+        .email-notification-badge small {
+          font-size: 11px;
+          opacity: 0.8;
+        }
+
         .notification-warning {
           background: rgba(245,158,11,0.1);
           border-left: 4px solid #f59e0b;
@@ -2462,6 +2601,15 @@ export default function Advertisements() {
         .notification-warning i {
           font-size: 20px;
           color: #f59e0b;
+        }
+
+        .notification-warning a {
+          color: #f59e0b;
+          text-decoration: none;
+        }
+
+        .notification-warning a:hover {
+          text-decoration: underline;
         }
 
         /* View Modal Styles */
@@ -2493,19 +2641,19 @@ export default function Advertisements() {
           line-height: 1.6;
         }
 
-        .info-grid {
+        .view-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 16px;
         }
 
-        .info-item {
+        .view-item {
           padding: 12px;
           background: #f8f9fa;
           border-radius: 12px;
         }
 
-        .info-item label {
+        .view-item label {
           display: block;
           font-size: 11px;
           font-weight: 600;
@@ -2514,13 +2662,13 @@ export default function Advertisements() {
           text-transform: uppercase;
         }
 
-        .info-item span {
-          font-size: 16px;
+        .view-item span {
+          font-size: 14px;
           font-weight: 500;
           color: #1f2937;
         }
 
-        .info-item.full-width {
+        .view-item.full-width {
           grid-column: span 2;
         }
 
@@ -2528,7 +2676,7 @@ export default function Advertisements() {
           color: #ef4444 !important;
         }
 
-        /* Packages Styles */
+        /* Packages Grid */
         .packages-header {
           display: flex;
           justify-content: flex-end;
@@ -2536,16 +2684,8 @@ export default function Advertisements() {
         }
 
         .btn-add-package {
-          padding: 10px 20px;
           background: linear-gradient(135deg, #667eea, #764ba2);
-          border: none;
-          border-radius: 12px;
           color: white;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          transition: all 0.3s ease;
         }
 
         .btn-add-package:hover {
@@ -2559,15 +2699,15 @@ export default function Advertisements() {
           gap: 24px;
         }
 
-        .package-card {
-          background: #f9fafb;
+        .package-card-modern {
+          background: white;
           border: 2px solid #e9ecef;
           border-radius: 20px;
           padding: 24px;
           transition: all 0.3s ease;
         }
 
-        .package-card:hover {
+        .package-card-modern:hover {
           transform: translateY(-4px);
           border-color: #667eea;
           box-shadow: 0 12px 24px rgba(102,126,234,0.1);
@@ -2618,7 +2758,7 @@ export default function Advertisements() {
           margin-bottom: 20px;
         }
 
-        .feature-item {
+        .feature {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -2627,7 +2767,7 @@ export default function Advertisements() {
           color: #374151;
         }
 
-        .feature-item i {
+        .feature i {
           color: #10b981;
           font-size: 14px;
         }
@@ -2672,46 +2812,42 @@ export default function Advertisements() {
           padding: 60px 20px;
         }
 
-        .empty-packages i {
-          font-size: 48px;
-          color: #cbd5e1;
-          margin-bottom: 16px;
-        }
-
         .empty-packages p {
           margin-bottom: 20px;
           color: #6c757d;
         }
 
-        /* Analytics Styles */
-        .analytics-summary {
+        /* Analytics Grid */
+        .analytics-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
-          gap: 16px;
-          margin-bottom: 32px;
+          gap: 20px;
         }
 
         .analytics-card {
           background: #f8f9fa;
           border-radius: 20px;
-          padding: 20px;
+          padding: 24px;
           display: flex;
           align-items: center;
-          gap: 16px;
+          gap: 20px;
+          transition: all 0.3s ease;
+        }
+
+        .analytics-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 16px rgba(0,0,0,0.08);
         }
 
         .analytics-icon {
-          width: 56px;
-          height: 56px;
+          width: 64px;
+          height: 64px;
           background: linear-gradient(135deg, #667eea20, #764ba220);
-          border-radius: 16px;
+          border-radius: 20px;
           display: flex;
           align-items: center;
           justify-content: center;
-        }
-
-        .analytics-icon i {
-          font-size: 24px;
+          font-size: 28px;
           color: #667eea;
         }
 
@@ -2720,148 +2856,24 @@ export default function Advertisements() {
         }
 
         .analytics-label {
-          font-size: 12px;
+          font-size: 13px;
           color: #6c757d;
           display: block;
-          margin-bottom: 4px;
+          margin-bottom: 8px;
         }
 
         .analytics-data h2 {
-          font-size: 28px;
+          font-size: 32px;
           margin: 0 0 4px 0;
           color: #1f2937;
         }
 
         .analytics-trend {
           font-size: 12px;
-        }
-
-        .analytics-trend.positive {
           color: #10b981;
         }
 
-        .analytics-trend.negative {
-          color: #ef4444;
-        }
-
-        .analytics-chart {
-          margin-top: 32px;
-          padding: 20px;
-          background: #f8f9fa;
-          border-radius: 20px;
-        }
-
-        .analytics-chart h3 {
-          margin: 0 0 20px 0;
-          font-size: 16px;
-        }
-
-        .chart-bars {
-          display: flex;
-          align-items: flex-end;
-          gap: 12px;
-          justify-content: space-around;
-          min-height: 200px;
-          padding: 20px 0;
-        }
-
-        .chart-bar-group {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .chart-bar {
-          width: 100%;
-          max-width: 40px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          border-radius: 6px;
-          transition: height 0.5s ease;
-          position: relative;
-          cursor: pointer;
-        }
-
-        .chart-bar.impressions {
-          background: linear-gradient(135deg, #3b82f6, #2563eb);
-        }
-
-        .chart-bar.clicks {
-          background: linear-gradient(135deg, #10b981, #059669);
-        }
-
-        .chart-bar span {
-          position: absolute;
-          top: -20px;
-          left: 50%;
-          transform: translateX(-50%);
-          font-size: 11px;
-          font-weight: 600;
-          color: #374151;
-          white-space: nowrap;
-        }
-
-        .chart-label {
-          font-size: 11px;
-          color: #6c757d;
-          text-align: center;
-        }
-
-        .chart-legend {
-          display: flex;
-          justify-content: center;
-          gap: 24px;
-          margin-top: 20px;
-          padding-top: 20px;
-          border-top: 1px solid #e9ecef;
-        }
-
-        .chart-legend span {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 12px;
-        }
-
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          border-radius: 12px;
-          cursor: pointer;
-          font-weight: 500;
-          transition: all 0.3s ease;
-        }
-
-        .btn-secondary:hover {
-          background: #e9ecef;
-        }
-
-        .btn-primary {
-          padding: 10px 24px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          border: none;
-          border-radius: 12px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(102,126,234,0.3);
-        }
-
-        .btn-primary:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
+        /* Animations */
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
@@ -2899,27 +2911,27 @@ export default function Advertisements() {
           
           .hero-content {
             flex-direction: column;
-            text-align: center;
             gap: 24px;
           }
           
+          .hero-text {
+            flex-direction: column;
+            text-align: center;
+          }
+          
           .hero-title {
-            font-size: 28px;
+            font-size: 24px;
+            flex-direction: column;
+            text-align: center;
           }
           
           .hero-actions {
-            flex-direction: column;
-            width: 100%;
-          }
-          
-          .btn-analytics, .btn-packages, .btn-create-campaign {
-            width: 100%;
+            flex-wrap: wrap;
             justify-content: center;
           }
           
           .stats-grid {
             grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
           }
           
           .controls-bar {
@@ -2932,6 +2944,7 @@ export default function Advertisements() {
           }
           
           .search-box {
+            max-width: none;
             width: 100%;
           }
           
@@ -2939,13 +2952,9 @@ export default function Advertisements() {
             width: 100%;
           }
           
-          .filter-trigger {
+          .filter-btn {
             width: 100%;
             justify-content: center;
-          }
-          
-          .sort-group {
-            width: 100%;
           }
           
           .controls-right {
@@ -2961,26 +2970,23 @@ export default function Advertisements() {
             grid-template-columns: repeat(2, 1fr);
           }
           
-          .ad-footer {
-            flex-direction: column;
-            gap: 12px;
+          .ad-actions {
+            flex-wrap: wrap;
           }
           
-          .ad-actions {
-            width: 100%;
-            justify-content: stretch;
+          .action-btn span {
+            display: none;
           }
           
           .action-btn {
-            flex: 1;
-            justify-content: center;
+            padding: 8px;
           }
           
-          .info-grid {
+          .view-grid {
             grid-template-columns: 1fr;
           }
           
-          .info-item.full-width {
+          .view-item.full-width {
             grid-column: span 1;
           }
           
@@ -2988,7 +2994,7 @@ export default function Advertisements() {
             grid-template-columns: 1fr;
           }
           
-          .analytics-summary {
+          .analytics-grid {
             grid-template-columns: 1fr;
           }
           
@@ -2996,13 +3002,17 @@ export default function Advertisements() {
             grid-template-columns: 1fr;
           }
           
-          .chart-bars {
-            height: 150px;
+          .bulk-actions-bar {
+            flex-direction: column;
+            gap: 12px;
           }
           
-          .chart-bar span {
-            font-size: 9px;
-            top: -16px;
+          .bulk-actions {
+            width: 100%;
+          }
+          
+          .bulk-select-all, .bulk-delete {
+            flex: 1;
           }
         }
       `}</style>
