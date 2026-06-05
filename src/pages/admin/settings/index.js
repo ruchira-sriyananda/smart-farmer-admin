@@ -9,6 +9,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
   const [activeTab, setActiveTab] = useState('general')
+  const [unsavedChanges, setUnsavedChanges] = useState(false)
+  const [originalSettings, setOriginalSettings] = useState({})
   const [settings, setSettings] = useState({
     site_name: 'Smart Farmer',
     site_description: 'Agricultural Platform for Farmers',
@@ -54,7 +56,18 @@ export default function Settings() {
       return
     }
     fetchSettings()
-  }, [router])
+    
+    // Warn before leaving if unsaved changes
+    const handleBeforeUnload = (e) => {
+      if (unsavedChanges) {
+        e.preventDefault()
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?'
+        return e.returnValue
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [router, unsavedChanges])
 
   const fetchSettings = async () => {
     try {
@@ -69,12 +82,18 @@ export default function Settings() {
         const settingsMap = {}
         data.forEach(setting => {
           let value = setting.setting_value
-          // Convert string booleans to actual booleans
           if (value === 'true') value = true
           if (value === 'false') value = false
+          if (!isNaN(value) && value !== '' && value !== null && setting.setting_key !== 'site_name' && setting.setting_key !== 'site_description') {
+            const numValue = Number(value)
+            if (!isNaN(numValue) && String(numValue) === value) {
+              value = numValue
+            }
+          }
           settingsMap[setting.setting_key] = value
         })
         setSettings(prev => ({ ...prev, ...settingsMap }))
+        setOriginalSettings(settingsMap)
       }
     } catch (err) {
       console.error('Error fetching settings:', err)
@@ -86,17 +105,23 @@ export default function Settings() {
 
   const showMessage = (type, text) => {
     setMessage({ type, text })
-    setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000)
+  }
+
+  const handleSettingChange = (key, value) => {
+    setSettings(prev => ({ ...prev, [key]: value }))
+    setUnsavedChanges(true)
   }
 
   const handleSave = async () => {
     setSaving(true)
     
     try {
-      // Prepare updates
       const updates = []
       for (const [key, value] of Object.entries(settings)) {
-        const stringValue = typeof value === 'boolean' ? String(value) : String(value)
+        let stringValue = typeof value === 'boolean' ? String(value) : String(value)
+        if (typeof value === 'number') stringValue = String(value)
+        
         updates.push({
           setting_key: key,
           setting_value: stringValue,
@@ -104,7 +129,6 @@ export default function Settings() {
         })
       }
 
-      // Update each setting using upsert
       for (const update of updates) {
         const { error } = await supabase
           .from('system_settings')
@@ -113,7 +137,14 @@ export default function Settings() {
         if (error) throw error
       }
 
+      setUnsavedChanges(false)
+      setOriginalSettings(settings)
       showMessage('success', 'Settings saved successfully!')
+      
+      // Refresh the page after 1 second to apply changes
+      setTimeout(() => {
+        window.location.reload()
+      }, 1500)
     } catch (err) {
       console.error('Error saving settings:', err)
       showMessage('error', 'Error saving settings: ' + err.message)
@@ -123,18 +154,70 @@ export default function Settings() {
   }
 
   const handleReset = async () => {
-    if (confirm('Are you sure you want to reset all settings to default?')) {
+    if (confirm('Are you sure you want to reset all settings to default? This will discard all unsaved changes.')) {
       await fetchSettings()
-      showMessage('info', 'Settings reset to defaults')
+      setUnsavedChanges(false)
+      showMessage('info', 'Settings have been reset to saved values')
     }
   }
 
   const handleTestEmail = async () => {
-    showMessage('info', 'Test email functionality will be available soon')
+    if (!settings.smtp_host || !settings.smtp_user) {
+      showMessage('error', 'Please configure SMTP settings first')
+      return
+    }
+    
+    showMessage('info', 'Sending test email...')
+    
+    try {
+      const { error } = await supabase.functions.invoke('send-test-email', {
+        body: { 
+          to: settings.admin_email || settings.support_email,
+          settings: {
+            host: settings.smtp_host,
+            port: settings.smtp_port,
+            user: settings.smtp_user,
+            pass: settings.smtp_password
+          }
+        }
+      })
+      
+      if (error) throw error
+      showMessage('success', 'Test email sent successfully!')
+    } catch (err) {
+      console.error('Error sending test email:', err)
+      showMessage('error', 'Failed to send test email. Please check SMTP settings.')
+    }
   }
 
   const handleBackupNow = async () => {
-    showMessage('info', 'Manual backup functionality will be available soon')
+    if (!confirm('Creating a backup may take a few minutes. Continue?')) return
+    
+    showMessage('info', 'Creating backup...')
+    
+    try {
+      const { error } = await supabase.functions.invoke('create-backup', {
+        body: { 
+          type: 'manual',
+          timestamp: new Date().toISOString()
+        }
+      })
+      
+      if (error) throw error
+      showMessage('success', 'Backup created successfully!')
+    } catch (err) {
+      console.error('Error creating backup:', err)
+      showMessage('error', 'Failed to create backup. Please try again later.')
+    }
+  }
+
+  const handleClearCache = async () => {
+    if (confirm('Clear all application cache? Users may need to reload the page.')) {
+      localStorage.clear()
+      sessionStorage.clear()
+      showMessage('success', 'Cache cleared successfully! Page will reload.')
+      setTimeout(() => window.location.reload(), 1500)
+    }
   }
 
   const tabs = [
@@ -179,11 +262,17 @@ export default function Settings() {
               <p className="hero-subtitle">Configure and manage your application settings</p>
             </div>
             <div className="hero-actions">
+              {unsavedChanges && (
+                <div className="unsaved-badge">
+                  <i className="bi bi-exclamation-circle"></i>
+                  Unsaved changes
+                </div>
+              )}
               <button className="btn-reset" onClick={handleReset}>
                 <i className="bi bi-arrow-repeat"></i>
-                Reset Defaults
+                Reset
               </button>
-              <button className="btn-save" onClick={handleSave} disabled={saving}>
+              <button className="btn-save" onClick={handleSave} disabled={saving || !unsavedChanges}>
                 {saving ? (
                   <>
                     <span className="spinner-border spinner-border-sm me-2"></span>
@@ -202,7 +291,7 @@ export default function Settings() {
 
         {/* Message Alert */}
         {message.text && (
-          <div className={`alert-custom alert-${message.type}`}>
+          <div className={`alert-custom alert-${message.type} fade-in-up`}>
             <i className={`bi bi-${message.type === 'success' ? 'check-circle-fill' : message.type === 'error' ? 'exclamation-triangle-fill' : 'info-circle-fill'}`}></i>
             <span>{message.text}</span>
             <button className="alert-close" onClick={() => setMessage({ type: '', text: '' })}>
@@ -248,7 +337,7 @@ export default function Settings() {
                     type="text" 
                     className="setting-input" 
                     value={settings.site_name}
-                    onChange={(e) => setSettings({...settings, site_name: e.target.value})}
+                    onChange={(e) => handleSettingChange('site_name', e.target.value)}
                     placeholder="Enter site name"
                   />
                   <small className="setting-hint">This appears in browser tabs and headers</small>
@@ -263,7 +352,7 @@ export default function Settings() {
                     className="setting-textarea" 
                     rows="3"
                     value={settings.site_description}
-                    onChange={(e) => setSettings({...settings, site_description: e.target.value})}
+                    onChange={(e) => handleSettingChange('site_description', e.target.value)}
                     placeholder="Enter site description"
                   />
                   <small className="setting-hint">Used for SEO and meta descriptions</small>
@@ -278,7 +367,7 @@ export default function Settings() {
                     type="email" 
                     className="setting-input" 
                     value={settings.admin_email}
-                    onChange={(e) => setSettings({...settings, admin_email: e.target.value})}
+                    onChange={(e) => handleSettingChange('admin_email', e.target.value)}
                     placeholder="admin@example.com"
                   />
                   <small className="setting-hint">Primary contact email for system notifications</small>
@@ -293,7 +382,7 @@ export default function Settings() {
                     type="email" 
                     className="setting-input" 
                     value={settings.support_email}
-                    onChange={(e) => setSettings({...settings, support_email: e.target.value})}
+                    onChange={(e) => handleSettingChange('support_email', e.target.value)}
                     placeholder="support@example.com"
                   />
                   <small className="setting-hint">Customer support contact email</small>
@@ -307,7 +396,7 @@ export default function Settings() {
                   <select 
                     className="setting-select"
                     value={settings.timezone}
-                    onChange={(e) => setSettings({...settings, timezone: e.target.value})}
+                    onChange={(e) => handleSettingChange('timezone', e.target.value)}
                   >
                     <option value="Asia/Colombo">🇱🇰 Asia/Colombo (Sri Lanka)</option>
                     <option value="Asia/Kolkata">🇮🇳 Asia/Kolkata (India)</option>
@@ -328,7 +417,7 @@ export default function Settings() {
                     <select 
                       className="setting-select"
                       value={settings.currency}
-                      onChange={(e) => setSettings({...settings, currency: e.target.value})}
+                      onChange={(e) => handleSettingChange('currency', e.target.value)}
                       style={{ flex: 1 }}
                     >
                       <option value="LKR">Sri Lankan Rupee (LKR)</option>
@@ -342,7 +431,7 @@ export default function Settings() {
                       className="setting-input"
                       style={{ width: '100px' }}
                       value={settings.currency_symbol}
-                      onChange={(e) => setSettings({...settings, currency_symbol: e.target.value})}
+                      onChange={(e) => handleSettingChange('currency_symbol', e.target.value)}
                       placeholder="Symbol"
                     />
                   </div>
@@ -373,7 +462,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.maintenance_mode}
-                        onChange={(e) => setSettings({...settings, maintenance_mode: e.target.checked})}
+                        onChange={(e) => handleSettingChange('maintenance_mode', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -391,7 +480,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.enable_2fa}
-                        onChange={(e) => setSettings({...settings, enable_2fa: e.target.checked})}
+                        onChange={(e) => handleSettingChange('enable_2fa', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -408,7 +497,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.max_login_attempts}
-                    onChange={(e) => setSettings({...settings, max_login_attempts: parseInt(e.target.value)})}
+                    onChange={(e) => handleSettingChange('max_login_attempts', parseInt(e.target.value))}
                     min="1"
                     max="10"
                   />
@@ -424,7 +513,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.session_timeout_minutes}
-                    onChange={(e) => setSettings({...settings, session_timeout_minutes: parseInt(e.target.value)})}
+                    onChange={(e) => handleSettingChange('session_timeout_minutes', parseInt(e.target.value))}
                     min="5"
                     max="120"
                   />
@@ -441,7 +530,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.enable_recaptcha}
-                        onChange={(e) => setSettings({...settings, enable_recaptcha: e.target.checked})}
+                        onChange={(e) => handleSettingChange('enable_recaptcha', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -460,7 +549,7 @@ export default function Settings() {
                         type="text" 
                         className="setting-input" 
                         value={settings.recaptcha_site_key}
-                        onChange={(e) => setSettings({...settings, recaptcha_site_key: e.target.value})}
+                        onChange={(e) => handleSettingChange('recaptcha_site_key', e.target.value)}
                         placeholder="Enter site key"
                       />
                     </div>
@@ -474,7 +563,7 @@ export default function Settings() {
                         type="password" 
                         className="setting-input" 
                         value={settings.recaptcha_secret_key}
-                        onChange={(e) => setSettings({...settings, recaptcha_secret_key: e.target.value})}
+                        onChange={(e) => handleSettingChange('recaptcha_secret_key', e.target.value)}
                         placeholder="Enter secret key"
                       />
                     </div>
@@ -506,7 +595,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.allow_registration}
-                        onChange={(e) => setSettings({...settings, allow_registration: e.target.checked})}
+                        onChange={(e) => handleSettingChange('allow_registration', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -523,7 +612,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.require_email_verification}
-                        onChange={(e) => setSettings({...settings, require_email_verification: e.target.checked})}
+                        onChange={(e) => handleSettingChange('require_email_verification', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -539,7 +628,7 @@ export default function Settings() {
                   <select 
                     className="setting-select"
                     value={settings.default_language}
-                    onChange={(e) => setSettings({...settings, default_language: e.target.value})}
+                    onChange={(e) => handleSettingChange('default_language', e.target.value)}
                   >
                     <option value="en">🇬🇧 English</option>
                     <option value="si">🇱🇰 Sinhala</option>
@@ -556,7 +645,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.posts_per_page}
-                    onChange={(e) => setSettings({...settings, posts_per_page: parseInt(e.target.value)})}
+                    onChange={(e) => handleSettingChange('posts_per_page', parseInt(e.target.value))}
                     min="5"
                     max="100"
                   />
@@ -573,7 +662,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.enable_notifications}
-                        onChange={(e) => setSettings({...settings, enable_notifications: e.target.checked})}
+                        onChange={(e) => handleSettingChange('enable_notifications', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -605,7 +694,7 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="smtp.gmail.com"
                     value={settings.smtp_host}
-                    onChange={(e) => setSettings({...settings, smtp_host: e.target.value})}
+                    onChange={(e) => handleSettingChange('smtp_host', e.target.value)}
                   />
                 </div>
 
@@ -619,7 +708,7 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="587"
                     value={settings.smtp_port}
-                    onChange={(e) => setSettings({...settings, smtp_port: e.target.value})}
+                    onChange={(e) => handleSettingChange('smtp_port', e.target.value)}
                   />
                 </div>
 
@@ -632,7 +721,7 @@ export default function Settings() {
                     type="text" 
                     className="setting-input" 
                     value={settings.smtp_user}
-                    onChange={(e) => setSettings({...settings, smtp_user: e.target.value})}
+                    onChange={(e) => handleSettingChange('smtp_user', e.target.value)}
                   />
                 </div>
 
@@ -645,8 +734,25 @@ export default function Settings() {
                     type="password" 
                     className="setting-input" 
                     value={settings.smtp_password}
-                    onChange={(e) => setSettings({...settings, smtp_password: e.target.value})}
+                    onChange={(e) => handleSettingChange('smtp_password', e.target.value)}
                   />
+                </div>
+
+                <div className="setting-card">
+                  <div className="toggle-switch">
+                    <label className="toggle-label">
+                      <i className="bi bi-bell-fill"></i>
+                      Enable Email Notifications
+                    </label>
+                    <label className="toggle">
+                      <input 
+                        type="checkbox"
+                        checked={settings.enable_notifications}
+                        onChange={(e) => handleSettingChange('enable_notifications', e.target.checked)}
+                      />
+                      <span className="toggle-slider"></span>
+                    </label>
+                  </div>
                 </div>
 
                 <div className="setting-card">
@@ -679,7 +785,7 @@ export default function Settings() {
                   <select 
                     className="setting-select"
                     value={settings.backup_frequency}
-                    onChange={(e) => setSettings({...settings, backup_frequency: e.target.value})}
+                    onChange={(e) => handleSettingChange('backup_frequency', e.target.value)}
                   >
                     <option value="daily">📅 Daily</option>
                     <option value="weekly">📆 Weekly</option>
@@ -697,7 +803,7 @@ export default function Settings() {
                     type="time" 
                     className="setting-input" 
                     value={settings.auto_backup_time}
-                    onChange={(e) => setSettings({...settings, auto_backup_time: e.target.value})}
+                    onChange={(e) => handleSettingChange('auto_backup_time', e.target.value)}
                   />
                 </div>
 
@@ -710,7 +816,7 @@ export default function Settings() {
                     type="number" 
                     className="setting-input" 
                     value={settings.retention_days}
-                    onChange={(e) => setSettings({...settings, retention_days: parseInt(e.target.value)})}
+                    onChange={(e) => handleSettingChange('retention_days', parseInt(e.target.value))}
                     min="1"
                     max="365"
                   />
@@ -721,7 +827,7 @@ export default function Settings() {
                   <div className="backup-info">
                     <i className="bi bi-info-circle"></i>
                     <div>
-                      <strong>Last Backup:</strong> Not performed yet
+                      <strong>Last Backup:</strong> {localStorage.getItem('last_backup') || 'Not performed yet'}
                       <br />
                       <strong>Next Backup:</strong> {settings.backup_frequency !== 'never' ? 'Scheduled' : 'Not scheduled'}
                     </div>
@@ -757,7 +863,7 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="https://facebook.com/yourpage"
                     value={settings.social_facebook}
-                    onChange={(e) => setSettings({...settings, social_facebook: e.target.value})}
+                    onChange={(e) => handleSettingChange('social_facebook', e.target.value)}
                   />
                 </div>
 
@@ -771,7 +877,7 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="https://twitter.com/yourprofile"
                     value={settings.social_twitter}
-                    onChange={(e) => setSettings({...settings, social_twitter: e.target.value})}
+                    onChange={(e) => handleSettingChange('social_twitter', e.target.value)}
                   />
                 </div>
 
@@ -785,7 +891,7 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="https://instagram.com/yourprofile"
                     value={settings.social_instagram}
-                    onChange={(e) => setSettings({...settings, social_instagram: e.target.value})}
+                    onChange={(e) => handleSettingChange('social_instagram', e.target.value)}
                   />
                 </div>
 
@@ -799,7 +905,7 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="https://youtube.com/yourchannel"
                     value={settings.social_youtube}
-                    onChange={(e) => setSettings({...settings, social_youtube: e.target.value})}
+                    onChange={(e) => handleSettingChange('social_youtube', e.target.value)}
                   />
                 </div>
               </div>
@@ -828,7 +934,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.enable_analytics}
-                        onChange={(e) => setSettings({...settings, enable_analytics: e.target.checked})}
+                        onChange={(e) => handleSettingChange('enable_analytics', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -846,7 +952,7 @@ export default function Settings() {
                       className="setting-input" 
                       placeholder="G-XXXXXXXXXX"
                       value={settings.analytics_id}
-                      onChange={(e) => setSettings({...settings, analytics_id: e.target.value})}
+                      onChange={(e) => handleSettingChange('analytics_id', e.target.value)}
                     />
                     <small className="setting-hint">Enter your Google Analytics 4 measurement ID</small>
                   </div>
@@ -862,7 +968,7 @@ export default function Settings() {
                       <input 
                         type="checkbox"
                         checked={settings.cookie_consent}
-                        onChange={(e) => setSettings({...settings, cookie_consent: e.target.checked})}
+                        onChange={(e) => handleSettingChange('cookie_consent', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
                     </label>
@@ -879,7 +985,7 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="/privacy-policy"
                     value={settings.privacy_policy_url}
-                    onChange={(e) => setSettings({...settings, privacy_policy_url: e.target.value})}
+                    onChange={(e) => handleSettingChange('privacy_policy_url', e.target.value)}
                   />
                 </div>
 
@@ -893,8 +999,15 @@ export default function Settings() {
                     className="setting-input" 
                     placeholder="/terms"
                     value={settings.terms_url}
-                    onChange={(e) => setSettings({...settings, terms_url: e.target.value})}
+                    onChange={(e) => handleSettingChange('terms_url', e.target.value)}
                   />
+                </div>
+
+                <div className="setting-card">
+                  <button className="btn-clear-cache" onClick={handleClearCache}>
+                    <i className="bi bi-trash"></i>
+                    Clear Application Cache
+                  </button>
                 </div>
               </div>
             </div>
@@ -966,6 +1079,20 @@ export default function Settings() {
         .hero-actions {
           display: flex;
           gap: 12px;
+          align-items: center;
+        }
+
+        .unsaved-badge {
+          background: rgba(255,255,255,0.2);
+          color: #fbbf24;
+          padding: 8px 16px;
+          border-radius: 12px;
+          font-size: 13px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          backdrop-filter: blur(10px);
         }
 
         .btn-reset, .btn-save {
@@ -999,7 +1126,7 @@ export default function Settings() {
         }
 
         .btn-save:disabled {
-          opacity: 0.7;
+          opacity: 0.5;
           cursor: not-allowed;
         }
 
@@ -1014,6 +1141,10 @@ export default function Settings() {
           gap: 12px;
           animation: slideDown 0.3s ease;
           box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        .fade-in-up {
+          animation: slideDown 0.3s ease;
         }
 
         .alert-success {
@@ -1271,7 +1402,7 @@ export default function Settings() {
         }
 
         /* Buttons */
-        .btn-test-email, .btn-backup-now {
+        .btn-test-email, .btn-backup-now, .btn-clear-cache {
           width: 100%;
           padding: 10px;
           background: linear-gradient(135deg, #667eea, #764ba2);
@@ -1287,7 +1418,7 @@ export default function Settings() {
           gap: 8px;
         }
 
-        .btn-test-email:hover, .btn-backup-now:hover {
+        .btn-test-email:hover, .btn-backup-now:hover, .btn-clear-cache:hover {
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(102,126,234,0.3);
         }
@@ -1361,6 +1492,11 @@ export default function Settings() {
 
           .hero-title {
             font-size: 24px;
+            justify-content: center;
+          }
+
+          .hero-actions {
+            flex-wrap: wrap;
             justify-content: center;
           }
 
