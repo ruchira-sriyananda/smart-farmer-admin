@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
+import Image from 'next/image'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function AdminSidebar() {
@@ -178,7 +179,12 @@ export default function AdminSidebar() {
         {/* Brand Section - Fixed at top */}
         <div className="brand-section">
           <div className="brand-logo">
-            <i className="bi bi-tractor"></i>
+            {/* Logo Image - Replace with your actual logo path */}
+            <img 
+              src="/logo.png" 
+              alt="Smart Farmer Logo" 
+              className="logo-image"
+            />
           </div>
           <div className="brand-info">
             <h1 className="brand-title">Smart Farmer</h1>
@@ -308,17 +314,16 @@ export default function AdminSidebar() {
         .brand-logo {
           width: 40px;
           height: 40px;
-          background: linear-gradient(135deg, #4f46e5, #7c3aed);
-          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
         }
 
-        .brand-logo i {
-          font-size: 20px;
-          color: white;
+        .logo-image {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
         }
 
         .brand-info {
