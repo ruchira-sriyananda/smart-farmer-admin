@@ -77,10 +77,26 @@ export default function UserDetails() {
     return currentAdmin?.admin_id === user?.admin_id
   }
 
+  const isSuperAdmin = () => {
+    return currentAdmin?.is_super_admin === true
+  }
+
+  const canModifyUser = () => {
+    // Super admin can modify anyone except themselves (to prevent accidental lockout)
+    if (isSuperAdmin() && !isCurrentUser()) return true
+    return false
+  }
+
   const handleStatusToggle = async () => {
     // Prevent self-deactivation
     if (isCurrentUser()) {
       alert('You cannot deactivate your own account!')
+      return
+    }
+    
+    // Only super admin can deactivate/activate
+    if (!isSuperAdmin()) {
+      alert('Only Super Administrators can deactivate or activate user accounts!')
       return
     }
     
@@ -96,55 +112,51 @@ export default function UserDetails() {
     if (!error) {
       fetchUserDetails()
       setShowDeactivateModal(false)
+      alert(`User ${user.is_active ? 'deactivated' : 'activated'} successfully!`)
+    } else {
+      alert('Error updating user status: ' + error.message)
     }
     setUpdating(false)
   }
 
   const handleDeleteUser = async () => {
-  if (isCurrentUser()) {
-    alert('You cannot delete your own account!')
-    return
-  }
-  
-  // Check if user is super admin
-  const session = JSON.parse(localStorage.getItem('adminSession'))
-  if (!session?.admin?.is_super_admin) {
-    alert('Only Super Admins can delete users!')
-    return
-  }
-  
-  setUpdating(true)
-  
-  try {
-    // First check if user exists
-    const { data: userExists } = await supabase
-      .from('admin_users')
-      .select('admin_id')
-      .eq('admin_id', id)
-      .single()
-    
-    if (!userExists) {
-      alert('User not found')
-      router.push('/admin/users')
+    // Prevent self-deletion
+    if (isCurrentUser()) {
+      alert('You cannot delete your own account!')
       return
     }
     
-    const { error } = await supabase
-      .from('admin_users')
-      .delete()
-      .eq('admin_id', id)
-
-    if (error) throw error
+    // Only super admin can delete users
+    if (!isSuperAdmin()) {
+      alert('Only Super Administrators can delete user accounts!')
+      return
+    }
     
-    router.push('/admin/users')
-  } catch (err) {
-    alert('Error deleting user: ' + err.message)
-  } finally {
-    setUpdating(false)
+    setUpdating(true)
+    
+    try {
+      const { error } = await supabase
+        .from('admin_users')
+        .delete()
+        .eq('admin_id', id)
+
+      if (error) throw error
+      
+      alert('User deleted successfully!')
+      router.push('/admin/users')
+    } catch (err) {
+      alert('Error deleting user: ' + err.message)
+    } finally {
+      setUpdating(false)
+    }
   }
-}
 
   const handleRoleChange = async (newRoleId) => {
+    if (!canModifyUser()) {
+      alert('You do not have permission to change user roles!')
+      return
+    }
+    
     setUpdating(true)
     const { error } = await supabase
       .from('admin_users')
@@ -156,6 +168,9 @@ export default function UserDetails() {
 
     if (!error) {
       fetchUserDetails()
+      alert('User role updated successfully!')
+    } else {
+      alert('Error updating role: ' + error.message)
     }
     setUpdating(false)
   }
@@ -276,6 +291,8 @@ export default function UserDetails() {
   }
 
   const isSelf = isCurrentUser()
+  const isSuperAdminUser = isSuperAdmin()
+  const canModify = canModifyUser()
 
   return (
     <AdminLayout title={`User: ${user.full_name}`}>
@@ -298,6 +315,27 @@ export default function UserDetails() {
             <span>Back</span>
           </button>
         </div>
+
+        {/* Permission Warning Banner */}
+        {!isSuperAdminUser && (
+          <div className="permission-warning">
+            <i className="bi bi-shield-exclamation"></i>
+            <div>
+              <strong>View-Only Mode</strong>
+              <p>You are viewing this user profile. Only Super Administrators can modify user accounts.</p>
+            </div>
+          </div>
+        )}
+
+        {isSelf && isSuperAdminUser && (
+          <div className="self-warning-banner">
+            <i className="bi bi-info-circle-fill"></i>
+            <div>
+              <strong>Your Own Account</strong>
+              <p>You cannot delete or deactivate your own account to prevent accidental lockout.</p>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="tabs-container">
@@ -432,11 +470,13 @@ export default function UserDetails() {
                   <button 
                     className="action-btn edit-btn"
                     onClick={() => router.push(`/admin/users/${id}/edit`)}
+                    disabled={!canModify}
                   >
                     <i className="bi bi-pencil-square"></i>
                     Edit User
                   </button>
-                  {!isSelf ? (
+                  
+                  {!isSelf && canModify && (
                     <>
                       <button 
                         className={`action-btn ${user.is_active ? 'deactivate-btn' : 'activate-btn'}`}
@@ -453,7 +493,16 @@ export default function UserDetails() {
                         Delete User
                       </button>
                     </>
-                  ) : (
+                  )}
+
+                  {!canModify && !isSelf && (
+                    <div className="permission-denied">
+                      <i className="bi bi-shield-lock"></i>
+                      <span>Only Super Administrators can modify users</span>
+                    </div>
+                  )}
+
+                  {isSelf && (
                     <div className="self-warning">
                       <i className="bi bi-shield-exclamation"></i>
                       <span>You cannot modify your own account</span>
@@ -478,12 +527,16 @@ export default function UserDetails() {
                     {user.is_super_admin ? 'Yes' : 'No'}
                   </span>
                 </div>
+                <div className="info-item">
+                  <span>Access Level</span>
+                  <span>{canModify ? 'Full Access' : 'Read Only'}</span>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Activity Tab */}
+        {/* Activity Tab - Same as before */}
         {activeTab === 'activity' && (
           <div className="activity-container">
             <div className="activity-header">
@@ -522,7 +575,7 @@ export default function UserDetails() {
           </div>
         )}
 
-        {/* Permissions Tab */}
+        {/* Permissions Tab - Same as before */}
         {activeTab === 'permissions' && (
           <div className="permissions-container">
             <div className="permissions-card">
@@ -751,6 +804,60 @@ export default function UserDetails() {
         .back-button:hover {
           background: #e9ecef;
           transform: translateX(-2px);
+        }
+
+        /* Permission Warning */
+        .permission-warning, .self-warning-banner {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 16px 20px;
+          margin-bottom: 24px;
+          border-radius: 16px;
+        }
+
+        .permission-warning {
+          background: #fef3c7;
+          border-left: 4px solid #f59e0b;
+        }
+
+        .permission-warning i {
+          font-size: 24px;
+          color: #f59e0b;
+        }
+
+        .permission-warning strong {
+          display: block;
+          margin-bottom: 4px;
+          color: #92400e;
+        }
+
+        .permission-warning p {
+          margin: 0;
+          font-size: 13px;
+          color: #92400e;
+        }
+
+        .self-warning-banner {
+          background: #dbeafe;
+          border-left: 4px solid #3b82f6;
+        }
+
+        .self-warning-banner i {
+          font-size: 24px;
+          color: #3b82f6;
+        }
+
+        .self-warning-banner strong {
+          display: block;
+          margin-bottom: 4px;
+          color: #1e40af;
+        }
+
+        .self-warning-banner p {
+          margin: 0;
+          font-size: 13px;
+          color: #1e40af;
         }
 
         /* Tabs */
@@ -1033,12 +1140,17 @@ export default function UserDetails() {
           transition: all 0.3s ease;
         }
 
+        .action-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
         .edit-btn {
           background: #4f46e5;
           color: white;
         }
 
-        .edit-btn:hover {
+        .edit-btn:hover:not(:disabled) {
           background: #4338ca;
           transform: translateY(-1px);
         }
@@ -1048,7 +1160,7 @@ export default function UserDetails() {
           color: white;
         }
 
-        .deactivate-btn:hover {
+        .deactivate-btn:hover:not(:disabled) {
           background: #d97706;
           transform: translateY(-1px);
         }
@@ -1058,7 +1170,7 @@ export default function UserDetails() {
           color: white;
         }
 
-        .activate-btn:hover {
+        .activate-btn:hover:not(:disabled) {
           background: #059669;
           transform: translateY(-1px);
         }
@@ -1068,14 +1180,27 @@ export default function UserDetails() {
           color: white;
         }
 
-        .delete-btn:hover {
+        .delete-btn:hover:not(:disabled) {
           background: #dc2626;
           transform: translateY(-1px);
+        }
+
+        .permission-denied {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 12px;
+          background: #fee2e2;
+          border-radius: 12px;
+          color: #991b1b;
+          font-size: 13px;
         }
 
         .self-warning {
           display: flex;
           align-items: center;
+          justify-content: center;
           gap: 10px;
           padding: 12px;
           background: #fef3c7;
