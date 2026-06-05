@@ -181,7 +181,7 @@ export default function AdminSidebar() {
           <div className="brand-logo">
             {/* Logo Image - Replace with your actual logo path */}
             <img 
-              src="/logo.png" 
+              src="https://fv5-2.files.fm/thumb_show.php?i=4qadq9rvse&view&v=1&PHPSESSID=924b31a5b8592478f569755d38d99a6bf98be309" 
               alt="Smart Farmer Logo" 
               className="logo-image"
             />
