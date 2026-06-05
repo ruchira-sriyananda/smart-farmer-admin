@@ -10,17 +10,20 @@ export default function Advertisements() {
   const [error, setError] = useState(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
   const [selectedAd, setSelectedAd] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [filter, setFilter] = useState('all')
   const [dateRange, setDateRange] = useState('all')
   const [showFilters, setShowFilters] = useState(false)
+  const [subscriptionPlans, setSubscriptionPlans] = useState([])
+  const [selectedPlan, setSelectedPlan] = useState(null)
   
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     image_url: '',
-    ad_type: 'STANDARD',
+    ad_type: 'PREMIUM',
     duration_days: 30,
     target_audience: 'ALL',
     status: 'ACTIVE'
@@ -33,11 +36,13 @@ export default function Advertisements() {
     clicks: 0,
     impressions: 0,
     ctr: 0,
-    revenue: 0
+    revenue: 0,
+    activeSubscriptions: 0
   })
 
   useEffect(() => {
     fetchAds()
+    fetchSubscriptionPlans()
     
     const subscription = supabase
       .channel('ads_changes')
@@ -48,59 +53,109 @@ export default function Advertisements() {
       .subscribe()
 
     return () => subscription.unsubscribe()
-  }, [filter, dateRange])
+  }, [])
 
   const fetchAds = async () => {
-    try {
-      setLoading(true)
-      setError(null)
+  try {
+    setLoading(true)
+    setError(null)
+    
+    // First, fetch advertisements without the join
+    let query = supabase
+      .from('advertisements')
+      .select('*')
+      .order('start_date', { ascending: false })
+
+    if (filter !== 'all') {
+      query = query.eq('status', filter.toUpperCase())
+    }
+
+    if (dateRange !== 'all') {
+      const now = new Date()
+      let startDate = new Date()
       
-      let query = supabase
-        .from('advertisements')
-        .select(`
-          *,
-          admin_users!advertisements_user_id_fkey (
-            admin_id,
-            full_name,
-            email
-          )
-        `)
-        .order('start_date', { ascending: false })
-
-      if (filter !== 'all') {
-        query = query.eq('status', filter.toUpperCase())
+      switch(dateRange) {
+        case 'today':
+          startDate.setHours(0, 0, 0, 0)
+          break
+        case 'week':
+          startDate.setDate(startDate.getDate() - 7)
+          break
+        case 'month':
+          startDate.setMonth(startDate.getMonth() - 1)
+          break
       }
+      
+      query = query.gte('start_date', startDate.toISOString())
+    }
 
-      if (dateRange !== 'all') {
-        const now = new Date()
-        let startDate = new Date()
+    const { data, error } = await query
+
+    if (error) throw error
+
+    // Then fetch admin users separately to get user details
+    if (data && data.length > 0) {
+      const userIds = [...new Set(data.map(ad => ad.user_id).filter(id => id))]
+      
+      if (userIds.length > 0) {
+        const { data: adminUsers, error: usersError } = await supabase
+          .from('admin_users')
+          .select('admin_id, full_name, email')
+          .in('admin_id', userIds)
         
-        switch(dateRange) {
-          case 'today':
-            startDate.setHours(0, 0, 0, 0)
-            break
-          case 'week':
-            startDate.setDate(startDate.getDate() - 7)
-            break
-          case 'month':
-            startDate.setMonth(startDate.getMonth() - 1)
-            break
+        if (!usersError && adminUsers) {
+          // Merge user data into ads
+          const userMap = {}
+          adminUsers.forEach(user => {
+            userMap[user.admin_id] = user
+          })
+          
+          const adsWithUsers = data.map(ad => ({
+            ...ad,
+            admin_users: userMap[ad.user_id] || null
+          }))
+          
+          setAds(adsWithUsers)
+          calculateStats(adsWithUsers)
+        } else {
+          setAds(data)
+          calculateStats(data)
         }
-        
-        query = query.gte('start_date', startDate.toISOString())
+      } else {
+        setAds(data)
+        calculateStats(data)
       }
+    } else {
+      setAds([])
+      calculateStats([])
+    }
+  } catch (err) {
+    console.error('Error fetching ads:', err)
+    setError(err.message)
+  } finally {
+    setLoading(false)
+  }
+}
 
-      const { data, error } = await query
+  const fetchSubscriptionPlans = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ad_packages')
+        .select('*')
+        .order('price', { ascending: true })
 
-      if (error) throw error
-
-      setAds(data || [])
-      calculateStats(data || [])
+      if (!error && data && data.length > 0) {
+        setSubscriptionPlans(data)
+      } else {
+        // Default plans if no data in database
+        setSubscriptionPlans([
+          { package_id: 'basic', package_name: 'Basic', price: 49, duration_days: 30, features: ['Standard placement', 'Basic targeting', '30 days duration'] },
+          { package_id: 'premium', package_name: 'Premium', price: 99, duration_days: 30, features: ['Premium placement', 'Advanced targeting', '30 days duration', 'Priority support'] },
+          { package_id: 'featured', package_name: 'Featured', price: 199, duration_days: 30, features: ['Featured placement', 'Advanced targeting', '30 days duration', 'Priority support', 'Analytics dashboard'] }
+        ])
+      }
     } catch (err) {
-      console.error('Error fetching ads:', err)
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      console.error('Error fetching subscription plans:', err)
     }
   }
 
@@ -111,6 +166,7 @@ export default function Advertisements() {
     const totalClicks = adsData.reduce((sum, ad) => sum + (ad.clicks || 0), 0)
     const totalImpressions = adsData.reduce((sum, ad) => sum + (ad.impressions || 0), 0)
     const totalRevenue = adsData.reduce((sum, ad) => sum + (ad.amount_paid || 0), 0)
+    const activeSubscriptions = adsData.filter(ad => ad.subscription_active === true && ad.status === 'ACTIVE').length
     
     setStats({
       total: adsData.length,
@@ -119,7 +175,8 @@ export default function Advertisements() {
       clicks: totalClicks,
       impressions: totalImpressions,
       ctr: totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : 0,
-      revenue: totalRevenue
+      revenue: totalRevenue,
+      activeSubscriptions: activeSubscriptions
     })
   }
 
@@ -137,15 +194,14 @@ export default function Advertisements() {
         .insert({
           title: formData.title,
           description: formData.description,
-          image_url: formData.image_url || null,
+          image_url: formData.image_url,
           ad_type: formData.ad_type,
           start_date: startDate.toISOString(),
           end_date: endDate.toISOString(),
           status: formData.status,
           target_audience: formData.target_audience,
           user_id: session?.admin?.admin_id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          created_at: new Date().toISOString()
         })
 
       if (error) throw error
@@ -214,7 +270,7 @@ export default function Advertisements() {
       title: '',
       description: '',
       image_url: '',
-      ad_type: 'STANDARD',
+      ad_type: 'PREMIUM',
       duration_days: 30,
       target_audience: 'ALL',
       status: 'ACTIVE'
@@ -225,14 +281,13 @@ export default function Advertisements() {
     const now = new Date()
     const isExpired = endDate && new Date(endDate) <= now
     
-    if (isExpired && status === 'ACTIVE') {
+    if (isExpired) {
       return <span className="status-badge expired"><i className="bi bi-clock-history"></i> Expired</span>
     }
     
     const badges = {
       'ACTIVE': <span className="status-badge active"><i className="bi bi-check-circle-fill"></i> Active</span>,
       'PENDING': <span className="status-badge pending"><i className="bi bi-clock-fill"></i> Pending</span>,
-      'EXPIRED': <span className="status-badge expired"><i className="bi bi-clock-history"></i> Expired</span>,
       'REJECTED': <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>
     }
     return badges[status] || <span className="status-badge default">{status}</span>
@@ -326,13 +381,17 @@ export default function Advertisements() {
             </div>
             <div>
               <h1 className="header-title">Advertisements</h1>
-              <p className="header-subtitle">Manage campaigns and track performance</p>
+              <p className="header-subtitle">Manage campaigns, track performance, and configure subscriptions</p>
             </div>
           </div>
           <div className="header-actions">
             <button className="filter-toggle-btn" onClick={() => setShowFilters(!showFilters)}>
               <i className="bi bi-funnel-fill"></i>
               <span>Filters</span>
+            </button>
+            <button className="btn-subscription" onClick={() => router.push('/admin/advertisements/subscriptions')}>
+              <i className="bi bi-credit-card"></i>
+              Subscriptions
             </button>
             <button className="btn-create" onClick={() => setShowCreateModal(true)}>
               <i className="bi bi-plus-circle-fill"></i>
@@ -461,11 +520,11 @@ export default function Advertisements() {
                   <div className="ad-meta">
                     <div className="meta-item">
                       <i className="bi bi-calendar3"></i>
-                      Start: {new Date(ad.start_date).toLocaleDateString()}
+                      {new Date(ad.created_at).toLocaleDateString()}
                     </div>
                     <div className="meta-item">
-                      <i className="bi bi-calendar-x"></i>
-                      End: {new Date(ad.end_date).toLocaleDateString()}
+                      <i className="bi bi-person"></i>
+                      {ad.users?.full_name || 'Admin'}
                     </div>
                   </div>
                 </div>
@@ -474,15 +533,21 @@ export default function Advertisements() {
                   <button className="btn-view" onClick={() => router.push(`/admin/advertisements/${ad.ad_id}`)}>
                     <i className="bi bi-eye"></i> View
                   </button>
+                  <button className="btn-edit" onClick={() => {
+                    setSelectedAd(ad)
+                    setShowEditModal(true)
+                  }}>
+                    <i className="bi bi-pencil"></i> Edit
+                  </button>
                   {ad.status === 'ACTIVE' ? (
                     <button className="btn-pause" onClick={() => updateAdStatus(ad.ad_id, 'EXPIRED')}>
                       <i className="bi bi-pause-circle"></i> Pause
                     </button>
-                  ) : ad.status === 'EXPIRED' ? (
+                  ) : (
                     <button className="btn-activate" onClick={() => updateAdStatus(ad.ad_id, 'ACTIVE')}>
                       <i className="bi bi-play-circle"></i> Activate
                     </button>
-                  ) : null}
+                  )}
                   <button className="btn-delete" onClick={() => deleteAd(ad.ad_id)}>
                     <i className="bi bi-trash"></i>
                   </button>
@@ -505,7 +570,7 @@ export default function Advertisements() {
       {/* Create Ad Modal */}
       {showCreateModal && (
         <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header info">
               <div className="modal-icon"><i className="bi bi-plus-circle-fill"></i></div>
               <h3>Create Advertisement</h3>
@@ -566,8 +631,6 @@ export default function Advertisements() {
                   <input
                     type="number"
                     className="form-input"
-                    min="1"
-                    max="365"
                     value={formData.duration_days}
                     onChange={(e) => setFormData({...formData, duration_days: parseInt(e.target.value)})}
                   />
@@ -670,7 +733,7 @@ export default function Advertisements() {
           flex-wrap: wrap;
         }
 
-        .filter-toggle-btn, .btn-create {
+        .filter-toggle-btn, .btn-subscription, .btn-create {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -689,6 +752,17 @@ export default function Advertisements() {
 
         .filter-toggle-btn:hover {
           background: #e9ecef;
+        }
+
+        .btn-subscription {
+          background: #8b5cf6;
+          border: none;
+          color: white;
+        }
+
+        .btn-subscription:hover {
+          background: #7c3aed;
+          transform: translateY(-1px);
         }
 
         .btn-create {
@@ -918,7 +992,7 @@ export default function Advertisements() {
           flex-wrap: wrap;
         }
 
-        .btn-view, .btn-pause, .btn-activate, .btn-delete {
+        .btn-view, .btn-edit, .btn-pause, .btn-activate, .btn-delete {
           flex: 1;
           padding: 6px 12px;
           border: none;
@@ -935,6 +1009,8 @@ export default function Advertisements() {
 
         .btn-view { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
         .btn-view:hover { background: #4f46e5; color: white; }
+        .btn-edit { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .btn-edit:hover { background: #10b981; color: white; }
         .btn-pause { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
         .btn-pause:hover { background: #f59e0b; color: white; }
         .btn-activate { background: rgba(16, 185, 129, 0.1); color: #10b981; }
@@ -988,6 +1064,10 @@ export default function Advertisements() {
           max-width: 550px;
           animation: slideUp 0.3s ease;
           overflow: hidden;
+        }
+
+        .modal-container.modal-lg {
+          max-width: 700px;
         }
 
         .modal-header {
