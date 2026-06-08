@@ -47,7 +47,12 @@ export default function ContentModeration() {
     if (!imagePath) return null
     if (imagePath.startsWith('http')) return imagePath
     if (imagePath.startsWith('/')) return imagePath
-    return imagePath
+    try {
+      const { data } = supabase.storage.from('post-images').getPublicUrl(imagePath)
+      return data?.publicUrl || imagePath
+    } catch {
+      return imagePath
+    }
   }
 
   const fetchPosts = async () => {
@@ -111,20 +116,53 @@ export default function ContentModeration() {
               images = [getImageUrl(postDataResult.image_url)]
             }
             
-            // Fetch user details
+            // Fetch user details - CRITICAL FIX: Use the user_id from the posts table
             if (postDataResult.user_id) {
-              const { data: userResult } = await supabase
+              const { data: userResult, error: userError } = await supabase
                 .from('users')
-                .select('user_id, full_name, email, profile_image, phone, district')
+                .select('user_id, full_name, email, profile_image, phone, district, location, created_at')
                 .eq('user_id', postDataResult.user_id)
                 .maybeSingle()
               
+              if (userError) {
+                console.error(`Error fetching user ${postDataResult.user_id}:`, userError)
+              }
+              
               if (userResult) {
                 userData = userResult
+                console.log(`Found user: ${userResult.full_name} for post ${post.content_id}`)
+              } else {
+                console.log(`No user found for ID: ${postDataResult.user_id}`)
+              }
+            }
+            
+            // If still no user data, try to get from content_moderation's user_id
+            if (!userData && post.user_id) {
+              const { data: userFromMod } = await supabase
+                .from('users')
+                .select('user_id, full_name, email, profile_image, phone, district')
+                .eq('user_id', post.user_id)
+                .maybeSingle()
+              
+              if (userFromMod) {
+                userData = userFromMod
+                console.log(`Found user from moderation table: ${userData.full_name}`)
               }
             }
           } else {
             postExists = false
+          }
+        }
+        
+        // Set default user data if still null
+        if (!userData) {
+          userData = {
+            full_name: 'Mobile User',
+            email: 'Email not available',
+            profile_image: null,
+            phone: null,
+            district: 'Not specified',
+            location: 'Not specified'
           }
         }
         
@@ -137,9 +175,9 @@ export default function ContentModeration() {
           cover_image: images[0] || null,
           post_created_at: postData?.created_at || post.created_at,
           user: userData,
-          author_name: userData?.full_name || 'Unknown User',
+          author_name: userData?.full_name || 'Mobile User',
           author_email: userData?.email || 'Email not available',
-          author_district: userData?.district || 'Not specified',
+          author_district: userData?.district || userData?.location || 'Not specified',
           post_exists: postExists
         }
       }))
@@ -207,7 +245,7 @@ export default function ContentModeration() {
           if (postData.user_id) {
             const { data: userResult } = await supabase
               .from('users')
-              .select('user_id, full_name, email, profile_image, phone, district')
+              .select('user_id, full_name, email, profile_image, phone, district, location')
               .eq('user_id', postData.user_id)
               .maybeSingle()
             
@@ -234,7 +272,13 @@ export default function ContentModeration() {
             ...postData, 
             images: images,
             image_count: images.length,
-            user: userData,
+            user: userData || {
+              full_name: 'Mobile User',
+              email: 'Email not available',
+              profile_image: null,
+              phone: null,
+              district: 'Not specified'
+            },
             category: categoryData
           }
         }
@@ -451,7 +495,7 @@ export default function ContentModeration() {
                     <div className="post-user-details">
                       <div className="post-user-name">{post.author_name}</div>
                       <div className="post-user-email">{post.author_email}</div>
-                      {post.author_district && (
+                      {post.author_district && post.author_district !== 'Not specified' && (
                         <div className="post-user-district"><i className="bi bi-geo-alt"></i> {post.author_district}</div>
                       )}
                     </div>
@@ -529,7 +573,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal with Full Content and All Images */}
+      {/* Details Modal */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -586,12 +630,12 @@ export default function ContentModeration() {
                         )}
                       </div>
                       <div className="detail-author-info">
-                        <div className="detail-author-name">{postDetails.user?.full_name || 'Unknown User'}</div>
+                        <div className="detail-author-name">{postDetails.user?.full_name || 'Mobile User'}</div>
                         <div className="detail-author-email">{postDetails.user?.email || 'Email not available'}</div>
                         {postDetails.user?.phone && (
                           <div className="detail-author-phone"><i className="bi bi-telephone"></i> {postDetails.user.phone}</div>
                         )}
-                        {postDetails.user?.district && (
+                        {postDetails.user?.district && postDetails.user.district !== 'Not specified' && (
                           <div className="detail-author-location"><i className="bi bi-geo-alt"></i> {postDetails.user.district}</div>
                         )}
                       </div>
@@ -641,9 +685,6 @@ export default function ContentModeration() {
                       <h4><i className="bi bi-tag"></i> Category</h4>
                       <div className="detail-category">
                         <span className="category-badge">{postDetails.category.category_name}</span>
-                        {postDetails.category.description && (
-                          <p className="category-description">{postDetails.category.description}</p>
-                        )}
                       </div>
                     </div>
                   )}
@@ -695,7 +736,7 @@ export default function ContentModeration() {
         </div>
       )}
 
-      {/* Full Image Lightbox with Navigation */}
+      {/* Full Image Lightbox */}
       {showFullImage && selectedImage && postDetails && (
         <div className="lightbox-overlay" onClick={() => setShowFullImage(false)}>
           <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
@@ -959,7 +1000,6 @@ export default function ContentModeration() {
         .post-user-district { font-size: 10px; color: #9ca3af; margin-top: 2px; }
         .post-user-district i { font-size: 9px; }
 
-        /* Images Gallery in Card */
         .post-images-gallery {
           padding: 12px;
           background: #fafbfc;
@@ -1188,7 +1228,6 @@ export default function ContentModeration() {
 
         .modal-body { padding: 24px; }
 
-        /* Detail Images Section */
         .detail-images-section {
           margin-bottom: 28px;
         }
@@ -1338,7 +1377,6 @@ export default function ContentModeration() {
           font-size: 13px;
         }
 
-        .category-description { margin-top: 8px; font-size: 13px; color: #6c757d; }
         .detail-rejection { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
         .detail-moderation { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
 
