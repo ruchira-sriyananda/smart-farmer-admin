@@ -19,6 +19,11 @@ export default function ContentModeration() {
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [showFullImage, setShowFullImage] = useState(false)
   const [selectedImage, setSelectedImage] = useState(null)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [allImages, setAllImages] = useState([])
+  const [showImageGallery, setShowImageGallery] = useState(false)
+  const [galleryImages, setGalleryImages] = useState([])
+  const [galleryIndex, setGalleryIndex] = useState(0)
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -79,17 +84,17 @@ export default function ContentModeration() {
 
       if (error) throw error
 
-      // Fetch images, user details, and post content for each post
+      // Fetch complete post details including all images
       const postsWithDetails = await Promise.all((data || []).map(async (post) => {
         if (post.content_type === 'POST') {
           // Fetch post content from posts table
           const { data: postData, error: postError } = await supabase
             .from('posts')
-            .select('title, content, description, created_at, user_id')
+            .select('title, content, description, created_at, user_id, image_url')
             .eq('post_id', post.content_id)
             .single()
           
-          // Fetch images
+          // Fetch all images from post_images table
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
             .select('image_url, image_order')
@@ -98,19 +103,20 @@ export default function ContentModeration() {
 
           let imageUrls = []
           if (!imagesError && images && images.length > 0) {
-            imageUrls = images.map(img => getImageUrl(img.image_url))
-          } else if (post.image_url) {
-            imageUrls = [getImageUrl(post.image_url)]
+            imageUrls = images.map(img => getImageUrl(img.image_url)).filter(url => url)
+          } else if (postData?.image_url) {
+            const singleImage = getImageUrl(postData.image_url)
+            if (singleImage) imageUrls.push(singleImage)
           }
           
-          // Fetch user details - Get the actual user who created the post
+          // Fetch user details
           let userData = null
           const userId = postData?.user_id
           
           if (userId) {
             const { data: userFromUsers } = await supabase
               .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location')
+              .select('user_id, full_name, email, profile_image, phone, location, district')
               .eq('user_id', userId)
               .single()
             
@@ -119,27 +125,14 @@ export default function ContentModeration() {
             }
           }
           
-          // If still no user data, try to get from content_moderation table
-          if (!userData && post.user_id) {
-            const { data: userFromModeration } = await supabase
-              .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location')
-              .eq('user_id', post.user_id)
-              .single()
-            
-            if (userFromModeration) {
-              userData = userFromModeration
-            }
-          }
-          
-          // Default user data if nothing found
           if (!userData) {
             userData = { 
               full_name: 'Mobile User', 
               email: 'Email not available',
               profile_image: null,
               phone: null,
-              location: null
+              location: null,
+              district: null
             }
           }
           
@@ -191,9 +184,6 @@ export default function ContentModeration() {
       let details = null
       
       if (contentType === 'POST') {
-        // First get the moderation record to get user_id
-        const moderationPost = posts.find(p => p.content_id === contentId)
-        
         // Fetch post with user details
         const { data, error } = await supabase
           .from('posts')
@@ -205,7 +195,8 @@ export default function ContentModeration() {
               email,
               profile_image,
               phone,
-              location
+              location,
+              district
             ),
             post_categories!posts_category_id_fkey (
               category_name,
@@ -216,7 +207,7 @@ export default function ContentModeration() {
           .single()
         
         if (!error && data) {
-          // Fetch images
+          // Fetch all images from post_images table
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
             .select('image_url, image_order')
@@ -234,27 +225,21 @@ export default function ContentModeration() {
             if (url) imageUrls.push(url)
           }
           
-          // Get user data from moderation if not in posts
-          let userData = data.users
-          if (!userData && moderationPost?.user_id) {
-            const { data: userFromUsers } = await supabase
-              .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location')
-              .eq('user_id', moderationPost.user_id)
-              .single()
-            userData = userFromUsers
-          }
-          
           details = { 
             ...data, 
             images: imageUrls, 
             image_count: imageUrls.length,
-            user: userData || data.users
+            user: data.users,
+            category: data.post_categories
           }
         }
       }
       
       setPostDetails(details)
+      if (details?.images?.length > 0) {
+        setAllImages(details.images)
+        setCurrentImageIndex(0)
+      }
     } catch (err) {
       console.error('Error fetching post details:', err)
     } finally {
@@ -318,9 +303,22 @@ export default function ContentModeration() {
     setShowDetailsModal(true)
   }
 
-  const openFullImage = (imageUrl) => {
-    setSelectedImage(imageUrl)
-    setShowFullImage(true)
+  const openImageGallery = (images, startIndex = 0) => {
+    setGalleryImages(images)
+    setGalleryIndex(startIndex)
+    setShowImageGallery(true)
+  }
+
+  const nextImage = () => {
+    if (galleryIndex < galleryImages.length - 1) {
+      setGalleryIndex(galleryIndex + 1)
+    }
+  }
+
+  const prevImage = () => {
+    if (galleryIndex > 0) {
+      setGalleryIndex(galleryIndex - 1)
+    }
   }
 
   const getStatusBadge = (status) => {
@@ -455,15 +453,25 @@ export default function ContentModeration() {
                   {getStatusBadge(post.moderation_status)}
                 </div>
 
-                {/* Post Image */}
+                {/* Post Images Gallery */}
                 {post.images && post.images.length > 0 && (
-                  <div className="post-card-image" onClick={() => openFullImage(post.images[0])}>
-                    <img src={post.images[0]} alt={post.title} />
-                    {post.images.length > 1 && (
-                      <div className="image-count-badge">
-                        <i className="bi bi-images"></i> +{post.images.length - 1}
-                      </div>
-                    )}
+                  <div className="post-card-images" onClick={() => openImageGallery(post.images, 0)}>
+                    <div className="images-grid">
+                      <img src={post.images[0]} alt={post.title} className="main-image" />
+                      {post.images.length > 1 && (
+                        <div className="images-overlay">
+                          <div className="more-images">
+                            <i className="bi bi-images"></i>
+                            <span>+{post.images.length - 1} more</span>
+                          </div>
+                          {post.images.slice(1, 4).map((img, idx) => (
+                            <div key={idx} className="thumbnail">
+                              <img src={img} alt={`Thumbnail ${idx + 1}`} />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -471,11 +479,14 @@ export default function ContentModeration() {
                 <div className="post-card-content">
                   <h6 className="post-card-title">{post.title}</h6>
                   <p className="post-card-text">
-                    {(post.content || post.description)?.substring(0, 100)}...
+                    {(post.content || post.description)?.substring(0, 120)}...
                   </p>
                   <div className="post-card-meta">
                     <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at || post.created_at).toLocaleDateString()}</span>
                     <span><i className="bi bi-clock"></i> {new Date(post.post_created_at || post.created_at).toLocaleTimeString()}</span>
+                    {post.image_count > 0 && (
+                      <span><i className="bi bi-images"></i> {post.image_count} image{post.image_count > 1 ? 's' : ''}</span>
+                    )}
                   </div>
                 </div>
 
@@ -510,7 +521,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Full Details Modal with Complete Content */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -520,8 +531,8 @@ export default function ContentModeration() {
                   <i className="bi bi-file-text-fill"></i>
                 </div>
                 <div>
-                  <h2>Content Details</h2>
-                  <p>Complete information about this content</p>
+                  <h2>Complete Post Details</h2>
+                  <p>Full content and all images</p>
                 </div>
               </div>
               <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
@@ -537,19 +548,28 @@ export default function ContentModeration() {
                 </div>
               ) : postDetails ? (
                 <>
-                  {/* Post Images */}
+                  {/* All Images Gallery */}
                   {postDetails.images && postDetails.images.length > 0 && (
-                    <div className="detail-images">
-                      <h4><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h4>
-                      <div className="detail-images-grid">
-                        {postDetails.images.map((img, idx) => (
-                          <div key={idx} className="detail-image-item" onClick={() => openFullImage(img)}>
-                            <img src={img} alt={`Image ${idx + 1}`} />
-                            <div className="detail-image-overlay">
-                              <i className="bi bi-zoom-in"></i>
-                            </div>
+                    <div className="detail-images-section">
+                      <h4><i className="bi bi-images"></i> Image Gallery ({postDetails.images.length})</h4>
+                      <div className="full-image-gallery">
+                        <div className="gallery-main" onClick={() => openImageGallery(postDetails.images, 0)}>
+                          <img src={postDetails.images[0]} alt="Main" />
+                        </div>
+                        {postDetails.images.length > 1 && (
+                          <div className="gallery-thumbnails">
+                            {postDetails.images.slice(0, 8).map((img, idx) => (
+                              <div key={idx} className="gallery-thumb" onClick={() => openImageGallery(postDetails.images, idx)}>
+                                <img src={img} alt={`Thumb ${idx + 1}`} />
+                              </div>
+                            ))}
+                            {postDetails.images.length > 8 && (
+                              <div className="gallery-more">
+                                <span>+{postDetails.images.length - 8}</span>
+                              </div>
+                            )}
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
                   )}
@@ -571,8 +591,8 @@ export default function ContentModeration() {
                         {postDetails.user?.phone && (
                           <div className="detail-author-phone"><i className="bi bi-telephone"></i> {postDetails.user.phone}</div>
                         )}
-                        {postDetails.user?.location && (
-                          <div className="detail-author-location"><i className="bi bi-geo-alt"></i> {postDetails.user.location}</div>
+                        {(postDetails.user?.location || postDetails.user?.district) && (
+                          <div className="detail-author-location"><i className="bi bi-geo-alt"></i> {postDetails.user.district || postDetails.user.location}</div>
                         )}
                       </div>
                     </div>
@@ -606,25 +626,28 @@ export default function ContentModeration() {
                   {/* Post Title */}
                   {postDetails.title && (
                     <div className="detail-section">
-                      <h4><i className="bi bi-heading"></i> Title</h4>
+                      <h4><i className="bi bi-heading"></i> Post Title</h4>
                       <div className="detail-title">{postDetails.title}</div>
                     </div>
                   )}
 
-                  {/* Post Content */}
+                  {/* Complete Post Content */}
                   {(postDetails.content || postDetails.description) && (
                     <div className="detail-section">
-                      <h4><i className="bi bi-file-text"></i> Content</h4>
+                      <h4><i className="bi bi-file-text"></i> Full Content</h4>
                       <div className="detail-content">{postDetails.content || postDetails.description}</div>
                     </div>
                   )}
 
                   {/* Category */}
-                  {postDetails.post_categories?.category_name && (
+                  {postDetails.category?.category_name && (
                     <div className="detail-section">
                       <h4><i className="bi bi-tag"></i> Category</h4>
                       <div className="detail-category">
-                        <span className="category-badge">{postDetails.post_categories.category_name}</span>
+                        <span className="category-badge">{postDetails.category.category_name}</span>
+                        {postDetails.category.description && (
+                          <p className="category-description">{postDetails.category.description}</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -676,17 +699,54 @@ export default function ContentModeration() {
         </div>
       )}
 
-      {/* Full Image Modal */}
-      {showFullImage && selectedImage && (
-        <div className="modal-overlay" onClick={() => setShowFullImage(false)}>
-          <div className="full-image-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="close-image" onClick={() => setShowFullImage(false)}>
+      {/* Full Screen Image Gallery */}
+      {showImageGallery && galleryImages.length > 0 && (
+        <div className="modal-overlay" onClick={() => setShowImageGallery(false)}>
+          <div className="full-gallery-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="gallery-close" onClick={() => setShowImageGallery(false)}>
               <i className="bi bi-x-lg"></i>
             </button>
-            <img src={selectedImage} alt="Full size" />
-            <div className="image-actions">
-              <button onClick={() => window.open(selectedImage, '_blank')}>
+            
+            <div className="gallery-container">
+              <button className="gallery-nav prev" onClick={prevImage} disabled={galleryIndex === 0}>
+                <i className="bi bi-chevron-left"></i>
+              </button>
+              
+              <div className="gallery-current">
+                <img src={galleryImages[galleryIndex]} alt={`Image ${galleryIndex + 1}`} />
+                <div className="gallery-counter">
+                  {galleryIndex + 1} / {galleryImages.length}
+                </div>
+              </div>
+              
+              <button className="gallery-nav next" onClick={nextImage} disabled={galleryIndex === galleryImages.length - 1}>
+                <i className="bi bi-chevron-right"></i>
+              </button>
+            </div>
+            
+            <div className="gallery-thumbnails-bar">
+              {galleryImages.map((img, idx) => (
+                <div 
+                  key={idx} 
+                  className={`gallery-thumbnail ${idx === galleryIndex ? 'active' : ''}`}
+                  onClick={() => setGalleryIndex(idx)}
+                >
+                  <img src={img} alt={`Thumb ${idx + 1}`} />
+                </div>
+              ))}
+            </div>
+            
+            <div className="gallery-actions">
+              <button onClick={() => window.open(galleryImages[galleryIndex], '_blank')}>
                 <i className="bi bi-box-arrow-up-right"></i> Open in new tab
+              </button>
+              <button onClick={() => {
+                const link = document.createElement('a');
+                link.href = galleryImages[galleryIndex];
+                link.download = `image-${galleryIndex + 1}.jpg`;
+                link.click();
+              }}>
+                <i className="bi bi-download"></i> Download
               </button>
             </div>
           </div>
@@ -774,7 +834,7 @@ export default function ContentModeration() {
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border-radius: 24px;
-          padding: 40px 32px;
+          padding: 32px;
           margin-bottom: 32px;
         }
 
@@ -785,8 +845,8 @@ export default function ContentModeration() {
         }
 
         .hero-icon {
-          width: 60px;
-          height: 60px;
+          width: 56px;
+          height: 56px;
           background: rgba(255,255,255,0.2);
           border-radius: 16px;
           display: flex;
@@ -800,10 +860,10 @@ export default function ContentModeration() {
         }
 
         .hero-title {
-          font-size: 28px;
+          font-size: 24px;
           font-weight: 700;
           color: white;
-          margin: 0 0 8px 0;
+          margin: 0 0 4px 0;
         }
 
         .hero-subtitle {
@@ -874,7 +934,7 @@ export default function ContentModeration() {
           align-items: center;
           justify-content: center;
           gap: 8px;
-          padding: 12px 20px;
+          padding: 10px 16px;
           background: transparent;
           border: none;
           border-radius: 12px;
@@ -914,7 +974,7 @@ export default function ContentModeration() {
         .post-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
 
         .post-card-header {
-          padding: 16px 20px;
+          padding: 16px;
           background: #f8f9fa;
           border-bottom: 1px solid #e9ecef;
           display: flex;
@@ -945,90 +1005,69 @@ export default function ContentModeration() {
           object-fit: cover;
         }
 
-        .post-user-avatar i {
-          font-size: 20px;
-          color: white;
+        .post-user-avatar i { font-size: 20px; color: white; }
+        .post-user-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+        .post-user-email { font-size: 11px; color: #9ca3af; }
+
+        /* Post Images */
+        .post-card-images {
+          cursor: pointer;
+          background: #f8f9fa;
         }
 
-        .post-user-details {
-          flex: 1;
-        }
-
-        .post-user-name {
-          font-weight: 600;
-          color: #1f2937;
-          margin-bottom: 2px;
-          font-size: 14px;
-        }
-
-        .post-user-email {
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .post-card-image {
+        .images-grid {
+          display: flex;
           position: relative;
           height: 200px;
-          overflow: hidden;
-          cursor: pointer;
         }
 
-        .post-card-image img {
+        .main-image {
+          width: 50%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .images-overlay {
+          width: 50%;
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 2px;
+          position: relative;
+        }
+
+        .thumbnail {
+          position: relative;
+          height: 99px;
+        }
+
+        .thumbnail img {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          transition: transform 0.3s ease;
         }
 
-        .post-card:hover .post-card-image img {
-          transform: scale(1.05);
-        }
-
-        .image-count-badge {
+        .more-images {
           position: absolute;
-          bottom: 12px;
-          right: 12px;
+          bottom: 8px;
+          right: 8px;
           background: rgba(0,0,0,0.7);
           color: white;
           padding: 4px 10px;
           border-radius: 20px;
-          font-size: 11px;
+          font-size: 12px;
           display: flex;
           align-items: center;
           gap: 4px;
         }
 
-        .post-card-content {
-          padding: 16px 20px;
-        }
-
-        .post-card-title {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0 0 8px 0;
-          color: #1f2937;
-        }
-
-        .post-card-text {
-          font-size: 13px;
-          color: #6c757d;
-          margin: 0 0 12px 0;
-          line-height: 1.5;
-        }
-
-        .post-card-meta {
-          display: flex;
-          gap: 16px;
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .post-card-meta i {
-          margin-right: 4px;
-        }
+        .post-card-content { padding: 16px; }
+        .post-card-title { font-size: 16px; font-weight: 600; margin: 0 0 8px 0; }
+        .post-card-text { font-size: 13px; color: #6c757d; margin: 0 0 12px 0; line-height: 1.5; }
+        .post-card-meta { display: flex; gap: 16px; font-size: 11px; color: #9ca3af; }
+        .post-card-meta i { margin-right: 4px; }
 
         .post-card-footer {
-          padding: 16px 20px;
+          padding: 16px;
           border-top: 1px solid #e9ecef;
           display: flex;
           gap: 12px;
@@ -1040,7 +1079,7 @@ export default function ContentModeration() {
           align-items: center;
           justify-content: center;
           gap: 6px;
-          padding: 8px 12px;
+          padding: 8px;
           background: rgba(79,70,229,0.1);
           border: none;
           border-radius: 8px;
@@ -1048,54 +1087,29 @@ export default function ContentModeration() {
           font-size: 13px;
           font-weight: 500;
           cursor: pointer;
-          transition: all 0.3s ease;
         }
 
-        .btn-view:hover {
-          background: #4f46e5;
-          color: white;
-        }
+        .btn-view:hover { background: #4f46e5; color: white; }
 
-        .action-buttons {
-          display: flex;
-          gap: 8px;
-          flex: 2;
-        }
-
+        .action-buttons { display: flex; gap: 8px; flex: 2; }
         .btn-approve, .btn-reject {
           flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 6px;
-          padding: 8px 12px;
+          padding: 8px;
           border: none;
           border-radius: 8px;
           font-size: 13px;
           font-weight: 500;
           cursor: pointer;
-          transition: all 0.3s ease;
         }
 
-        .btn-approve {
-          background: rgba(16,185,129,0.1);
-          color: #10b981;
-        }
-
-        .btn-approve:hover {
-          background: #10b981;
-          color: white;
-        }
-
-        .btn-reject {
-          background: rgba(239,68,68,0.1);
-          color: #ef4444;
-        }
-
-        .btn-reject:hover {
-          background: #ef4444;
-          color: white;
-        }
+        .btn-approve { background: rgba(16,185,129,0.1); color: #10b981; }
+        .btn-approve:hover { background: #10b981; color: white; }
+        .btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .btn-reject:hover { background: #ef4444; color: white; }
 
         .status-badge {
           display: inline-flex;
@@ -1118,12 +1132,7 @@ export default function ContentModeration() {
           border-radius: 24px;
         }
 
-        .empty-state i {
-          font-size: 64px;
-          color: #cbd5e1;
-          margin-bottom: 16px;
-          display: block;
-        }
+        .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
 
         /* Modal Styles */
         .modal-overlay {
@@ -1145,29 +1154,27 @@ export default function ContentModeration() {
           background: white;
           border-radius: 28px;
           width: 90%;
-          max-width: 800px;
+          max-width: 900px;
           max-height: 85vh;
           overflow-y: auto;
           animation: slideUp 0.3s ease;
         }
 
-        .modal-container.modal-lg { max-width: 900px; }
-        .modal-container.modal-reject { max-width: 600px; }
+        .modal-container.modal-reject { max-width: 550px; }
 
         .modal-header {
-          padding: 24px 28px 20px;
+          padding: 24px;
           border-bottom: 1px solid #e9ecef;
           display: flex;
           justify-content: space-between;
           align-items: center;
+          position: sticky;
+          top: 0;
+          background: white;
+          z-index: 10;
         }
 
-        .modal-header-content {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-        }
-
+        .modal-header-content { display: flex; align-items: center; gap: 16px; }
         .modal-icon {
           width: 48px;
           height: 48px;
@@ -1179,7 +1186,6 @@ export default function ContentModeration() {
         }
 
         .modal-icon i { font-size: 24px; color: #667eea; }
-
         .modal-header h2 { font-size: 20px; margin: 0 0 4px 0; }
         .modal-header p { margin: 0; color: #6c757d; font-size: 13px; }
 
@@ -1190,105 +1196,88 @@ export default function ContentModeration() {
           border: none;
           border-radius: 50%;
           cursor: pointer;
-          transition: all 0.3s ease;
         }
 
         .modal-close:hover { background: #e9ecef; transform: rotate(90deg); }
 
-        .modal-body { padding: 28px; }
-        .modal-footer { padding: 16px 28px 28px; border-top: 1px solid #e9ecef; display: flex; justify-content: flex-end; gap: 12px; }
+        .modal-body { padding: 24px; }
 
-        .footer-actions { display: flex; gap: 12px; flex: 1; }
-
-        /* Detail Modal Styles */
-        .detail-images {
-          margin-bottom: 24px;
-        }
-
-        .detail-images h4 {
-          font-size: 14px;
+        /* Detail Sections */
+        .detail-section { margin-bottom: 28px; }
+        .detail-section h4 {
+          font-size: 15px;
           font-weight: 600;
           margin-bottom: 12px;
           display: flex;
           align-items: center;
           gap: 8px;
+          color: #1f2937;
         }
 
-        .detail-images-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-          gap: 12px;
+        .detail-section h4 i { color: #667eea; }
+
+        /* Image Gallery Section */
+        .detail-images-section { margin-bottom: 28px; }
+        .full-image-gallery {
+          background: #f8f9fa;
+          border-radius: 16px;
+          padding: 16px;
         }
 
-        .detail-image-item {
-          position: relative;
-          aspect-ratio: 1;
+        .gallery-main {
+          cursor: pointer;
+          margin-bottom: 12px;
           border-radius: 12px;
           overflow: hidden;
-          cursor: pointer;
-          border: 2px solid #e9ecef;
         }
 
-        .detail-image-item img {
+        .gallery-main img {
           width: 100%;
-          height: 100%;
-          object-fit: cover;
+          max-height: 400px;
+          object-fit: contain;
+          background: #1a1f2e;
         }
 
-        .detail-image-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.5);
+        .gallery-thumbnails {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+          gap: 8px;
+        }
+
+        .gallery-thumb {
+          cursor: pointer;
+          border-radius: 8px;
+          overflow: hidden;
+          border: 2px solid transparent;
+          transition: all 0.3s ease;
+        }
+
+        .gallery-thumb:hover { border-color: #667eea; transform: scale(1.05); }
+        .gallery-thumb img { width: 100%; height: 70px; object-fit: cover; }
+        .gallery-more {
+          background: rgba(0,0,0,0.7);
+          border-radius: 8px;
           display: flex;
           align-items: center;
           justify-content: center;
-          opacity: 0;
-          transition: opacity 0.3s ease;
           color: white;
-        }
-
-        .detail-image-item:hover .detail-image-overlay {
-          opacity: 1;
-        }
-
-        .detail-section {
-          margin-bottom: 24px;
-          padding-bottom: 20px;
-          border-bottom: 1px solid #e9ecef;
-        }
-
-        .detail-section:last-child {
-          border-bottom: none;
-        }
-
-        .detail-section h4 {
           font-size: 14px;
           font-weight: 600;
-          margin-bottom: 12px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
         }
 
-        .detail-section h4 i {
-          color: #667eea;
-        }
-
+        /* Author Info */
         .detail-author {
           display: flex;
           align-items: center;
-          gap: 16px;
-          padding: 16px;
+          gap: 20px;
+          padding: 20px;
           background: #f8f9fa;
           border-radius: 16px;
         }
 
         .detail-author-avatar {
-          width: 56px;
-          height: 56px;
+          width: 70px;
+          height: 70px;
           background: linear-gradient(135deg, #667eea, #764ba2);
           border-radius: 50%;
           display: flex;
@@ -1297,30 +1286,10 @@ export default function ContentModeration() {
           overflow: hidden;
         }
 
-        .detail-author-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .detail-author-avatar i {
-          font-size: 28px;
-          color: white;
-        }
-
-        .detail-author-name {
-          font-weight: 600;
-          font-size: 16px;
-          margin-bottom: 4px;
-        }
-
-        .detail-author-email,
-        .detail-author-phone,
-        .detail-author-location {
-          font-size: 12px;
-          color: #6c757d;
-          margin: 2px 0;
-        }
+        .detail-author-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .detail-author-avatar i { font-size: 32px; color: white; }
+        .detail-author-name { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+        .detail-author-email, .detail-author-phone, .detail-author-location { font-size: 13px; color: #6c757d; margin: 4px 0; display: flex; align-items: center; gap: 6px; }
 
         .detail-info-grid {
           display: grid;
@@ -1337,63 +1306,158 @@ export default function ContentModeration() {
           text-transform: uppercase;
         }
 
-        .detail-info-item code {
-          background: #f8f9fa;
-          padding: 4px 8px;
-          border-radius: 6px;
-          font-size: 12px;
-        }
-
+        .detail-info-item code { background: #f8f9fa; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
         .detail-title {
           font-size: 18px;
           font-weight: 600;
-          padding: 12px;
+          padding: 16px;
           background: #f8f9fa;
           border-radius: 12px;
         }
 
         .detail-content {
           background: #f8f9fa;
-          padding: 16px;
+          padding: 20px;
           border-radius: 12px;
-          line-height: 1.6;
+          line-height: 1.8;
           white-space: pre-wrap;
+          font-size: 14px;
         }
 
         .category-badge {
           display: inline-block;
-          padding: 6px 12px;
+          padding: 6px 14px;
           background: linear-gradient(135deg, #667eea, #764ba2);
           color: white;
           border-radius: 20px;
-          font-size: 12px;
-          margin-bottom: 8px;
-        }
-
-        .detail-rejection {
-          background: #fef3c7;
-          padding: 12px;
-          border-radius: 8px;
-          color: #92400e;
-        }
-
-        .detail-moderation {
-          background: #f8f9fa;
-          padding: 12px;
-          border-radius: 8px;
           font-size: 13px;
         }
 
-        .no-details {
-          text-align: center;
-          padding: 60px;
-          color: #9ca3af;
+        .category-description { margin-top: 8px; font-size: 13px; color: #6c757d; }
+        .detail-rejection { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
+        .detail-moderation { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+
+        /* Full Screen Gallery */
+        .full-gallery-modal {
+          position: relative;
+          width: 90vw;
+          height: 90vh;
+          background: #1a1f2e;
+          border-radius: 24px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }
 
-        .no-details i {
-          font-size: 48px;
-          margin-bottom: 16px;
-          display: block;
+        .gallery-close {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          width: 40px;
+          height: 40px;
+          background: rgba(255,255,255,0.2);
+          border: none;
+          border-radius: 50%;
+          color: white;
+          cursor: pointer;
+          z-index: 10;
+        }
+
+        .gallery-container {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+        }
+
+        .gallery-nav {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 48px;
+          height: 48px;
+          background: rgba(0,0,0,0.5);
+          border: none;
+          border-radius: 50%;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.3s ease;
+        }
+
+        .gallery-nav:hover:not(:disabled) { background: rgba(0,0,0,0.8); transform: translateY(-50%) scale(1.1); }
+        .gallery-nav.prev { left: 20px; }
+        .gallery-nav.next { right: 20px; }
+        .gallery-nav:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        .gallery-current {
+          max-width: 80%;
+          max-height: 70vh;
+          position: relative;
+        }
+
+        .gallery-current img {
+          max-width: 100%;
+          max-height: 70vh;
+          object-fit: contain;
+        }
+
+        .gallery-counter {
+          position: absolute;
+          bottom: -30px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(0,0,0,0.7);
+          padding: 4px 12px;
+          border-radius: 20px;
+          color: white;
+          font-size: 12px;
+        }
+
+        .gallery-thumbnails-bar {
+          height: 80px;
+          display: flex;
+          gap: 8px;
+          padding: 12px;
+          overflow-x: auto;
+          background: #0f1117;
+        }
+
+        .gallery-thumbnail {
+          width: 60px;
+          height: 60px;
+          border-radius: 8px;
+          overflow: hidden;
+          cursor: pointer;
+          border: 2px solid transparent;
+          transition: all 0.3s ease;
+        }
+
+        .gallery-thumbnail.active { border-color: #667eea; transform: scale(1.05); }
+        .gallery-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+
+        .gallery-actions {
+          position: absolute;
+          bottom: 100px;
+          right: 20px;
+          display: flex;
+          gap: 8px;
+        }
+
+        .gallery-actions button {
+          padding: 8px 16px;
+          background: rgba(0,0,0,0.7);
+          border: none;
+          border-radius: 8px;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
         }
 
         /* Quick Reasons */
@@ -1408,19 +1472,17 @@ export default function ContentModeration() {
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 12px 16px;
+          padding: 12px;
           background: #f8f9fa;
           border: 2px solid #e9ecef;
           border-radius: 12px;
           cursor: pointer;
-          transition: all 0.3s ease;
           position: relative;
         }
 
-        .quick-reason:hover { background: #e9ecef; transform: translateY(-2px); }
         .quick-reason.selected { background: #fef3c7; border-color: #f59e0b; }
         .quick-reason i { font-size: 18px; color: var(--reason-color); }
-        .quick-reason .check { position: absolute; right: 12px; top: 12px; color: #10b981; font-size: 16px; }
+        .quick-reason .check { position: absolute; right: 12px; top: 12px; color: #10b981; }
 
         .custom-reason { margin-top: 20px; }
         .custom-reason label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
@@ -1429,7 +1491,6 @@ export default function ContentModeration() {
           padding: 12px;
           border: 2px solid #e9ecef;
           border-radius: 12px;
-          font-size: 14px;
           resize: vertical;
         }
 
@@ -1445,126 +1506,50 @@ export default function ContentModeration() {
           color: #856404;
         }
 
-        /* Full Image Modal */
-        .full-image-modal {
-          position: relative;
-          max-width: 90vw;
-          max-height: 90vh;
-          background: #1a1f2e;
-          border-radius: 12px;
-          overflow: hidden;
-          animation: slideUp 0.3s ease;
-        }
-
-        .full-image-modal img {
-          max-width: 100%;
-          max-height: 85vh;
-          display: block;
-          margin: 0 auto;
-        }
-
-        .close-image {
-          position: absolute;
-          top: 16px;
-          right: 16px;
-          width: 40px;
-          height: 40px;
-          background: rgba(0,0,0,0.7);
-          border: none;
-          border-radius: 50%;
-          color: white;
-          cursor: pointer;
+        .modal-footer {
+          padding: 16px 24px;
+          border-top: 1px solid #e9ecef;
           display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.3s ease;
+          justify-content: flex-end;
+          gap: 12px;
+          background: white;
+          position: sticky;
+          bottom: 0;
         }
 
-        .close-image:hover { background: rgba(0,0,0,0.9); transform: rotate(90deg); }
+        .footer-actions { display: flex; gap: 12px; flex: 1; }
+        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; }
+        .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-danger { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
 
-        .image-actions {
-          position: absolute;
-          bottom: 16px;
-          right: 16px;
-        }
-
-        .image-actions button {
-          padding: 8px 16px;
-          background: rgba(0,0,0,0.7);
-          border: none;
-          border-radius: 8px;
-          color: white;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          transition: all 0.3s ease;
-        }
-
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-        }
-
-        .btn-approve-modal {
-          padding: 10px 24px;
-          background: #10b981;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .btn-reject-modal {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .btn-danger {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-        }
+        .loading-details { text-align: center; padding: 60px; }
+        .no-details { text-align: center; padding: 60px; color: #9ca3af; }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
-        @media (max-width: 1200px) {
-          .stats-grid { grid-template-columns: repeat(2, 1fr); }
-          .posts-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
-        }
-
         @media (max-width: 768px) {
           .moderation-container { padding: 0 16px; }
-          .hero-section { padding: 32px 24px; }
+          .hero-section { padding: 24px; }
           .hero-content { flex-direction: column; text-align: center; }
           .stats-grid { grid-template-columns: 1fr; }
           .filter-tabs { flex-wrap: wrap; }
           .filter-tab { flex: auto; }
           .posts-grid { grid-template-columns: 1fr; }
-          .detail-info-grid { grid-template-columns: 1fr; }
-          .detail-images-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
-          .quick-reasons { grid-template-columns: 1fr; }
+          .images-grid { flex-direction: column; height: auto; }
+          .main-image { width: 100%; height: 200px; }
+          .images-overlay { width: 100%; grid-template-columns: repeat(3, 1fr); }
           .detail-author { flex-direction: column; text-align: center; }
+          .detail-info-grid { grid-template-columns: 1fr; }
+          .quick-reasons { grid-template-columns: 1fr; }
           .footer-actions { flex-direction: column; }
           .btn-approve-modal, .btn-reject-modal { width: 100%; }
-          .post-card-footer { flex-direction: column; }
-          .action-buttons { width: 100%; }
+          .gallery-container { flex-direction: column; }
+          .gallery-nav { width: 36px; height: 36px; }
+          .gallery-current { max-width: 95%; }
+          .gallery-thumbnails-bar { height: 60px; }
+          .gallery-thumbnail { width: 50px; height: 50px; }
         }
       `}</style>
     </AdminLayout>
