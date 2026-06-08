@@ -137,7 +137,7 @@ export default function Advertisements() {
       setError(null)
       
       let query = supabase
-        .from('advertisements')
+        .from('mobile_advertisements')
         .select('*')
         .order('created_at', { ascending: false })
 
