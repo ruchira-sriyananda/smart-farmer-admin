@@ -17,6 +17,7 @@ export default function MobileUsers() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [banReason, setBanReason] = useState('')
+  const [tableColumns, setTableColumns] = useState([])
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -29,6 +30,7 @@ export default function MobileUsers() {
   })
 
   useEffect(() => {
+    checkTableColumns()
     fetchUsers()
     fetchStats()
     
@@ -45,6 +47,24 @@ export default function MobileUsers() {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  // Check what columns exist in the users table
+  const checkTableColumns = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .limit(1)
+
+      if (!error && data && data.length > 0) {
+        const columns = Object.keys(data[0])
+        console.log('Available columns:', columns)
+        setTableColumns(columns)
+      }
+    } catch (err) {
+      console.error('Error checking columns:', err)
+    }
+  }
 
   const fetchUsers = async () => {
     try {
@@ -69,8 +89,11 @@ export default function MobileUsers() {
         const processedUsers = data.map(user => ({
           ...user,
           role_name: user.roles?.role_name || 'USER',
+          // Set default values if columns don't exist
           status: user.status || 'active',
-          is_verified: user.is_verified || false
+          is_verified: user.is_verified || false,
+          ban_reason: user.ban_reason || null,
+          banned_at: user.banned_at || null
         }))
         setUsers(processedUsers)
       } else {
@@ -158,9 +181,18 @@ export default function MobileUsers() {
     setActionLoading(true)
     
     try {
+      // Build update data based on available columns
       const updateData = {
         status: 'banned',
         updated_at: new Date().toISOString()
+      }
+      
+      // Only add ban_reason if column exists
+      if (tableColumns.includes('ban_reason')) {
+        updateData.ban_reason = banReason
+      }
+      if (tableColumns.includes('banned_at')) {
+        updateData.banned_at = new Date().toISOString()
       }
       
       const { error } = await supabase
@@ -193,6 +225,10 @@ export default function MobileUsers() {
       const updateData = {
         status: 'active',
         updated_at: new Date().toISOString()
+      }
+      
+      if (tableColumns.includes('ban_reason')) {
+        updateData.ban_reason = null
       }
       
       const { error } = await supabase
@@ -284,6 +320,27 @@ export default function MobileUsers() {
           <div className="loading-spinner"></div>
           <p>Loading users...</p>
         </div>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+          }
+          .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e9ecef;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
@@ -438,7 +495,7 @@ export default function MobileUsers() {
                           {user.phone && <div><i className="bi bi-telephone"></i> {user.phone}</div>}
                           {user.is_verified && <span className="verified-badge"><i className="bi bi-check-circle-fill"></i> Verified</span>}
                         </div>
-                       </td>
+                      </td>
                       <td className="role-cell">{getRoleBadge(user.role_name)}</td>
                       <td className="status-cell">{getStatusBadge(user.status)}</td>
                       <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
@@ -529,6 +586,13 @@ export default function MobileUsers() {
                   <div><strong>Last Updated:</strong> {new Date(selectedUser.updated_at).toLocaleString()}</div>
                   <div><strong>Last Login:</strong> {selectedUser.last_login ? new Date(selectedUser.last_login).toLocaleString() : 'Never'}</div>
                 </div>
+                {selectedUser.ban_reason && (
+                  <div className="detail-section full-width">
+                    <h4><i className="bi bi-exclamation-triangle"></i> Ban Information</h4>
+                    <div><strong>Reason:</strong> {selectedUser.ban_reason}</div>
+                    {selectedUser.banned_at && <div><strong>Banned At:</strong> {new Date(selectedUser.banned_at).toLocaleString()}</div>}
+                  </div>
+                )}
                 {selectedUser.bio && (
                   <div className="detail-section full-width">
                     <h4><i className="bi bi-file-text"></i> Bio</h4>
@@ -602,26 +666,7 @@ export default function MobileUsers() {
       <style jsx>{`
         .users-container { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
 
-        /* Loading */
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          min-height: 400px;
-        }
-        .loading-spinner {
-          width: 48px;
-          height: 48px;
-          border: 3px solid #e9ecef;
-          border-top-color: #4f46e5;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Hero */
+        /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border-radius: 28px;
