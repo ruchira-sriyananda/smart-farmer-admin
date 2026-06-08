@@ -15,6 +15,7 @@ export default function MobileUsers() {
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showBanModal, setShowBanModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
+  const [profileImages, setProfileImages] = useState({})
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -43,25 +44,54 @@ export default function MobileUsers() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Helper function to get Supabase storage URL for profile images
+  const getProfileImageUrl = (imagePath) => {
+    if (!imagePath) return null
+    if (imagePath.startsWith('http')) return imagePath
+    const { data } = supabase.storage.from('profile-images').getPublicUrl(imagePath)
+    return data?.publicUrl || imagePath
+  }
+
   const fetchUsers = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      let query = supabase
+      // Simplified query - just get users without relationships
+      const { data, error } = await supabase
         .from('users')
-        .select(`
-          *,
-          user_profiles (*),
-          user_statistics (*)
-        `)
+        .select('*')
         .order('created_at', { ascending: false })
-
-      const { data, error } = await query
 
       if (error) throw error
 
-      setUsers(data || [])
+      // Process users to ensure consistent data structure
+      const processedUsers = (data || []).map(user => ({
+        ...user,
+        full_name: user.full_name || user.email?.split('@')[0] || 'User',
+        role: user.role || 'user',
+        status: user.status || 'active',
+        is_verified: user.is_verified || false,
+        profile_image: user.profile_image || null,
+        phone: user.phone || null,
+        location: user.location || null,
+        bio: user.bio || null,
+        ban_reason: user.ban_reason || null,
+        banned_at: user.banned_at || null,
+        last_login: user.last_login || null
+      }))
+      
+      setUsers(processedUsers)
+      
+      // Load profile images
+      const images = {}
+      for (const user of processedUsers) {
+        if (user.profile_image) {
+          images[user.user_id] = getProfileImageUrl(user.profile_image)
+        }
+      }
+      setProfileImages(images)
+      
     } catch (err) {
       console.error('Error fetching users:', err)
       setError(err.message)
@@ -249,27 +279,19 @@ export default function MobileUsers() {
           <div className="loading-spinner"></div>
           <p>Loading users...</p>
         </div>
-        <style jsx>{`
-          .loading-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 400px;
-          }
-          .loading-spinner {
-            width: 48px;
-            height: 48px;
-            border: 3px solid #e9ecef;
-            border-top-color: #4f46e5;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 16px;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+      </AdminLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <AdminLayout title="Mobile Users">
+        <div className="error-container">
+          <i className="bi bi-exclamation-triangle-fill"></i>
+          <h3>Error Loading Users</h3>
+          <p>{error}</p>
+          <button className="retry-btn" onClick={fetchUsers}>Retry</button>
+        </div>
       </AdminLayout>
     )
   }
@@ -302,86 +324,56 @@ export default function MobileUsers() {
         <div className="stats-wrapper">
           <div className="stats-grid">
             <div className="stat-card stat-total">
-              <div className="stat-icon">
-                <i className="bi bi-people"></i>
-              </div>
+              <div className="stat-icon"><i className="bi bi-people"></i></div>
               <div className="stat-info">
                 <span className="stat-label">Total Users</span>
-                <h3 className="stat-value">{stats.total}</h3>
+                <h3>{stats.total}</h3>
                 <span className="stat-trend">All registered users</span>
-              </div>
-              <div className="stat-bg-icon">
-                <i className="bi bi-people"></i>
               </div>
             </div>
 
             <div className="stat-card stat-active">
-              <div className="stat-icon">
-                <i className="bi bi-person-check"></i>
-              </div>
+              <div className="stat-icon"><i className="bi bi-person-check"></i></div>
               <div className="stat-info">
                 <span className="stat-label">Active Users</span>
-                <h3 className="stat-value text-success">{stats.active}</h3>
+                <h3 className="text-success">{stats.active}</h3>
                 <span className="stat-trend">{stats.total > 0 ? ((stats.active/stats.total)*100).toFixed(0) : 0}% of total</span>
-              </div>
-              <div className="stat-bg-icon">
-                <i className="bi bi-person-check"></i>
               </div>
             </div>
 
             <div className="stat-card stat-banned">
-              <div className="stat-icon">
-                <i className="bi bi-ban"></i>
-              </div>
+              <div className="stat-icon"><i className="bi bi-ban"></i></div>
               <div className="stat-info">
                 <span className="stat-label">Banned Users</span>
-                <h3 className="stat-value text-danger">{stats.banned}</h3>
+                <h3 className="text-danger">{stats.banned}</h3>
                 <span className="stat-trend">Restricted access</span>
-              </div>
-              <div className="stat-bg-icon">
-                <i className="bi bi-ban"></i>
               </div>
             </div>
 
             <div className="stat-card stat-farmers">
-              <div className="stat-icon">
-                <i className="bi bi-tree"></i>
-              </div>
+              <div className="stat-icon"><i className="bi bi-tree"></i></div>
               <div className="stat-info">
                 <span className="stat-label">Farmers</span>
-                <h3 className="stat-value text-info">{stats.farmers}</h3>
+                <h3 className="text-info">{stats.farmers}</h3>
                 <span className="stat-trend">Agricultural producers</span>
-              </div>
-              <div className="stat-bg-icon">
-                <i className="bi bi-tree"></i>
               </div>
             </div>
 
             <div className="stat-card stat-vendors">
-              <div className="stat-icon">
-                <i className="bi bi-shop"></i>
-              </div>
+              <div className="stat-icon"><i className="bi bi-shop"></i></div>
               <div className="stat-info">
                 <span className="stat-label">Vendors</span>
-                <h3 className="stat-value text-warning">{stats.vendors}</h3>
+                <h3 className="text-warning">{stats.vendors}</h3>
                 <span className="stat-trend">Product sellers</span>
-              </div>
-              <div className="stat-bg-icon">
-                <i className="bi bi-shop"></i>
               </div>
             </div>
 
             <div className="stat-card stat-new">
-              <div className="stat-icon">
-                <i className="bi bi-calendar-plus"></i>
-              </div>
+              <div className="stat-icon"><i className="bi bi-calendar-plus"></i></div>
               <div className="stat-info">
                 <span className="stat-label">New Today</span>
-                <h3 className="stat-value text-primary">{stats.newToday}</h3>
+                <h3 className="text-primary">{stats.newToday}</h3>
                 <span className="stat-trend">Joined in last 24h</span>
-              </div>
-              <div className="stat-bg-icon">
-                <i className="bi bi-calendar-plus"></i>
               </div>
             </div>
           </div>
@@ -443,130 +435,137 @@ export default function MobileUsers() {
         {/* Users Table */}
         {filteredUsers.length > 0 ? (
           <div className="users-table-container">
-            <table className="users-table">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Contact Info</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Joined</th>
-                  <th>Last Active</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredUsers.map((user) => (
-                  <tr key={user.user_id} className="user-row">
-                    <td className="user-cell">
-                      <div className="user-info">
-                        <div className="user-avatar">
-                          {user.profile_image ? (
-                            <img src={user.profile_image} alt={user.full_name} />
-                          ) : (
-                            <span>{user.full_name?.charAt(0) || 'U'}</span>
+            <div className="table-responsive">
+              <table className="users-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Contact Info</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Joined</th>
+                    <th>Last Active</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredUsers.map((user) => (
+                    <tr key={user.user_id} className="user-row">
+                      <td className="user-cell">
+                        <div className="user-info">
+                          <div className="user-avatar">
+                            {profileImages[user.user_id] ? (
+                              <img src={profileImages[user.user_id]} alt={user.full_name} />
+                            ) : (
+                              <span>{user.full_name?.charAt(0) || 'U'}</span>
+                            )}
+                          </div>
+                          <div className="user-details">
+                            <div className="user-name">{user.full_name}</div>
+                            <div className="user-id">ID: {user.user_id?.slice(0, 8)}...</div>
+                          </div>
+                        </div>
+                       </td>
+                      <td className="contact-cell">
+                        <div className="contact-info">
+                          <div className="contact-item">
+                            <i className="bi bi-envelope"></i>
+                            <span>{user.email || 'No email'}</span>
+                          </div>
+                          <div className="contact-item">
+                            <i className="bi bi-telephone"></i>
+                            <span>{user.phone || 'No phone'}</span>
+                          </div>
+                          {user.is_verified && (
+                            <div className="verified-badge">
+                              <i className="bi bi-check-circle-fill"></i> Verified
+                            </div>
                           )}
                         </div>
-                        <div className="user-details">
-                          <div className="user-name">{user.full_name || 'Unknown User'}</div>
-                          <div className="user-id">ID: {user.user_id?.slice(0, 8)}...</div>
+                      </td>
+                      <td className="role-cell">
+                        {getRoleBadge(user.role)}
+                      </td>
+                      <td className="status-cell">
+                        {getStatusBadge(user.status)}
+                        {user.ban_reason && (
+                          <div className="ban-reason-tooltip" title={user.ban_reason}>
+                            <i className="bi bi-info-circle"></i>
+                          </div>
+                        )}
+                      </td>
+                      <td className="date-cell">
+                        <div className="date-info">
+                          <i className="bi bi-calendar3"></i>
+                          {new Date(user.created_at).toLocaleDateString()}
                         </div>
-                      </div>
-                    </td>
-                    <td className="contact-cell">
-                      <div className="contact-info">
-                        <div className="contact-item">
-                          <i className="bi bi-envelope"></i>
-                          <span>{user.email || 'No email'}</span>
+                      </td>
+                      <td className="date-cell">
+                        <div className="date-info">
+                          <i className="bi bi-clock"></i>
+                          {user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}
                         </div>
-                        <div className="contact-item">
-                          <i className="bi bi-telephone"></i>
-                          <span>{user.phone || 'No phone'}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="role-cell">
-                      {getRoleBadge(user.role)}
-                    </td>
-                    <td className="status-cell">
-                      {getStatusBadge(user.status)}
-                      {user.ban_reason && (
-                        <div className="ban-reason-tooltip" title={user.ban_reason}>
-                          <i className="bi bi-info-circle"></i>
-                        </div>
-                      )}
-                    </td>
-                    <td className="date-cell">
-                      <div className="date-info">
-                        <i className="bi bi-calendar3"></i>
-                        {new Date(user.created_at).toLocaleDateString()}
-                      </div>
-                    </td>
-                    <td className="date-cell">
-                      <div className="date-info">
-                        <i className="bi bi-clock"></i>
-                        {user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}
-                      </div>
-                    </td>
-                    <td className="actions-cell">
-                      <div className="action-buttons">
-                        <button 
-                          className="action-btn view" 
-                          onClick={() => {
-                            setSelectedUser(user)
-                            setShowDetailsModal(true)
-                          }}
-                          title="View Details"
-                        >
-                          <i className="bi bi-eye"></i>
-                        </button>
-                        
-                        {user.status !== 'banned' ? (
+                      </td>
+                      <td className="actions-cell">
+                        <div className="action-buttons">
                           <button 
-                            className="action-btn ban" 
+                            className="action-btn view" 
                             onClick={() => {
                               setSelectedUser(user)
-                              setShowBanModal(true)
+                              setShowDetailsModal(true)
                             }}
-                            title="Ban User"
+                            title="View Details"
                           >
-                            <i className="bi bi-ban"></i>
+                            <i className="bi bi-eye"></i>
                           </button>
-                        ) : (
-                          <button 
-                            className="action-btn unban" 
-                            onClick={() => handleUnbanUser(user.user_id)}
+                          
+                          {user.status !== 'banned' ? (
+                            <button 
+                              className="action-btn ban" 
+                              onClick={() => {
+                                setSelectedUser(user)
+                                setShowBanModal(true)
+                              }}
+                              title="Ban User"
+                            >
+                              <i className="bi bi-ban"></i>
+                            </button>
+                          ) : (
+                            <button 
+                              className="action-btn unban" 
+                              onClick={() => handleUnbanUser(user.user_id)}
+                              disabled={actionLoading}
+                              title="Unban User"
+                            >
+                              <i className="bi bi-check-circle"></i>
+                            </button>
+                          )}
+                          
+                          <select 
+                            className="role-select"
+                            value={user.role}
+                            onChange={(e) => handleChangeRole(user.user_id, e.target.value)}
                             disabled={actionLoading}
-                            title="Unban User"
                           >
-                            <i className="bi bi-check-circle"></i>
+                            <option value="farmer">Farmer</option>
+                            <option value="vendor">Vendor</option>
+                          </select>
+                          
+                          <button 
+                            className="action-btn delete" 
+                            onClick={() => handleDeleteUser(user.user_id)}
+                            disabled={actionLoading}
+                            title="Delete User"
+                          >
+                            <i className="bi bi-trash"></i>
                           </button>
-                        )}
-                        
-                        <select 
-                          className="role-select"
-                          value={user.role}
-                          onChange={(e) => handleChangeRole(user.user_id, e.target.value)}
-                          disabled={actionLoading}
-                        >
-                          <option value="farmer">Farmer</option>
-                          <option value="vendor">Vendor</option>
-                        </select>
-                        
-                        <button 
-                          className="action-btn delete" 
-                          onClick={() => handleDeleteUser(user.user_id)}
-                          disabled={actionLoading}
-                          title="Delete User"
-                        >
-                          <i className="bi bi-trash"></i>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div className="empty-state">
@@ -608,14 +607,14 @@ export default function MobileUsers() {
             <div className="modal-body">
               <div className="user-profile-header">
                 <div className="user-avatar-large">
-                  {selectedUser.profile_image ? (
-                    <img src={selectedUser.profile_image} alt={selectedUser.full_name} />
+                  {profileImages[selectedUser.user_id] ? (
+                    <img src={profileImages[selectedUser.user_id]} alt={selectedUser.full_name} />
                   ) : (
                     <span>{selectedUser.full_name?.charAt(0) || 'U'}</span>
                   )}
                 </div>
                 <div className="user-profile-info">
-                  <h3>{selectedUser.full_name || 'Unknown User'}</h3>
+                  <h3>{selectedUser.full_name}</h3>
                   <div className="user-meta">
                     {getRoleBadge(selectedUser.role)}
                     {getStatusBadge(selectedUser.status)}
@@ -632,6 +631,11 @@ export default function MobileUsers() {
                   <div className="detail-item">
                     <label>Email Address</label>
                     <p>{selectedUser.email || 'Not provided'}</p>
+                    {selectedUser.is_verified && (
+                      <span className="verified-badge-sm">
+                        <i className="bi bi-check-circle-fill"></i> Verified
+                      </span>
+                    )}
                   </div>
                   <div className="detail-item">
                     <label>Phone Number</label>
@@ -711,8 +715,8 @@ export default function MobileUsers() {
             <div className="modal-body">
               <div className="ban-user-info">
                 <div className="user-avatar-small">
-                  {selectedUser.profile_image ? (
-                    <img src={selectedUser.profile_image} alt={selectedUser.full_name} />
+                  {profileImages[selectedUser.user_id] ? (
+                    <img src={profileImages[selectedUser.user_id]} alt={selectedUser.full_name} />
                   ) : (
                     <span>{selectedUser.full_name?.charAt(0) || 'U'}</span>
                   )}
@@ -767,6 +771,53 @@ export default function MobileUsers() {
           max-width: 1400px;
           margin: 0 auto;
           padding: 0 24px;
+        }
+
+        .loading-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 400px;
+        }
+
+        .loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid #e9ecef;
+          border-top-color: #4f46e5;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        .error-container {
+          text-align: center;
+          padding: 60px 20px;
+          background: white;
+          border-radius: 24px;
+          max-width: 500px;
+          margin: 40px auto;
+        }
+
+        .error-container i {
+          font-size: 48px;
+          color: #dc3545;
+          margin-bottom: 16px;
+        }
+
+        .retry-btn {
+          margin-top: 20px;
+          padding: 10px 24px;
+          background: #4f46e5;
+          color: white;
+          border: none;
+          border-radius: 12px;
+          cursor: pointer;
         }
 
         /* Hero Section */
@@ -872,8 +923,6 @@ export default function MobileUsers() {
           display: flex;
           align-items: center;
           gap: 16px;
-          position: relative;
-          overflow: hidden;
           transition: all 0.3s ease;
         }
 
@@ -890,7 +939,6 @@ export default function MobileUsers() {
           align-items: center;
           justify-content: center;
           font-size: 24px;
-          z-index: 1;
         }
 
         .stat-total .stat-icon { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
@@ -902,7 +950,6 @@ export default function MobileUsers() {
 
         .stat-info {
           flex: 1;
-          z-index: 1;
         }
 
         .stat-label {
@@ -912,7 +959,7 @@ export default function MobileUsers() {
           display: block;
         }
 
-        .stat-value {
+        .stat-info h3 {
           font-size: 28px;
           font-weight: 700;
           margin: 0;
@@ -928,14 +975,6 @@ export default function MobileUsers() {
         .stat-trend {
           font-size: 11px;
           color: #6c757d;
-        }
-
-        .stat-bg-icon {
-          position: absolute;
-          right: 16px;
-          bottom: 16px;
-          font-size: 70px;
-          opacity: 0.05;
         }
 
         /* Controls Bar */
@@ -1034,8 +1073,12 @@ export default function MobileUsers() {
         .users-table-container {
           background: white;
           border-radius: 20px;
-          overflow-x: auto;
+          overflow: hidden;
           box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+
+        .table-responsive {
+          overflow-x: auto;
         }
 
         .users-table {
@@ -1119,6 +1162,24 @@ export default function MobileUsers() {
         .contact-item i {
           font-size: 12px;
           color: #9ca3af;
+        }
+
+        .verified-badge {
+          font-size: 10px;
+          color: #10b981;
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          margin-top: 2px;
+        }
+
+        .verified-badge-sm {
+          font-size: 10px;
+          color: #10b981;
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          margin-left: 8px;
         }
 
         /* Role Badges */
@@ -1389,6 +1450,7 @@ export default function MobileUsers() {
           display: flex;
           gap: 8px;
           margin-bottom: 8px;
+          flex-wrap: wrap;
         }
 
         .user-id-full {
@@ -1643,6 +1705,14 @@ export default function MobileUsers() {
 
           .user-meta {
             justify-content: center;
+          }
+
+          .action-buttons {
+            flex-wrap: wrap;
+          }
+
+          .action-btn span {
+            display: none;
           }
         }
       `}</style>
