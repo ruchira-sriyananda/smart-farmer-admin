@@ -111,48 +111,14 @@ export default function ContentModeration() {
             const userId = postDataResult.user_id || post.user_id
             
             if (userId) {
-              const { data: userResult, error: userError } = await supabase
+              const { data: userResult } = await supabase
                 .from('users')
                 .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
                 .eq('user_id', userId)
                 .maybeSingle()
               
-              if (userError) {
-                console.error(`Error fetching user ${userId}:`, userError)
-              }
-              
               if (userResult) {
                 userData = userResult
-              } else {
-                const { data: adminResult } = await supabase
-                  .from('admin_users')
-                  .select('admin_id, full_name, email')
-                  .eq('admin_id', userId)
-                  .maybeSingle()
-                
-                if (adminResult) {
-                  userData = {
-                    user_id: adminResult.admin_id,
-                    full_name: adminResult.full_name,
-                    email: adminResult.email,
-                    profile_image: null,
-                    phone: null,
-                    location: null,
-                    district: null
-                  }
-                }
-              }
-            }
-            
-            if (!userData && userId) {
-              userData = {
-                user_id: userId,
-                full_name: `User (${userId.slice(0, 8)}...)`,
-                email: 'Email not available',
-                profile_image: null,
-                phone: null,
-                location: null,
-                district: null
               }
             }
           } else {
@@ -170,9 +136,9 @@ export default function ContentModeration() {
           post_created_at: postData?.created_at || post.created_at,
           user: userData,
           author_name: userData?.full_name || 'Mobile User',
-          author_email: userData?.email || 'Email not available',
-          author_phone: userData?.phone || null,
-          author_location: userData?.location || userData?.district || null,
+          author_email: userData?.email || '',
+          author_phone: userData?.phone || '',
+          author_location: userData?.location || userData?.district || '',
           user_id: userData?.user_id || post.user_id,
           post_exists: postExists
         }
@@ -238,36 +204,14 @@ export default function ContentModeration() {
           const userId = postData.user_id
           
           if (userId) {
-            const { data: userResult, error: userError } = await supabase
+            const { data: userResult } = await supabase
               .from('users')
               .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
               .eq('user_id', userId)
               .maybeSingle()
             
-            if (userError) {
-              console.error('Error fetching user:', userError)
-            }
-            
             if (userResult) {
               userData = userResult
-            } else {
-              const { data: adminResult } = await supabase
-                .from('admin_users')
-                .select('admin_id, full_name, email')
-                .eq('admin_id', userId)
-                .maybeSingle()
-              
-              if (adminResult) {
-                userData = {
-                  user_id: adminResult.admin_id,
-                  full_name: adminResult.full_name,
-                  email: adminResult.email,
-                  profile_image: null,
-                  phone: null,
-                  location: null,
-                  district: null
-                }
-              }
             }
           }
           
@@ -482,17 +426,12 @@ export default function ContentModeration() {
                       )}
                     </div>
                     <div className="post-user-details">
-                      <div className="post-user-name">
-                        {post.author_name}
-                        {post.user_id && (
-                          <span className="user-id-tooltip" title={`User ID: ${post.user_id}`}>
-                            <i className="bi bi-info-circle"></i>
-                          </span>
-                        )}
-                      </div>
-                      <div className="post-user-email">
-                        <i className="bi bi-envelope"></i> {post.author_email}
-                      </div>
+                      <div className="post-user-name">{post.author_name}</div>
+                      {post.author_email && (
+                        <div className="post-user-email">
+                          <i className="bi bi-envelope"></i> {post.author_email}
+                        </div>
+                      )}
                       {post.author_phone && (
                         <div className="post-user-phone">
                           <i className="bi bi-telephone"></i> {post.author_phone}
@@ -635,15 +574,12 @@ export default function ContentModeration() {
                         )}
                       </div>
                       <div className="detail-author-info">
-                        <div className="detail-author-name">
-                          {postDetails.user?.full_name || 'Mobile User'}
-                          {postDetails.user?.user_id && (
-                            <span className="user-id-badge">ID: {postDetails.user.user_id.slice(0, 8)}...</span>
-                          )}
-                        </div>
-                        <div className="detail-author-email">
-                          <i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}
-                        </div>
+                        <div className="detail-author-name">{postDetails.user?.full_name || 'Mobile User'}</div>
+                        {postDetails.user?.email && (
+                          <div className="detail-author-email">
+                            <i className="bi bi-envelope"></i> {postDetails.user.email}
+                          </div>
+                        )}
                         {postDetails.user?.phone && (
                           <div className="detail-author-phone">
                             <i className="bi bi-telephone"></i> {postDetails.user.phone}
@@ -1046,9 +982,15 @@ export default function ContentModeration() {
         .post-user-avatar i { font-size: 20px; color: white; }
 
         .post-user-details { flex: 1; }
-        .post-user-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-        .user-id-tooltip { cursor: help; font-size: 11px; color: #9ca3af; }
-        .post-user-email, .post-user-phone, .post-user-location { font-size: 10px; color: #9ca3af; margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+        .post-user-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+        .post-user-email, .post-user-phone, .post-user-location { 
+          font-size: 10px; 
+          color: #9ca3af; 
+          margin-top: 2px; 
+          display: flex; 
+          align-items: center; 
+          gap: 4px; 
+        }
         .post-user-email i, .post-user-phone i, .post-user-location i { font-size: 9px; }
 
         .post-images-gallery { padding: 12px; background: #fafbfc; }
@@ -1291,16 +1233,7 @@ export default function ContentModeration() {
         }
         .detail-author-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .detail-author-avatar i { font-size: 32px; color: white; }
-        .detail-author-name { font-weight: 700; font-size: 18px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .user-id-badge {
-          display: inline-block;
-          font-size: 10px;
-          background: #e9ecef;
-          padding: 2px 6px;
-          border-radius: 12px;
-          color: #6c757d;
-          font-weight: normal;
-        }
+        .detail-author-name { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
         .detail-author-email, .detail-author-phone, .detail-author-location, .detail-author-district, .detail-author-joined {
           font-size: 13px;
           color: #6c757d;
