@@ -396,7 +396,7 @@ export default function Advertisements() {
       }
 
       const { error } = await supabase
-        .from('mobile_advertisements')
+        .from('advertisements')
         .insert(adData)
 
       if (error) throw error
