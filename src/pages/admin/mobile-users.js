@@ -27,8 +27,10 @@ export default function MobileUsers() {
     verified: 0,
     pending: 0
   })
+  const [debugInfo, setDebugInfo] = useState(null)
 
   useEffect(() => {
+    checkAndInsertSampleData()
     fetchUsers()
     fetchStats()
     
@@ -47,17 +49,138 @@ export default function MobileUsers() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Function to check and insert sample data
+  const checkAndInsertSampleData = async () => {
+    try {
+      // Check if users table has any data
+      const { count, error: countError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+
+      if (countError) {
+        console.error('Error checking users:', countError)
+        setDebugInfo({ error: countError.message })
+        return
+      }
+
+      console.log('Current user count:', count)
+
+      if (count === 0) {
+        console.log('No users found, inserting sample data...')
+        await insertSampleUsers()
+      }
+    } catch (err) {
+      console.error('Error checking sample data:', err)
+    }
+  }
+
+  // Insert sample users
+  const insertSampleUsers = async () => {
+    try {
+      // First, get role IDs from roles table
+      const { data: roles, error: rolesError } = await supabase
+        .from('roles')
+        .select('role_id, role_name')
+
+      if (rolesError) {
+        console.error('Error fetching roles:', rolesError)
+        return
+      }
+
+      console.log('Available roles:', roles)
+
+      const roleMap = {}
+      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+
+      const sampleUsers = [
+        {
+          full_name: 'John Farmer',
+          email: 'john.farmer@example.com',
+          phone: '+94 77 123 4567',
+          role_id: roleMap['FARMER'] || null,
+          status: 'active',
+          is_verified: true,
+          location: 'Kandy, Sri Lanka',
+          bio: 'Organic farmer specializing in vegetables',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        {
+          full_name: 'Sarah Vendor',
+          email: 'sarah.vendor@example.com',
+          phone: '+94 77 234 5678',
+          role_id: roleMap['VENDOR'] || null,
+          status: 'active',
+          is_verified: true,
+          location: 'Colombo, Sri Lanka',
+          bio: 'Fresh produce supplier',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        {
+          full_name: 'Mike Thompson',
+          email: 'mike.thompson@example.com',
+          phone: '+94 77 345 6789',
+          role_id: roleMap['FARMER'] || null,
+          status: 'banned',
+          is_verified: false,
+          location: 'Galle, Sri Lanka',
+          bio: 'Rice farmer',
+          ban_reason: 'Violation of community guidelines',
+          banned_at: new Date().toISOString(),
+          created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        {
+          full_name: 'Emma Wilson',
+          email: 'emma.wilson@example.com',
+          phone: '+94 77 456 7890',
+          role_id: roleMap['VENDOR'] || null,
+          status: 'active',
+          is_verified: true,
+          location: 'Kandy, Sri Lanka',
+          bio: 'Organic fertilizer supplier',
+          created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        {
+          full_name: 'David Perera',
+          email: 'david.perera@example.com',
+          phone: '+94 77 567 8901',
+          role_id: roleMap['FARMER'] || null,
+          status: 'pending',
+          is_verified: false,
+          location: 'Kurunegala, Sri Lanka',
+          bio: 'Spice farmer',
+          created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      ]
+
+      for (const user of sampleUsers) {
+        const { error } = await supabase
+          .from('users')
+          .insert(user)
+        
+        if (error) {
+          console.error('Error inserting sample user:', error)
+        } else {
+          console.log('Inserted user:', user.full_name)
+        }
+      }
+
+      console.log('Sample users inserted successfully')
+    } catch (err) {
+      console.error('Error inserting sample users:', err)
+    }
+  }
+
   const fetchUsers = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      // Get role IDs for filtering
-      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
-      const roleMap = {}
-      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
-
-      // Fetch all users with their role names
+      // Fetch all users with their role names using join
       const { data, error } = await supabase
         .from('users')
         .select(`
@@ -71,11 +194,12 @@ export default function MobileUsers() {
 
       if (error) throw error
 
+      console.log('Fetched users:', data?.length || 0)
+
       if (data && data.length > 0) {
-        // Process users with role name
         const processedUsers = data.map(user => ({
           ...user,
-          role_name: user.roles?.role_name || 'user'
+          role_name: user.roles?.role_name || 'USER'
         }))
         setUsers(processedUsers)
       } else {
@@ -91,23 +215,27 @@ export default function MobileUsers() {
 
   const fetchStats = async () => {
     try {
-      // Get role IDs for accurate counting
-      const { data: roles } = await supabase.from('roles').select('role_id, role_name')
-      const roleMap = {}
-      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
-
-      // Get all users for stats
+      // Fetch all users for stats
       const { data, error } = await supabase
         .from('users')
         .select('status, is_verified, created_at, role_id')
 
       if (error) throw error
 
+      console.log('Stats data:', data?.length || 0)
+
       if (data && data.length > 0) {
         const today = new Date()
         today.setHours(0, 0, 0, 0)
         
-        // Calculate real counts
+        // Get role IDs for accurate counting
+        const { data: roles } = await supabase
+          .from('roles')
+          .select('role_id, role_name')
+        
+        const roleMap = {}
+        roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+        
         const total = data.length
         const active = data.filter(u => u.status === 'active').length
         const banned = data.filter(u => u.status === 'banned').length
@@ -320,8 +448,19 @@ export default function MobileUsers() {
           <i className="bi bi-exclamation-triangle-fill"></i>
           <h3>Error Loading Users</h3>
           <p>{error}</p>
+          {debugInfo && (
+            <div className="debug-info">
+              <details>
+                <summary>Debug Information</summary>
+                <pre>{JSON.stringify(debugInfo, null, 2)}</pre>
+              </details>
+            </div>
+          )}
           <button className="retry-btn" onClick={() => { fetchUsers(); fetchStats(); }}>
             Retry
+          </button>
+          <button className="insert-btn" onClick={insertSampleUsers}>
+            Insert Sample Users
           </button>
         </div>
         <style jsx>{`
@@ -330,22 +469,37 @@ export default function MobileUsers() {
             padding: 60px 20px;
             background: white;
             border-radius: 24px;
-            max-width: 500px;
+            max-width: 600px;
             margin: 40px auto;
           }
           .error-container i {
             font-size: 48px;
-            color: #dc3545;
+            color: #f59e0b;
             margin-bottom: 16px;
           }
-          .retry-btn {
+          .debug-info {
+            margin: 20px 0;
+            text-align: left;
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+          }
+          .retry-btn, .insert-btn {
             margin-top: 20px;
             padding: 10px 24px;
-            background: #4f46e5;
-            color: white;
             border: none;
             border-radius: 12px;
             cursor: pointer;
+            margin-right: 12px;
+          }
+          .retry-btn {
+            background: #4f46e5;
+            color: white;
+          }
+          .insert-btn {
+            background: #10b981;
+            color: white;
           }
         `}</style>
       </AdminLayout>
@@ -540,11 +694,14 @@ export default function MobileUsers() {
             <button className="btn-clear-filters" onClick={() => { setSearchTerm(''); setFilterStatus('all'); setFilterRole('all'); }}>
               Clear Filters
             </button>
+            <button className="btn-insert-sample" onClick={insertSampleUsers}>
+              Insert Sample Users
+            </button>
           </div>
         )}
       </div>
 
-      {/* User Details Modal */}
+      {/* User Details Modal - Same as before */}
       {showDetailsModal && selectedUser && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -765,7 +922,9 @@ export default function MobileUsers() {
 
         .empty-state { text-align: center; padding: 80px 20px; background: white; border-radius: 24px; }
         .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; }
-        .btn-clear-filters { margin-top: 20px; padding: 12px 32px; background: linear-gradient(135deg, #667eea, #764ba2); border: none; border-radius: 12px; color: white; cursor: pointer; }
+        .btn-clear-filters, .btn-insert-sample { margin-top: 20px; padding: 12px 32px; border: none; border-radius: 12px; color: white; cursor: pointer; margin-right: 12px; }
+        .btn-clear-filters { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .btn-insert-sample { background: #10b981; }
 
         /* Modal Styles */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
