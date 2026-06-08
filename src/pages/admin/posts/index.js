@@ -103,12 +103,11 @@ export default function ContentModeration() {
             imageUrls = [getImageUrl(post.image_url)]
           }
           
-          // Fetch user details - Try multiple methods to get user info
+          // Fetch user details - Get the actual user who created the post
           let userData = null
-          const userId = post.user_id || postData?.user_id
+          const userId = postData?.user_id
           
           if (userId) {
-            // Try to get from users table
             const { data: userFromUsers } = await supabase
               .from('users')
               .select('user_id, full_name, email, profile_image, phone, location')
@@ -117,17 +116,24 @@ export default function ContentModeration() {
             
             if (userFromUsers) {
               userData = userFromUsers
-            } else {
-              // If not found, use default but with meaningful info
-              userData = { 
-                full_name: 'Mobile User', 
-                email: 'Email not available',
-                profile_image: null,
-                phone: null,
-                location: null
-              }
             }
-          } else {
+          }
+          
+          // If still no user data, try to get from content_moderation table
+          if (!userData && post.user_id) {
+            const { data: userFromModeration } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location')
+              .eq('user_id', post.user_id)
+              .single()
+            
+            if (userFromModeration) {
+              userData = userFromModeration
+            }
+          }
+          
+          // Default user data if nothing found
+          if (!userData) {
             userData = { 
               full_name: 'Mobile User', 
               email: 'Email not available',
@@ -145,8 +151,7 @@ export default function ContentModeration() {
             post_created_at: postData?.created_at || post.created_at,
             images: imageUrls, 
             image_count: imageUrls.length,
-            user: userData,
-            post_user_id: userId
+            user: userData
           }
         }
         return { ...post, images: [], image_count: 0, user: null, title: '', content: '', description: '' }
@@ -186,6 +191,9 @@ export default function ContentModeration() {
       let details = null
       
       if (contentType === 'POST') {
+        // First get the moderation record to get user_id
+        const moderationPost = posts.find(p => p.content_id === contentId)
+        
         // Fetch post with user details
         const { data, error } = await supabase
           .from('posts')
@@ -226,11 +234,22 @@ export default function ContentModeration() {
             if (url) imageUrls.push(url)
           }
           
+          // Get user data from moderation if not in posts
+          let userData = data.users
+          if (!userData && moderationPost?.user_id) {
+            const { data: userFromUsers } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location')
+              .eq('user_id', moderationPost.user_id)
+              .single()
+            userData = userFromUsers
+          }
+          
           details = { 
             ...data, 
             images: imageUrls, 
             image_count: imageUrls.length,
-            user: data.users
+            user: userData || data.users
           }
         }
       }
@@ -492,7 +511,7 @@ export default function ContentModeration() {
       </div>
 
       {/* Details Modal */}
-      {showDetailsModal && selectedPost && postDetails && (
+      {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
@@ -516,7 +535,7 @@ export default function ContentModeration() {
                   <div className="spinner-border text-primary"></div>
                   <p>Loading content details...</p>
                 </div>
-              ) : (
+              ) : postDetails ? (
                 <>
                   {/* Post Images */}
                   {postDetails.images && postDetails.images.length > 0 && (
@@ -606,9 +625,6 @@ export default function ContentModeration() {
                       <h4><i className="bi bi-tag"></i> Category</h4>
                       <div className="detail-category">
                         <span className="category-badge">{postDetails.post_categories.category_name}</span>
-                        {postDetails.post_categories.description && (
-                          <p className="category-desc">{postDetails.post_categories.description}</p>
-                        )}
                       </div>
                     </div>
                   )}
@@ -632,6 +648,11 @@ export default function ContentModeration() {
                     </div>
                   )}
                 </>
+              ) : (
+                <div className="no-details">
+                  <i className="bi bi-file-text"></i>
+                  <p>No details available for this content</p>
+                </div>
               )}
             </div>
             
@@ -1361,6 +1382,18 @@ export default function ContentModeration() {
           padding: 12px;
           border-radius: 8px;
           font-size: 13px;
+        }
+
+        .no-details {
+          text-align: center;
+          padding: 60px;
+          color: #9ca3af;
+        }
+
+        .no-details i {
+          font-size: 48px;
+          margin-bottom: 16px;
+          display: block;
         }
 
         /* Quick Reasons */
