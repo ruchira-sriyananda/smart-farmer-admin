@@ -19,7 +19,6 @@ export default function ContentModeration() {
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [showFullImage, setShowFullImage] = useState(false)
   const [selectedImage, setSelectedImage] = useState(null)
-  const [imageLoading, setImageLoading] = useState({})
   const [imageErrors, setImageErrors] = useState({})
   const [stats, setStats] = useState({
     total: 0,
@@ -79,8 +78,7 @@ export default function ContentModeration() {
       if (error) throw error
 
       // Fetch images for each post
-      const postsWithImages = []
-      for (const post of (data || [])) {
+      const postsWithImages = await Promise.all((data || []).map(async (post) => {
         if (post.content_type === 'POST') {
           // Fetch images from post_images table
           const { data: images, error: imagesError } = await supabase
@@ -88,21 +86,18 @@ export default function ContentModeration() {
             .select('image_id, image_url, image_order')
             .eq('post_id', post.content_id)
             .order('image_order', { ascending: true })
-          
+
+          let imageUrls = []
           if (!imagesError && images && images.length > 0) {
-            postsWithImages.push({ 
-              ...post, 
-              images: images.map(img => getImageUrl(img.image_url)),
-              image_count: images.length,
-              display_image: getImageUrl(images[0].image_url)
-            })
-          } else {
-            postsWithImages.push({ ...post, images: [], image_count: 0, display_image: null })
+            imageUrls = images.map(img => getImageUrl(img.image_url))
+          } else if (post.image_url) {
+            imageUrls = [getImageUrl(post.image_url)]
           }
-        } else {
-          postsWithImages.push({ ...post, images: [], image_count: 0, display_image: null })
+
+          return { ...post, images: imageUrls, image_count: imageUrls.length }
         }
-      }
+        return { ...post, images: [], image_count: 0 }
+      }))
 
       setPosts(postsWithImages || [])
     } catch (err) {
@@ -146,10 +141,13 @@ export default function ContentModeration() {
               user_id,
               full_name,
               email,
-              profile_image
+              profile_image,
+              phone,
+              location
             ),
             post_categories!posts_category_id_fkey (
-              category_name
+              category_name,
+              description
             )
           `)
           .eq('post_id', contentId)
@@ -159,19 +157,16 @@ export default function ContentModeration() {
           // Fetch images
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
-            .select('image_id, image_url, image_order')
+            .select('image_url, image_order')
             .eq('post_id', contentId)
             .order('image_order', { ascending: true })
           
           if (!imagesError && images && images.length > 0) {
             data.images = images.map(img => getImageUrl(img.image_url))
-            data.image_count = images.length
           } else if (data.image_url) {
             data.images = [getImageUrl(data.image_url)]
-            data.image_count = 1
           } else {
             data.images = []
-            data.image_count = 0
           }
           details = data
         }
@@ -188,7 +183,8 @@ export default function ContentModeration() {
             ),
             posts!comments_post_id_fkey (
               post_id,
-              title
+              title,
+              content
             )
           `)
           .eq('comment_id', contentId)
@@ -227,13 +223,14 @@ export default function ContentModeration() {
     setActionLoading(false)
 
     if (!error) {
-      fetchPosts()
-      fetchStats()
+      await fetchPosts()
+      await fetchStats()
       setShowRejectModal(false)
       setRejectReason('')
       setCustomReason('')
       setSelectedPost(null)
       if (showDetailsModal) setShowDetailsModal(false)
+      alert(`Content ${status.toLowerCase()} successfully!`)
     } else {
       alert(`Error updating status: ${error.message}`)
     }
@@ -291,6 +288,27 @@ export default function ContentModeration() {
           <div className="loading-spinner"></div>
           <p>Loading content...</p>
         </div>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+          }
+          .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e9ecef;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
@@ -314,48 +332,44 @@ export default function ContentModeration() {
         {/* Hero Section */}
         <div className="hero-section">
           <div className="hero-content">
-            <div className="hero-text">
-              <div className="hero-icon">
-                <i className="bi bi-shield-check"></i>
-              </div>
-              <div>
-                <h1 className="hero-title">Content Moderation</h1>
-                <p className="hero-subtitle">Review and manage user-generated content before publication</p>
-              </div>
+            <div className="hero-icon">
+              <i className="bi bi-shield-check"></i>
+            </div>
+            <div>
+              <h1 className="hero-title">Content Moderation</h1>
+              <p className="hero-subtitle">Review and manage user-generated content before publication</p>
             </div>
           </div>
         </div>
 
         {/* Stats Cards */}
-        <div className="stats-wrapper">
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-icon total"><i className="bi bi-files"></i></div>
-              <div className="stat-info">
-                <span className="stat-label">Total Content</span>
-                <h3>{stats.total}</h3>
-              </div>
+        <div className="stats-grid">
+          <div className="stat-card total">
+            <div className="stat-icon"><i className="bi bi-files"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Total Content</span>
+              <h2 className="stat-value">{stats.total}</h2>
             </div>
-            <div className="stat-card">
-              <div className="stat-icon pending"><i className="bi bi-hourglass-split"></i></div>
-              <div className="stat-info">
-                <span className="stat-label">Pending</span>
-                <h3 className="text-warning">{stats.pending}</h3>
-              </div>
+          </div>
+          <div className="stat-card pending">
+            <div className="stat-icon"><i className="bi bi-hourglass-split"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Pending Review</span>
+              <h2 className="stat-value text-warning">{stats.pending}</h2>
             </div>
-            <div className="stat-card">
-              <div className="stat-icon approved"><i className="bi bi-check-circle"></i></div>
-              <div className="stat-info">
-                <span className="stat-label">Approved</span>
-                <h3 className="text-success">{stats.approved}</h3>
-              </div>
+          </div>
+          <div className="stat-card approved">
+            <div className="stat-icon"><i className="bi bi-check-circle"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Approved</span>
+              <h2 className="stat-value text-success">{stats.approved}</h2>
             </div>
-            <div className="stat-card">
-              <div className="stat-icon rejected"><i className="bi bi-x-circle"></i></div>
-              <div className="stat-info">
-                <span className="stat-label">Rejected</span>
-                <h3 className="text-danger">{stats.rejected}</h3>
-              </div>
+          </div>
+          <div className="stat-card rejected">
+            <div className="stat-icon"><i className="bi bi-x-circle"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Rejected</span>
+              <h2 className="stat-value text-danger">{stats.rejected}</h2>
             </div>
           </div>
         </div>
@@ -380,47 +394,51 @@ export default function ContentModeration() {
           </button>
         </div>
 
-        {/* Content Cards Grid */}
-        <div className="content-grid">
+        {/* Posts Grid */}
+        <div className="posts-grid">
           {posts.length > 0 ? (
             posts.map((post, index) => (
-              <div key={post.moderation_id} className="content-card" style={{ animationDelay: `${index * 0.05}s` }}>
-                {post.display_image && (
-                  <div className="content-image">
-                    <img src={post.display_image} alt={post.title} />
-                    {post.image_count > 1 && (
-                      <div className="image-count-badge">
-                        <i className="bi bi-images"></i> {post.image_count}
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className="content-card-header">
-                  <div className="content-type">
+              <div key={post.moderation_id} className="post-card" style={{ animationDelay: `${index * 0.05}s` }}>
+                <div className="post-card-header">
+                  <div className="post-type">
                     <i className={`bi ${getContentTypeIcon(post.content_type)}`}></i>
-                    <span>{post.content_type || 'CONTENT'}</span>
+                    <span>{post.content_type}</span>
                   </div>
                   {getStatusBadge(post.moderation_status)}
                 </div>
                 
-                <div className="content-card-body">
-                  <div className="content-id">
-                    <i className="bi bi-hash"></i> {post.content_id?.slice(0, 12)}...
+                {/* Image Preview */}
+                {post.images && post.images.length > 0 && (
+                  <div className="post-image-preview" onClick={() => openFullImage(post.images[0])}>
+                    <img src={post.images[0]} alt="Preview" />
+                    {post.images.length > 1 && (
+                      <div className="image-count-badge">
+                        <i className="bi bi-images"></i> +{post.images.length - 1}
+                      </div>
+                    )}
                   </div>
-                  <div className="content-date">
-                    <i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleString()}
+                )}
+                
+                <div className="post-card-body">
+                  <div className="post-meta">
+                    <span className="post-id">
+                      <i className="bi bi-hash"></i> {post.content_id?.slice(0, 12)}...
+                    </span>
+                    <span className="post-date">
+                      <i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}
+                    </span>
                   </div>
                   {post.moderation_reason && (
-                    <div className="rejection-reason">
+                    <div className="rejection-badge">
                       <i className="bi bi-exclamation-triangle-fill"></i>
                       <span>{post.moderation_reason}</span>
                     </div>
                   )}
                 </div>
                 
-                <div className="content-card-footer">
+                <div className="post-card-footer">
                   {post.moderation_status === 'PENDING' ? (
-                    <div className="action-buttons">
+                    <div className="action-group">
                       <button className="btn-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
                         <i className="bi bi-check-lg"></i> Approve
                       </button>
@@ -431,7 +449,7 @@ export default function ContentModeration() {
                         <i className="bi bi-x-lg"></i> Reject
                       </button>
                       <button className="btn-view" onClick={() => viewDetails(post)}>
-                        <i className="bi bi-eye"></i> View
+                        <i className="bi bi-eye"></i> Details
                       </button>
                     </div>
                   ) : (
@@ -467,7 +485,7 @@ export default function ContentModeration() {
                 </div>
                 <div>
                   <h2>Content Details</h2>
-                  <p>Review content before making a decision</p>
+                  <p>Complete information about this content</p>
                 </div>
               </div>
               <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
@@ -483,99 +501,125 @@ export default function ContentModeration() {
                 </div>
               ) : (
                 <>
-                  {/* Author Info */}
-                  {postDetails && (
-                    <div className="author-section">
-                      <div className="author-avatar">
-                        {postDetails.users?.profile_image ? (
-                          <img src={getImageUrl(postDetails.users.profile_image)} alt={postDetails.users.full_name} />
-                        ) : (
-                          <i className="bi bi-person-circle"></i>
-                        )}
+                  {/* Content Info Section */}
+                  <div className="info-section">
+                    <h4><i className="bi bi-info-circle"></i> Content Information</h4>
+                    <div className="info-grid">
+                      <div className="info-item">
+                        <label>Content ID</label>
+                        <code>{selectedPost.content_id}</code>
                       </div>
-                      <div className="author-info">
-                        <h4>{postDetails.users?.full_name || 'Unknown User'}</h4>
-                        <p>{postDetails.users?.email || 'No email'}</p>
-                        <span className="author-id">ID: {postDetails.users?.user_id?.slice(0, 8)}...</span>
+                      <div className="info-item">
+                        <label>Content Type</label>
+                        <span className="badge-type">{selectedPost.content_type}</span>
+                      </div>
+                      <div className="info-item">
+                        <label>Status</label>
+                        {getStatusBadge(selectedPost.moderation_status)}
+                      </div>
+                      <div className="info-item">
+                        <label>Created At</label>
+                        <span>{new Date(selectedPost.created_at).toLocaleString()}</span>
+                      </div>
+                      <div className="info-item">
+                        <label>Submitted By</label>
+                        <span>Mobile User</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Author Information */}
+                  {postDetails && postDetails.users && (
+                    <div className="info-section">
+                      <h4><i className="bi bi-person-badge"></i> Author Information</h4>
+                      <div className="author-card">
+                        <div className="author-avatar">
+                          {postDetails.users.profile_image ? (
+                            <img src={getImageUrl(postDetails.users.profile_image)} alt={postDetails.users.full_name} />
+                          ) : (
+                            <i className="bi bi-person-circle"></i>
+                          )}
+                        </div>
+                        <div className="author-details">
+                          <div className="author-name">{postDetails.users.full_name || 'Unknown User'}</div>
+                          <div className="author-email">{postDetails.users.email || 'No email'}</div>
+                          {postDetails.users.phone && (
+                            <div className="author-phone"><i className="bi bi-telephone"></i> {postDetails.users.phone}</div>
+                          )}
+                          {postDetails.users.location && (
+                            <div className="author-location"><i className="bi bi-geo-alt"></i> {postDetails.users.location}</div>
+                          )}
+                          <div className="author-id">ID: {postDetails.users.user_id?.slice(0, 8)}...</div>
+                        </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Content Section */}
-                  <div className="content-section">
-                    <div className="section-title">
-                      <i className="bi bi-file-text"></i>
-                      <h3>Content</h3>
-                    </div>
-                    
-                    {selectedPost.content_type === 'POST' && postDetails && (
-                      <div className="post-content-view">
-                        <div className="post-title">{postDetails.title}</div>
-                        <div className="post-body">{postDetails.content}</div>
-                        
-                        {/* Images Gallery */}
-                        {postDetails.images && postDetails.images.length > 0 && (
-                          <div className="images-gallery">
-                            <div className="gallery-title">
-                              <i className="bi bi-images"></i>
-                              Attached Images ({postDetails.images.length})
-                            </div>
-                            <div className="gallery-grid">
-                              {postDetails.images.map((img, idx) => (
-                                <div 
-                                  key={idx} 
-                                  className="gallery-item"
-                                  onClick={() => openFullImage(img)}
-                                >
-                                  <img src={img} alt={`Image ${idx + 1}`} />
-                                  <div className="gallery-overlay">
-                                    <i className="bi bi-zoom-in"></i>
-                                  </div>
+                  {/* Post Content */}
+                  {selectedPost.content_type === 'POST' && postDetails && (
+                    <div className="info-section">
+                      <h4><i className="bi bi-file-text"></i> Post Content</h4>
+                      <div className="post-title">{postDetails.title}</div>
+                      <div className="post-content">{postDetails.content}</div>
+                      
+                      {/* Images Gallery */}
+                      {postDetails.images && postDetails.images.length > 0 && (
+                        <div className="images-section">
+                          <h5><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h5>
+                          <div className="images-grid">
+                            {postDetails.images.map((img, idx) => (
+                              <div 
+                                key={idx} 
+                                className="image-card"
+                                onClick={() => openFullImage(img)}
+                              >
+                                <img src={img} alt={`Image ${idx + 1}`} />
+                                <div className="image-overlay">
+                                  <i className="bi bi-zoom-in"></i>
+                                  <span>Click to enlarge</span>
                                 </div>
-                              ))}
-                            </div>
+                              </div>
+                            ))}
                           </div>
-                        )}
-                        
-                        {postDetails.post_categories?.category_name && (
-                          <div className="post-category">
-                            <i className="bi bi-tag"></i> Category: {postDetails.post_categories.category_name}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {selectedPost.content_type === 'COMMENT' && postDetails && (
-                      <div className="comment-content-view">
-                        <div className="comment-post-info">
-                          <i className="bi bi-file-post"></i>
-                          On Post: {postDetails.posts?.title || 'Unknown Post'}
                         </div>
-                        <div className="comment-text">{postDetails.comment_text}</div>
+                      )}
+
+                      {postDetails.post_categories?.category_name && (
+                        <div className="post-category">
+                          <i className="bi bi-tag"></i> Category: {postDetails.post_categories.category_name}
+                          {postDetails.post_categories.description && (
+                            <span className="category-desc"> - {postDetails.post_categories.description}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Comment Content */}
+                  {selectedPost.content_type === 'COMMENT' && postDetails && (
+                    <div className="info-section">
+                      <h4><i className="bi bi-chat"></i> Comment Content</h4>
+                      <div className="comment-post-info">
+                        <i className="bi bi-file-post"></i> On Post: <strong>{postDetails.posts?.title || 'Unknown Post'}</strong>
                       </div>
-                    )}
-                  </div>
+                      <div className="comment-text">{postDetails.comment_text}</div>
+                    </div>
+                  )}
 
                   {/* Moderation Info */}
                   {selectedPost.moderation_reason && (
-                    <div className="moderation-section rejection">
-                      <div className="section-title">
-                        <i className="bi bi-exclamation-triangle"></i>
-                        <h3>Rejection Reason</h3>
-                      </div>
-                      <div className="rejection-reason-box">{selectedPost.moderation_reason}</div>
+                    <div className="info-section rejection">
+                      <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
+                      <div className="rejection-box">{selectedPost.moderation_reason}</div>
                     </div>
                   )}
 
                   {selectedPost.reviewed_by_admin && (
-                    <div className="moderation-section info">
-                      <div className="section-title">
-                        <i className="bi bi-person-check"></i>
-                        <h3>Moderation Info</h3>
-                      </div>
-                      <div className="moderation-details">
-                        <div>Reviewed by: {selectedPost.reviewed_by_admin?.full_name}</div>
-                        <div>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
+                    <div className="info-section">
+                      <h4><i className="bi bi-person-check"></i> Moderation Information</h4>
+                      <div className="moderation-info">
+                        <div><i className="bi bi-person"></i> Reviewed by: <strong>{selectedPost.reviewed_by_admin?.full_name}</strong></div>
+                        <div><i className="bi bi-clock"></i> Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
                       </div>
                     </div>
                   )}
@@ -700,7 +744,7 @@ export default function ContentModeration() {
         /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 28px;
+          border-radius: 24px;
           padding: 40px 32px;
           margin-bottom: 32px;
           position: relative;
@@ -724,21 +768,18 @@ export default function ContentModeration() {
         }
 
         .hero-content {
-          position: relative;
-          z-index: 1;
-        }
-
-        .hero-text {
           display: flex;
           align-items: center;
           gap: 20px;
+          position: relative;
+          z-index: 1;
         }
 
         .hero-icon {
           width: 60px;
           height: 60px;
           background: rgba(255,255,255,0.2);
-          border-radius: 20px;
+          border-radius: 16px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -762,15 +803,12 @@ export default function ContentModeration() {
           margin: 0;
         }
 
-        /* Stats Section */
-        .stats-wrapper {
-          margin-bottom: 32px;
-        }
-
+        /* Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
           gap: 20px;
+          margin-bottom: 28px;
         }
 
         .stat-card {
@@ -781,7 +819,6 @@ export default function ContentModeration() {
           align-items: center;
           gap: 16px;
           transition: all 0.3s ease;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
 
         .stat-card:hover {
@@ -799,10 +836,10 @@ export default function ContentModeration() {
           font-size: 24px;
         }
 
-        .stat-icon.total { background: linear-gradient(135deg, #667eea20, #764ba220); color: #667eea; }
-        .stat-icon.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
-        .stat-icon.approved { background: rgba(16,185,129,0.1); color: #10b981; }
-        .stat-icon.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .stat-card.total .stat-icon { background: linear-gradient(135deg, #667eea20, #764ba220); color: #667eea; }
+        .stat-card.pending .stat-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .stat-card.approved .stat-icon { background: rgba(16,185,129,0.1); color: #10b981; }
+        .stat-card.rejected .stat-icon { background: rgba(239,68,68,0.1); color: #ef4444; }
 
         .stat-info {
           flex: 1;
@@ -811,11 +848,11 @@ export default function ContentModeration() {
         .stat-label {
           font-size: 13px;
           color: #6c757d;
-          margin-bottom: 4px;
           display: block;
+          margin-bottom: 4px;
         }
 
-        .stat-info h3 {
+        .stat-value {
           font-size: 28px;
           font-weight: 700;
           margin: 0;
@@ -873,14 +910,14 @@ export default function ContentModeration() {
           background: rgba(255,255,255,0.2);
         }
 
-        /* Content Grid */
-        .content-grid {
+        /* Posts Grid */
+        .posts-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
           gap: 24px;
         }
 
-        .content-card {
+        .post-card {
           background: white;
           border-radius: 20px;
           overflow: hidden;
@@ -900,25 +937,45 @@ export default function ContentModeration() {
           }
         }
 
-        .content-card:hover {
+        .post-card:hover {
           transform: translateY(-4px);
           box-shadow: 0 12px 24px rgba(0,0,0,0.1);
         }
 
-        .content-image {
+        .post-card-header {
+          padding: 16px 20px;
+          background: #f8f9fa;
+          border-bottom: 1px solid #e9ecef;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .post-type {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6c757d;
+        }
+
+        /* Image Preview */
+        .post-image-preview {
           position: relative;
           height: 180px;
           overflow: hidden;
+          cursor: pointer;
         }
 
-        .content-image img {
+        .post-image-preview img {
           width: 100%;
           height: 100%;
           object-fit: cover;
           transition: transform 0.3s ease;
         }
 
-        .content-card:hover .content-image img {
+        .post-card:hover .post-image-preview img {
           transform: scale(1.05);
         }
 
@@ -936,24 +993,7 @@ export default function ContentModeration() {
           gap: 4px;
         }
 
-        .content-card-header {
-          padding: 16px 20px;
-          background: #f8f9fa;
-          border-bottom: 1px solid #e9ecef;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .content-type {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          color: #6c757d;
-        }
-
+        /* Status Badges */
         .status-badge {
           display: inline-flex;
           align-items: center;
@@ -968,25 +1008,24 @@ export default function ContentModeration() {
         .status-badge.approved { background: rgba(16,185,129,0.1); color: #10b981; }
         .status-badge.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
 
-        .content-card-body {
+        .post-card-body {
           padding: 16px 20px;
           border-bottom: 1px solid #e9ecef;
         }
 
-        .content-id {
-          font-family: monospace;
-          font-size: 12px;
-          color: #6c757d;
-          margin-bottom: 8px;
-        }
-
-        .content-date {
+        .post-meta {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 12px;
           font-size: 11px;
           color: #9ca3af;
-          margin-bottom: 8px;
         }
 
-        .rejection-reason {
+        .post-meta i {
+          margin-right: 4px;
+        }
+
+        .rejection-badge {
           background: #fef3c7;
           padding: 8px 12px;
           border-radius: 8px;
@@ -997,11 +1036,11 @@ export default function ContentModeration() {
           gap: 6px;
         }
 
-        .content-card-footer {
+        .post-card-footer {
           padding: 16px 20px;
         }
 
-        .action-buttons {
+        .action-group {
           display: flex;
           gap: 12px;
         }
@@ -1053,29 +1092,6 @@ export default function ContentModeration() {
           display: block;
         }
 
-        /* Loading Container */
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          min-height: 400px;
-        }
-
-        .loading-spinner {
-          width: 48px;
-          height: 48px;
-          border: 3px solid #e9ecef;
-          border-top-color: #4f46e5;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-
         /* Modal Styles */
         .modal-overlay {
           position: fixed;
@@ -1094,7 +1110,7 @@ export default function ContentModeration() {
 
         .modal-container {
           background: white;
-          border-radius: 28px;
+          border-radius: 24px;
           width: 90%;
           max-width: 700px;
           max-height: 85vh;
@@ -1116,11 +1132,16 @@ export default function ContentModeration() {
           display: flex;
           justify-content: space-between;
           align-items: center;
+          position: sticky;
+          top: 0;
+          background: white;
+          z-index: 10;
         }
 
-        .modal-header.warning .modal-icon {
-          background: rgba(245,158,11,0.1);
-          color: #f59e0b;
+        .modal-header-content {
+          display: flex;
+          align-items: center;
+          gap: 16px;
         }
 
         .modal-icon {
@@ -1174,22 +1195,80 @@ export default function ContentModeration() {
           display: flex;
           justify-content: flex-end;
           gap: 12px;
+          position: sticky;
+          bottom: 0;
+          background: white;
         }
 
-        /* Author Section */
-        .author-section {
+        .footer-actions {
+          display: flex;
+          gap: 12px;
+          flex: 1;
+        }
+
+        /* Info Sections */
+        .info-section {
+          margin-bottom: 28px;
+        }
+
+        .info-section h4 {
+          font-size: 16px;
+          font-weight: 600;
+          margin-bottom: 16px;
+          color: #1f2937;
           display: flex;
           align-items: center;
-          gap: 20px;
-          padding: 20px;
+          gap: 8px;
+        }
+
+        .info-section h4 i {
+          color: #667eea;
+        }
+
+        .info-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
           background: #f8f9fa;
-          border-radius: 20px;
-          margin-bottom: 24px;
+          padding: 16px;
+          border-radius: 16px;
+        }
+
+        .info-item label {
+          display: block;
+          font-size: 11px;
+          font-weight: 600;
+          color: #6c757d;
+          margin-bottom: 4px;
+          text-transform: uppercase;
+        }
+
+        .info-item code {
+          background: #e9ecef;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 11px;
+        }
+
+        .badge-type {
+          background: #e9ecef;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+        }
+
+        /* Author Card */
+        .author-card {
+          display: flex;
+          gap: 16px;
+          padding: 16px;
+          background: #f8f9fa;
+          border-radius: 16px;
         }
 
         .author-avatar {
-          width: 64px;
-          height: 64px;
+          width: 60px;
+          height: 60px;
           background: linear-gradient(135deg, #667eea, #764ba2);
           border-radius: 50%;
           display: flex;
@@ -1198,94 +1277,90 @@ export default function ContentModeration() {
           overflow: hidden;
         }
 
-        .author-avatar i {
-          font-size: 32px;
-          color: white;
-        }
-
         .author-avatar img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
 
-        .author-info h4 {
-          margin: 0 0 4px 0;
-          font-size: 16px;
-          font-weight: 600;
+        .author-avatar i {
+          font-size: 32px;
+          color: white;
         }
 
-        .author-info p {
-          margin: 0 0 2px 0;
-          font-size: 13px;
+        .author-details {
+          flex: 1;
+        }
+
+        .author-name {
+          font-weight: 600;
+          font-size: 16px;
+          color: #1f2937;
+          margin-bottom: 4px;
+        }
+
+        .author-email, .author-phone, .author-location {
+          font-size: 12px;
           color: #6c757d;
+          margin-bottom: 2px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
 
         .author-id {
-          font-size: 11px;
+          font-size: 10px;
           color: #9ca3af;
           font-family: monospace;
+          margin-top: 4px;
         }
 
-        /* Content Section */
-        .content-section {
-          margin-bottom: 24px;
-        }
-
-        .section-title {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 16px;
-          padding-bottom: 8px;
-          border-bottom: 2px solid #e9ecef;
-        }
-
-        .section-title i {
-          font-size: 18px;
-          color: #667eea;
-        }
-
-        .section-title h3 {
-          margin: 0;
-          font-size: 16px;
-          font-weight: 600;
-        }
-
+        /* Post Content */
         .post-title {
           font-size: 18px;
           font-weight: 600;
           margin-bottom: 12px;
+          color: #1f2937;
         }
 
-        .post-body {
+        .post-content {
           background: #f8f9fa;
           padding: 16px;
           border-radius: 12px;
+          margin-bottom: 16px;
           line-height: 1.6;
           color: #4b5563;
-          margin-bottom: 16px;
         }
 
-        /* Images Gallery */
-        .images-gallery {
-          margin-top: 20px;
+        .post-category {
+          font-size: 12px;
+          color: #6c757d;
+          margin-top: 12px;
         }
 
-        .gallery-title {
-          font-size: 13px;
+        .category-desc {
+          color: #9ca3af;
+        }
+
+        /* Images Section */
+        .images-section {
+          margin-top: 16px;
+        }
+
+        .images-section h5 {
+          font-size: 14px;
           font-weight: 600;
           margin-bottom: 12px;
           color: #374151;
         }
 
-        .gallery-grid {
+        .images-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
           gap: 12px;
         }
 
-        .gallery-item {
+        .image-card {
           position: relative;
           aspect-ratio: 1;
           border-radius: 12px;
@@ -1295,45 +1370,55 @@ export default function ContentModeration() {
           transition: all 0.3s ease;
         }
 
-        .gallery-item:hover {
+        .image-card:hover {
           transform: scale(1.02);
           border-color: #667eea;
           box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
 
-        .gallery-item img {
+        .image-card img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
 
-        .gallery-overlay {
+        .image-overlay {
           position: absolute;
           top: 0;
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0,0,0,0.6);
+          background: rgba(0,0,0,0.7);
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
+          gap: 8px;
           opacity: 0;
           transition: opacity 0.3s ease;
-        }
-
-        .gallery-item:hover .gallery-overlay {
-          opacity: 1;
-        }
-
-        .gallery-overlay i {
-          font-size: 24px;
           color: white;
         }
 
-        .post-category {
-          margin-top: 12px;
-          font-size: 12px;
-          color: #6c757d;
+        .image-card:hover .image-overlay {
+          opacity: 1;
+        }
+
+        .image-overlay i {
+          font-size: 24px;
+        }
+
+        .image-overlay span {
+          font-size: 11px;
+        }
+
+        /* Comment Styles */
+        .comment-post-info {
+          background: #e7f1ff;
+          padding: 12px;
+          border-radius: 8px;
+          margin-bottom: 12px;
+          font-size: 13px;
+          color: #0d6efd;
         }
 
         .comment-text {
@@ -1344,38 +1429,95 @@ export default function ContentModeration() {
           color: #4b5563;
         }
 
-        .comment-post-info {
-          background: #e7f1ff;
-          padding: 10px 12px;
-          border-radius: 8px;
-          margin-bottom: 12px;
-          font-size: 13px;
-          color: #0d6efd;
-        }
-
-        /* Moderation Section */
-        .moderation-section {
-          margin-bottom: 20px;
-          padding: 16px;
-          border-radius: 16px;
-        }
-
-        .moderation-section.rejection {
+        /* Rejection Box */
+        .rejection-box {
           background: #fef3c7;
-        }
-
-        .moderation-section.info {
-          background: #f8f9fa;
-        }
-
-        .rejection-reason-box {
+          padding: 12px;
+          border-radius: 8px;
           color: #92400e;
-          font-size: 14px;
         }
 
-        .moderation-details {
+        .moderation-info {
+          background: #f8f9fa;
+          padding: 12px;
+          border-radius: 8px;
           font-size: 13px;
-          color: #4b5563;
+          display: flex;
+          gap: 16px;
+          flex-wrap: wrap;
+        }
+
+        .moderation-info div {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        /* Full Image Modal */
+        .full-image-modal {
+          position: relative;
+          max-width: 90vw;
+          max-height: 90vh;
+          background: #1a1f2e;
+          border-radius: 12px;
+          overflow: hidden;
+          animation: slideUp 0.3s ease;
+        }
+
+        .full-image-modal img {
+          max-width: 100%;
+          max-height: 85vh;
+          display: block;
+          margin: 0 auto;
+        }
+
+        .close-image {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          width: 40px;
+          height: 40px;
+          background: rgba(0,0,0,0.7);
+          border: none;
+          border-radius: 50%;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.3s ease;
+          z-index: 10;
+        }
+
+        .close-image:hover {
+          background: rgba(0,0,0,0.9);
+          transform: rotate(90deg);
+        }
+
+        .image-actions {
+          position: absolute;
+          bottom: 16px;
+          right: 16px;
+          z-index: 10;
+        }
+
+        .image-actions button {
+          padding: 8px 16px;
+          background: rgba(0,0,0,0.7);
+          border: none;
+          border-radius: 8px;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          transition: all 0.3s ease;
+        }
+
+        .image-actions button:hover {
+          background: rgba(0,0,0,0.9);
+          transform: translateY(-2px);
         }
 
         /* Quick Reasons */
@@ -1446,6 +1588,7 @@ export default function ContentModeration() {
         .custom-reason textarea:focus {
           outline: none;
           border-color: #667eea;
+          box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
         }
 
         .warning-note {
@@ -1460,71 +1603,6 @@ export default function ContentModeration() {
           color: #856404;
         }
 
-        /* Full Image Modal */
-        .full-image-modal {
-          position: relative;
-          max-width: 90vw;
-          max-height: 90vh;
-          background: #1a1f2e;
-          border-radius: 12px;
-          overflow: hidden;
-          animation: slideUp 0.3s ease;
-        }
-
-        .full-image-modal img {
-          max-width: 100%;
-          max-height: 85vh;
-          display: block;
-          margin: 0 auto;
-        }
-
-        .close-image {
-          position: absolute;
-          top: 16px;
-          right: 16px;
-          width: 40px;
-          height: 40px;
-          background: rgba(0,0,0,0.7);
-          border: none;
-          border-radius: 50%;
-          color: white;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.3s ease;
-        }
-
-        .close-image:hover {
-          background: rgba(0,0,0,0.9);
-          transform: rotate(90deg);
-        }
-
-        .image-actions {
-          position: absolute;
-          bottom: 16px;
-          right: 16px;
-        }
-
-        .image-actions button {
-          padding: 8px 16px;
-          background: rgba(0,0,0,0.7);
-          border: none;
-          border-radius: 8px;
-          color: white;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          transition: all 0.3s ease;
-        }
-
-        .image-actions button:hover {
-          background: rgba(0,0,0,0.9);
-        }
-
-        /* Button Styles */
         .btn-secondary {
           padding: 10px 20px;
           background: #f8f9fa;
@@ -1532,16 +1610,6 @@ export default function ContentModeration() {
           border-radius: 10px;
           cursor: pointer;
           font-weight: 500;
-        }
-
-        .btn-primary {
-          padding: 10px 24px;
-          background: #4f46e5;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
         }
 
         .btn-danger {
@@ -1554,6 +1622,11 @@ export default function ContentModeration() {
           cursor: pointer;
         }
 
+        .btn-danger:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
         .btn-approve-modal {
           padding: 10px 24px;
           background: #10b981;
@@ -1562,6 +1635,7 @@ export default function ContentModeration() {
           color: white;
           font-weight: 600;
           cursor: pointer;
+          flex: 1;
         }
 
         .btn-reject-modal {
@@ -1572,21 +1646,12 @@ export default function ContentModeration() {
           color: white;
           font-weight: 600;
           cursor: pointer;
-        }
-
-        .btn-primary:disabled, .btn-danger:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .footer-actions {
-          display: flex;
-          gap: 12px;
+          flex: 1;
         }
 
         .loading-details {
           text-align: center;
-          padding: 60px;
+          padding: 60px 20px;
         }
 
         @keyframes fadeIn {
@@ -1605,28 +1670,9 @@ export default function ContentModeration() {
           }
         }
 
-        /* Responsive */
-        @media (max-width: 1200px) {
-          .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .content-grid {
-            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-          }
-        }
-
         @media (max-width: 768px) {
           .moderation-container {
             padding: 0 16px;
-          }
-
-          .hero-section {
-            padding: 32px 24px;
-          }
-
-          .hero-text {
-            flex-direction: column;
-            text-align: center;
           }
 
           .stats-grid {
@@ -1641,11 +1687,28 @@ export default function ContentModeration() {
             flex: auto;
           }
 
-          .content-grid {
+          .posts-grid {
             grid-template-columns: 1fr;
           }
 
-          .gallery-grid {
+          .info-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .author-card {
+            flex-direction: column;
+            text-align: center;
+          }
+
+          .author-details {
+            text-align: center;
+          }
+
+          .author-email, .author-phone, .author-location {
+            justify-content: center;
+          }
+
+          .images-grid {
             grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
           }
 
@@ -1653,17 +1716,8 @@ export default function ContentModeration() {
             grid-template-columns: 1fr;
           }
 
-          .author-section {
-            flex-direction: column;
-            text-align: center;
-          }
-
           .footer-actions {
             flex-direction: column;
-          }
-
-          .btn-approve-modal, .btn-reject-modal {
-            width: 100%;
           }
         }
       `}</style>
