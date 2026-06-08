@@ -368,7 +368,8 @@ const handleTestEmail = async () => {
                 <p>Basic configuration for your application</p>
               </div>
 
-            
+              <div className="settings-grid">
+                
 
                 <div className="setting-card">
                   <label className="setting-label">
