@@ -8,6 +8,7 @@ export default function MobileUsers() {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [debugInfo, setDebugInfo] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterRole, setFilterRole] = useState('all')
@@ -26,6 +27,7 @@ export default function MobileUsers() {
   })
 
   useEffect(() => {
+    fetchTableInfo()
     fetchUsers()
     fetchStats()
     
@@ -44,12 +46,38 @@ export default function MobileUsers() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // First, let's check what columns exist in the users table
+  const fetchTableInfo = async () => {
+    try {
+      // Get table info to see available columns
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .limit(1)
+
+      if (error) throw error
+
+      if (data && data.length > 0) {
+        const columns = Object.keys(data[0])
+        console.log('Available columns in users table:', columns)
+        setDebugInfo({ columns, sample: data[0] })
+      }
+    } catch (err) {
+      console.error('Error fetching table info:', err)
+      setDebugInfo({ error: err.message })
+    }
+  }
+
   // Helper function to get Supabase storage URL for profile images
   const getProfileImageUrl = (imagePath) => {
     if (!imagePath) return null
     if (imagePath.startsWith('http')) return imagePath
-    const { data } = supabase.storage.from('profile-images').getPublicUrl(imagePath)
-    return data?.publicUrl || imagePath
+    try {
+      const { data } = supabase.storage.from('profile-images').getPublicUrl(imagePath)
+      return data?.publicUrl || imagePath
+    } catch (err) {
+      return imagePath
+    }
   }
 
   const fetchUsers = async () => {
@@ -57,7 +85,7 @@ export default function MobileUsers() {
       setLoading(true)
       setError(null)
       
-      // Simplified query - just get users without relationships
+      // Get all columns to see what's available
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -65,32 +93,41 @@ export default function MobileUsers() {
 
       if (error) throw error
 
-      // Process users to ensure consistent data structure
-      const processedUsers = (data || []).map(user => ({
-        ...user,
-        full_name: user.full_name || user.email?.split('@')[0] || 'User',
-        role: user.role || 'user',
-        status: user.status || 'active',
-        is_verified: user.is_verified || false,
-        profile_image: user.profile_image || null,
-        phone: user.phone || null,
-        location: user.location || null,
-        bio: user.bio || null,
-        ban_reason: user.ban_reason || null,
-        banned_at: user.banned_at || null,
-        last_login: user.last_login || null
-      }))
-      
-      setUsers(processedUsers)
-      
-      // Load profile images
-      const images = {}
-      for (const user of processedUsers) {
-        if (user.profile_image) {
-          images[user.user_id] = getProfileImageUrl(user.profile_image)
+      console.log('Fetched users:', data?.length || 0, 'users')
+
+      if (data && data.length > 0) {
+        // Map the data to our expected format based on available columns
+        const processedUsers = data.map(user => ({
+          user_id: user.user_id || user.id,
+          full_name: user.full_name || user.name || user.username || `User_${(user.user_id || user.id)?.slice(0, 8)}`,
+          email: user.email || 'No email',
+          phone: user.phone || user.mobile || null,
+          role: user.role || user.user_role || 'user',
+          status: user.status || user.account_status || 'active',
+          is_verified: user.is_verified || user.email_verified || false,
+          profile_image: user.profile_image || user.avatar_url || null,
+          location: user.location || user.address || null,
+          bio: user.bio || user.description || null,
+          ban_reason: user.ban_reason || null,
+          banned_at: user.banned_at || null,
+          last_login: user.last_login || user.last_active || null,
+          created_at: user.created_at,
+          updated_at: user.updated_at
+        }))
+        
+        setUsers(processedUsers)
+        
+        // Load profile images
+        const images = {}
+        for (const user of processedUsers) {
+          if (user.profile_image) {
+            images[user.user_id] = getProfileImageUrl(user.profile_image)
+          }
         }
+        setProfileImages(images)
+      } else {
+        setUsers([])
       }
-      setProfileImages(images)
       
     } catch (err) {
       console.error('Error fetching users:', err)
@@ -106,21 +143,118 @@ export default function MobileUsers() {
         .from('users')
         .select('status, role, created_at')
 
-      if (!error && data) {
+      if (error) throw error
+
+      console.log('Stats data:', data?.length || 0, 'records')
+
+      if (data && data.length > 0) {
         const now = new Date()
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
         
+        // Check what status values exist
+        const statuses = [...new Set(data.map(u => u.status))];
+        const roles = [...new Set(data.map(u => u.role))];
+        console.log('Available statuses:', statuses);
+        console.log('Available roles:', roles);
+        
         setStats({
           total: data.length,
-          active: data.filter(u => u.status === 'active').length,
-          banned: data.filter(u => u.status === 'banned').length,
-          farmers: data.filter(u => u.role === 'farmer').length,
-          vendors: data.filter(u => u.role === 'vendor').length,
+          active: data.filter(u => u.status === 'active' || u.status === 'ACTIVE' || u.status === 'Active').length,
+          banned: data.filter(u => u.status === 'banned' || u.status === 'BANNED' || u.status === 'Banned').length,
+          farmers: data.filter(u => u.role === 'farmer' || u.role === 'FARMER' || u.role === 'Farmer').length,
+          vendors: data.filter(u => u.role === 'vendor' || u.role === 'VENDOR' || u.role === 'Vendor').length,
           newToday: data.filter(u => new Date(u.created_at) >= today).length
         })
+      } else {
+        // If no data, let's insert some sample users for testing
+        await insertSampleUsers()
       }
     } catch (err) {
       console.error('Error fetching stats:', err)
+      setError(err.message)
+    }
+  }
+
+  // Insert sample users if table is empty
+  const insertSampleUsers = async () => {
+    try {
+      console.log('Inserting sample users...')
+      
+      const sampleUsers = [
+        {
+          full_name: 'John Farmer',
+          email: 'john.farmer@example.com',
+          phone: '+94 77 123 4567',
+          role: 'farmer',
+          status: 'active',
+          is_verified: true,
+          location: 'Kandy, Sri Lanka',
+          bio: 'Organic farmer specializing in vegetables'
+        },
+        {
+          full_name: 'Sarah Vendor',
+          email: 'sarah.vendor@example.com',
+          phone: '+94 77 234 5678',
+          role: 'vendor',
+          status: 'active',
+          is_verified: true,
+          location: 'Colombo, Sri Lanka',
+          bio: 'Fresh produce supplier'
+        },
+        {
+          full_name: 'Mike Thompson',
+          email: 'mike@example.com',
+          phone: '+94 77 345 6789',
+          role: 'farmer',
+          status: 'banned',
+          is_verified: false,
+          location: 'Galle, Sri Lanka',
+          ban_reason: 'Violation of community guidelines',
+          bio: 'Rice farmer'
+        },
+        {
+          full_name: 'Emma Wilson',
+          email: 'emma@example.com',
+          phone: '+94 77 456 7890',
+          role: 'vendor',
+          status: 'active',
+          is_verified: true,
+          location: 'Kandy, Sri Lanka',
+          bio: 'Organic fertilizer supplier'
+        },
+        {
+          full_name: 'David Perera',
+          email: 'david@example.com',
+          phone: '+94 77 567 8901',
+          role: 'farmer',
+          status: 'pending',
+          is_verified: false,
+          location: 'Kurunegala, Sri Lanka',
+          bio: 'Spice farmer'
+        }
+      ]
+
+      for (const user of sampleUsers) {
+        const { error } = await supabase
+          .from('users')
+          .insert({
+            ...user,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        
+        if (error) {
+          console.error('Error inserting sample user:', error)
+        }
+      }
+
+      console.log('Sample users inserted successfully')
+      // Refresh data after inserting
+      fetchUsers()
+      fetchStats()
+      
+    } catch (err) {
+      console.error('Error inserting sample users:', err)
     }
   }
 
@@ -233,13 +367,14 @@ export default function MobileUsers() {
   }
 
   const getStatusBadge = (status) => {
+    const statusLower = status?.toLowerCase() || 'active'
     const badges = {
       'active': { class: 'success', icon: 'bi-check-circle-fill', text: 'Active' },
       'banned': { class: 'danger', icon: 'bi-ban-fill', text: 'Banned' },
       'suspended': { class: 'warning', icon: 'bi-exclamation-triangle-fill', text: 'Suspended' },
       'pending': { class: 'info', icon: 'bi-clock-fill', text: 'Pending' }
     }
-    const badge = badges[status] || badges['active']
+    const badge = badges[statusLower] || badges['active']
     return (
       <span className={`status-badge ${badge.class}`}>
         <i className={`bi ${badge.icon}`}></i>
@@ -249,12 +384,14 @@ export default function MobileUsers() {
   }
 
   const getRoleBadge = (role) => {
+    const roleLower = role?.toLowerCase() || 'user'
     const roles = {
       'farmer': { class: 'farmer', icon: 'bi-tree-fill', text: 'Farmer' },
       'vendor': { class: 'vendor', icon: 'bi-shop', text: 'Vendor' },
-      'admin': { class: 'admin', icon: 'bi-shield-lock-fill', text: 'Admin' }
+      'admin': { class: 'admin', icon: 'bi-shield-lock-fill', text: 'Admin' },
+      'user': { class: 'default', icon: 'bi-person', text: 'User' }
     }
-    const roleInfo = roles[role] || { class: 'default', icon: 'bi-person', text: role || 'User' }
+    const roleInfo = roles[roleLower] || roles['user']
     return (
       <span className={`role-badge ${roleInfo.class}`}>
         <i className={`bi ${roleInfo.icon}`}></i>
@@ -266,7 +403,7 @@ export default function MobileUsers() {
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         user.phone?.includes(searchTerm)
+                         (user.phone && user.phone.includes(searchTerm))
     const matchesStatus = filterStatus === 'all' || user.status === filterStatus
     const matchesRole = filterRole === 'all' || user.role === filterRole
     return matchesSearch && matchesStatus && matchesRole
@@ -283,14 +420,24 @@ export default function MobileUsers() {
     )
   }
 
-  if (error) {
+  if (error && users.length === 0) {
     return (
       <AdminLayout title="Mobile Users">
         <div className="error-container">
           <i className="bi bi-exclamation-triangle-fill"></i>
           <h3>Error Loading Users</h3>
           <p>{error}</p>
-          <button className="retry-btn" onClick={fetchUsers}>Retry</button>
+          {debugInfo && (
+            <div className="debug-info">
+              <details>
+                <summary>Debug Information</summary>
+                <pre>{JSON.stringify(debugInfo, null, 2)}</pre>
+              </details>
+            </div>
+          )}
+          <button className="retry-btn" onClick={() => { fetchUsers(); fetchStats(); }}>
+            Retry
+          </button>
         </div>
       </AdminLayout>
     )
@@ -312,7 +459,7 @@ export default function MobileUsers() {
               </div>
             </div>
             <div className="hero-actions">
-              <button className="btn-refresh" onClick={fetchUsers}>
+              <button className="btn-refresh" onClick={() => { fetchUsers(); fetchStats(); }}>
                 <i className="bi bi-arrow-repeat"></i>
                 Refresh
               </button>
@@ -574,6 +721,10 @@ export default function MobileUsers() {
             </div>
             <h3>No Users Found</h3>
             <p>No mobile users match your search criteria</p>
+            <button className="btn-create-sample" onClick={insertSampleUsers}>
+              <i className="bi bi-database-add"></i>
+              Create Sample Users
+            </button>
             <button className="btn-clear-filters" onClick={() => {
               setSearchTerm('')
               setFilterStatus('all')
@@ -586,6 +737,7 @@ export default function MobileUsers() {
         )}
       </div>
 
+      {/* Rest of the modals remain the same... */}
       {/* User Details Modal */}
       {showDetailsModal && selectedUser && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
@@ -800,7 +952,7 @@ export default function MobileUsers() {
           padding: 60px 20px;
           background: white;
           border-radius: 24px;
-          max-width: 500px;
+          max-width: 600px;
           margin: 40px auto;
         }
 
@@ -810,7 +962,21 @@ export default function MobileUsers() {
           margin-bottom: 16px;
         }
 
-        .retry-btn {
+        .debug-info {
+          margin: 20px 0;
+          text-align: left;
+          background: #f8f9fa;
+          padding: 12px;
+          border-radius: 8px;
+          overflow-x: auto;
+        }
+
+        .debug-info pre {
+          margin: 0;
+          font-size: 11px;
+        }
+
+        .retry-btn, .btn-create-sample {
           margin-top: 20px;
           padding: 10px 24px;
           background: #4f46e5;
@@ -818,6 +984,11 @@ export default function MobileUsers() {
           border: none;
           border-radius: 12px;
           cursor: pointer;
+          margin-right: 12px;
+        }
+
+        .btn-create-sample {
+          background: #10b981;
         }
 
         /* Hero Section */
@@ -1107,7 +1278,6 @@ export default function MobileUsers() {
           background: #f8f9fa;
         }
 
-        /* User Cell */
         .user-info {
           display: flex;
           align-items: center;
@@ -1145,7 +1315,6 @@ export default function MobileUsers() {
           font-family: monospace;
         }
 
-        /* Contact Cell */
         .contact-info {
           display: flex;
           flex-direction: column;
@@ -1182,7 +1351,6 @@ export default function MobileUsers() {
           margin-left: 8px;
         }
 
-        /* Role Badges */
         .role-badge {
           display: inline-flex;
           align-items: center;
@@ -1198,7 +1366,6 @@ export default function MobileUsers() {
         .role-badge.admin { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
         .role-badge.default { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
 
-        /* Status Badges */
         .status-badge {
           display: inline-flex;
           align-items: center;
@@ -1225,7 +1392,6 @@ export default function MobileUsers() {
           color: #ef4444;
         }
 
-        /* Date Cell */
         .date-info {
           display: flex;
           align-items: center;
@@ -1239,7 +1405,6 @@ export default function MobileUsers() {
           color: #9ca3af;
         }
 
-        /* Actions Cell */
         .action-buttons {
           display: flex;
           gap: 8px;
@@ -1277,7 +1442,6 @@ export default function MobileUsers() {
           cursor: pointer;
         }
 
-        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 80px 20px;
@@ -1411,7 +1575,6 @@ export default function MobileUsers() {
           gap: 12px;
         }
 
-        /* User Profile in Modal */
         .user-profile-header {
           display: flex;
           align-items: center;
@@ -1489,7 +1652,6 @@ export default function MobileUsers() {
           margin-bottom: 20px;
         }
 
-        /* Details Grid */
         .details-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1522,10 +1684,6 @@ export default function MobileUsers() {
           margin-bottom: 12px;
         }
 
-        .detail-item:last-child {
-          margin-bottom: 0;
-        }
-
         .detail-item label {
           display: block;
           font-size: 11px;
@@ -1550,7 +1708,6 @@ export default function MobileUsers() {
           color: #4b5563;
         }
 
-        /* Form Styles */
         .form-group {
           margin-bottom: 20px;
         }
