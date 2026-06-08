@@ -232,43 +232,46 @@ export default function Advertisements() {
   }
 
   const sendEmailNotification = async (type, recipientEmail, data) => {
-    if (!emailSettings.enable_notifications) {
-      console.log('Email notifications are disabled')
-      return false
-    }
-
-    if (!recipientEmail) {
-      console.log('No recipient email provided')
-      return false
-    }
-
-    try {
-      const response = await fetch('/api/email/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          to: recipientEmail,
-          data: {
-            ...data,
-            siteName: 'Smart Farmer'
-          }
-        })
-      })
-
-      const result = await response.json()
-      if (result.success) {
-        console.log(`${type} notification sent to ${recipientEmail}`)
-        return true
-      } else {
-        console.error('Failed to send email:', result.error)
-        return false
-      }
-    } catch (error) {
-      console.error('Error sending email:', error)
-      return false
-    }
+  if (!emailSettings.enable_notifications) {
+    console.log('Email notifications are disabled')
+    return false
   }
+
+  if (!recipientEmail || recipientEmail === 'user@example.com') {
+    console.log('No valid recipient email provided')
+    return false
+  }
+
+  try {
+    console.log(`Sending ${type} email to ${recipientEmail}...`)
+    
+    const response = await fetch('/api/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        to: recipientEmail,
+        data: {
+          ...data,
+          siteName: 'Smart Farmer'
+        }
+      })
+    })
+    
+    const result = await response.json()
+    
+    if (result.success) {
+      console.log(`✅ ${type} email sent successfully to ${recipientEmail}`)
+      return true
+    } else {
+      console.error(`Failed to send email:`, result.error)
+      return false
+    }
+  } catch (error) {
+    console.error('Error sending email:', error)
+    return false
+  }
+}
 
   const createPackage = async () => {
     if (!packageFormData.package_name || !packageFormData.price) {
@@ -368,50 +371,62 @@ export default function Advertisements() {
   }
 
   const createCampaign = async () => {
-    if (!formData.title || !formData.package_id) {
-      alert('Please fill in all required fields')
+  if (!formData.title || !formData.package_id) {
+    alert('Please fill in all required fields')
+    return
+  }
+
+  setActionLoading(true)
+  
+  try {
+    const selectedPackage = packages.find(p => p.package_id === formData.package_id)
+    
+    const startDate = new Date()
+    const endDate = new Date()
+    endDate.setDate(endDate.getDate() + (selectedPackage?.duration_days || 30))
+
+    // Get current admin user ID from session
+    const session = JSON.parse(localStorage.getItem('adminSession'))
+    const userId = session?.admin?.admin_id || session?.user?.id
+
+    if (!userId) {
+      alert('User ID not found. Please login again.')
       return
     }
 
-    setActionLoading(true)
-    
-    try {
-      const selectedPackage = packages.find(p => p.package_id === formData.package_id)
-      
-      const startDate = new Date()
-      const endDate = new Date()
-      endDate.setDate(endDate.getDate() + (selectedPackage?.duration_days || 30))
-
-      const adData = {
-        title: formData.title,
-        description: formData.description || '',
-        image_url: formData.image_url || null,
-        package_id: formData.package_id,
-        target_audience: formData.target_audience,
-        status: 'PENDING',
-        amount_paid: selectedPackage?.price || 0,
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-        created_at: new Date().toISOString()
-      }
-
-      const { error } = await supabase
-        .from('mobile_advertisements')
-        .insert(adData)
-
-      if (error) throw error
-
-      alert('Campaign created successfully! Pending approval.')
-      setShowCreateModal(false)
-      resetForm()
-      fetchAds()
-    } catch (err) {
-      console.error('Error creating campaign:', err)
-      alert('Error creating campaign: ' + err.message)
-    } finally {
-      setActionLoading(false)
+    const adData = {
+      title: formData.title,
+      description: formData.description || '',
+      image_url: formData.image_url || null,
+      package_id: formData.package_id,
+      target_audience: formData.target_audience,
+      status: 'PENDING',
+      amount_paid: selectedPackage?.price || 0,
+      start_date: startDate.toISOString(),
+      end_date: endDate.toISOString(),
+      created_at: new Date().toISOString(),
+      user_id: userId,  // Add user_id here
+      user_name: session?.admin?.full_name || 'Admin',
+      user_email: session?.admin?.email || 'admin@smartfarmer.com'
     }
+
+    const { error } = await supabase
+      .from('mobile_advertisements')
+      .insert(adData)
+
+    if (error) throw error
+
+    alert('Campaign created successfully! Pending approval.')
+    setShowCreateModal(false)
+    resetForm()
+    fetchAds()
+  } catch (err) {
+    console.error('Error creating campaign:', err)
+    alert('Error creating campaign: ' + err.message)
+  } finally {
+    setActionLoading(false)
   }
+}
 
   const approveAd = async (adId) => {
     setActionLoading(true)
