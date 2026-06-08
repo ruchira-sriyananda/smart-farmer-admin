@@ -264,14 +264,7 @@ export default function AdminSidebar() {
           </div>
         </div>
 
-        {/* Collapse Toggle (Desktop) */}
-        <button 
-          className="collapse-toggle"
-          onClick={() => setCollapsed(!collapsed)}
-          aria-label={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-        >
-          <i className={`bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-left'}`}></i>
-        </button>
+        
       </aside>
 
       <style jsx>{`
