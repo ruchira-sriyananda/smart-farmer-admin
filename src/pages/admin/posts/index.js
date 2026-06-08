@@ -19,8 +19,6 @@ export default function ContentModeration() {
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [showFullImage, setShowFullImage] = useState(false)
   const [selectedImage, setSelectedImage] = useState(null)
-  const [currentImageIndex, setCurrentImageIndex] = useState(0)
-  const [allImages, setAllImages] = useState([])
   const [showImageGallery, setShowImageGallery] = useState(false)
   const [galleryImages, setGalleryImages] = useState([])
   const [galleryIndex, setGalleryIndex] = useState(0)
@@ -51,6 +49,7 @@ export default function ContentModeration() {
   const getImageUrl = (imagePath) => {
     if (!imagePath) return null
     if (imagePath.startsWith('http')) return imagePath
+    if (imagePath.startsWith('/')) return imagePath
     try {
       const { data } = supabase.storage.from('post-images').getPublicUrl(imagePath)
       return data?.publicUrl || imagePath
@@ -86,68 +85,62 @@ export default function ContentModeration() {
 
       // Fetch complete post details including all images
       const postsWithDetails = await Promise.all((data || []).map(async (post) => {
+        let imageUrls = []
+        let postData = null
+        let userData = null
+        
         if (post.content_type === 'POST') {
           // Fetch post content from posts table
-          const { data: postData, error: postError } = await supabase
+          const { data: postDataResult, error: postError } = await supabase
             .from('posts')
-            .select('title, content, description, created_at, user_id, image_url')
+            .select('*')
             .eq('post_id', post.content_id)
-            .single()
+            .maybeSingle() // Use maybeSingle to avoid errors if not found
           
-          // Fetch all images from post_images table
-          const { data: images, error: imagesError } = await supabase
-            .from('post_images')
-            .select('image_url, image_order')
-            .eq('post_id', post.content_id)
-            .order('image_order', { ascending: true })
-
-          let imageUrls = []
-          if (!imagesError && images && images.length > 0) {
-            imageUrls = images.map(img => getImageUrl(img.image_url)).filter(url => url)
-          } else if (postData?.image_url) {
-            const singleImage = getImageUrl(postData.image_url)
-            if (singleImage) imageUrls.push(singleImage)
-          }
-          
-          // Fetch user details
-          let userData = null
-          const userId = postData?.user_id
-          
-          if (userId) {
-            const { data: userFromUsers } = await supabase
-              .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location, district')
-              .eq('user_id', userId)
-              .single()
+          if (!postError && postDataResult) {
+            postData = postDataResult
             
-            if (userFromUsers) {
-              userData = userFromUsers
+            // Fetch all images from post_images table
+            const { data: images, error: imagesError } = await supabase
+              .from('post_images')
+              .select('image_url, image_order')
+              .eq('post_id', post.content_id)
+              .order('image_order', { ascending: true })
+
+            if (!imagesError && images && images.length > 0) {
+              imageUrls = images.map(img => getImageUrl(img.image_url)).filter(url => url)
+            } else if (postData.image_url) {
+              const singleImage = getImageUrl(postData.image_url)
+              if (singleImage) imageUrls.push(singleImage)
             }
-          }
-          
-          if (!userData) {
-            userData = { 
-              full_name: 'Mobile User', 
-              email: 'Email not available',
-              profile_image: null,
-              phone: null,
-              location: null,
-              district: null
+            
+            // Fetch user details
+            if (postData.user_id) {
+              const { data: userResult } = await supabase
+                .from('users')
+                .select('user_id, full_name, email, profile_image, phone, location, district')
+                .eq('user_id', postData.user_id)
+                .maybeSingle()
+              
+              if (userResult) {
+                userData = userResult
+              }
             }
-          }
-          
-          return { 
-            ...post, 
-            title: postData?.title || 'Untitled',
-            content: postData?.content || '',
-            description: postData?.description || '',
-            post_created_at: postData?.created_at || post.created_at,
-            images: imageUrls, 
-            image_count: imageUrls.length,
-            user: userData
           }
         }
-        return { ...post, images: [], image_count: 0, user: null, title: '', content: '', description: '' }
+        
+        return { 
+          ...post, 
+          title: postData?.title || 'Untitled',
+          content: postData?.content || postData?.description || 'No content available',
+          description: postData?.description || '',
+          post_created_at: postData?.created_at || post.created_at,
+          images: imageUrls, 
+          image_count: imageUrls.length,
+          user: userData,
+          author_name: userData?.full_name || 'Mobile User',
+          author_email: userData?.email || 'Email not available'
+        }
       }))
 
       setPosts(postsWithDetails || [])
@@ -180,68 +173,98 @@ export default function ContentModeration() {
 
   const fetchPostDetails = async (contentId, contentType) => {
     setLoadingDetails(true)
+    setPostDetails(null)
+    
     try {
       let details = null
       
       if (contentType === 'POST') {
-        // Fetch post with user details
-        const { data, error } = await supabase
+        // Fetch post from posts table
+        const { data: postData, error: postError } = await supabase
           .from('posts')
-          .select(`
-            *,
-            users!posts_user_id_fkey (
-              user_id,
-              full_name,
-              email,
-              profile_image,
-              phone,
-              location,
-              district
-            ),
-            post_categories!posts_category_id_fkey (
-              category_name,
-              description
-            )
-          `)
+          .select('*')
           .eq('post_id', contentId)
-          .single()
+          .maybeSingle()
         
-        if (!error && data) {
-          // Fetch all images from post_images table
+        if (postError) {
+          console.error('Error fetching post:', postError)
+        }
+        
+        if (postData) {
+          // Fetch user details
+          let userData = null
+          if (postData.user_id) {
+            const { data: userResult } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location, district')
+              .eq('user_id', postData.user_id)
+              .maybeSingle()
+            userData = userResult
+          }
+          
+          // Fetch category
+          let categoryData = null
+          if (postData.category_id) {
+            const { data: catResult } = await supabase
+              .from('post_categories')
+              .select('category_name, description')
+              .eq('category_id', postData.category_id)
+              .maybeSingle()
+            categoryData = catResult
+          }
+          
+          // Fetch all images
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
             .select('image_url, image_order')
             .eq('post_id', contentId)
             .order('image_order', { ascending: true })
           
-          const imageUrls = []
+          let imageUrls = []
           if (!imagesError && images && images.length > 0) {
-            for (const img of images) {
-              const url = getImageUrl(img.image_url)
-              if (url) imageUrls.push(url)
-            }
-          } else if (data.image_url) {
-            const url = getImageUrl(data.image_url)
-            if (url) imageUrls.push(url)
+            imageUrls = images.map(img => getImageUrl(img.image_url)).filter(url => url)
+          } else if (postData.image_url) {
+            const singleImage = getImageUrl(postData.image_url)
+            if (singleImage) imageUrls.push(singleImage)
           }
           
           details = { 
-            ...data, 
+            ...postData, 
             images: imageUrls, 
             image_count: imageUrls.length,
-            user: data.users,
-            category: data.post_categories
+            user: userData,
+            category: categoryData
           }
         }
       }
       
-      setPostDetails(details)
-      if (details?.images?.length > 0) {
-        setAllImages(details.images)
-        setCurrentImageIndex(0)
+      if (details) {
+        setPostDetails(details)
+        if (details?.images?.length > 0) {
+          setGalleryImages(details.images)
+          setGalleryIndex(0)
+        }
+      } else {
+        // Set fallback data
+        setPostDetails({
+          title: 'Content not found',
+          content: 'Unable to load content details. The post may have been deleted.',
+          images: [],
+          image_count: 0,
+          user: null,
+          category: null
+        })
       }
     } catch (err) {
       console.error('Error fetching post details:', err)
+      setPostDetails({
+        title: 'Error loading content',
+        content: 'An error occurred while loading the content details.',
+        images: [],
+        image_count: 0,
+        user: null,
+        category: null
+      })
     } finally {
       setLoadingDetails(false)
     }
@@ -446,8 +469,8 @@ export default function ContentModeration() {
                       )}
                     </div>
                     <div className="post-user-details">
-                      <div className="post-user-name">{post.user?.full_name || 'Mobile User'}</div>
-                      <div className="post-user-email">{post.user?.email || 'Email not available'}</div>
+                      <div className="post-user-name">{post.author_name}</div>
+                      <div className="post-user-email">{post.author_email}</div>
                     </div>
                   </div>
                   {getStatusBadge(post.moderation_status)}
@@ -479,7 +502,7 @@ export default function ContentModeration() {
                 <div className="post-card-content">
                   <h6 className="post-card-title">{post.title}</h6>
                   <p className="post-card-text">
-                    {(post.content || post.description)?.substring(0, 120)}...
+                    {post.content?.substring(0, 120) || 'No content available'}...
                   </p>
                   <div className="post-card-meta">
                     <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at || post.created_at).toLocaleDateString()}</span>
@@ -558,14 +581,14 @@ export default function ContentModeration() {
                         </div>
                         {postDetails.images.length > 1 && (
                           <div className="gallery-thumbnails">
-                            {postDetails.images.slice(0, 8).map((img, idx) => (
+                            {postDetails.images.slice(0, 6).map((img, idx) => (
                               <div key={idx} className="gallery-thumb" onClick={() => openImageGallery(postDetails.images, idx)}>
                                 <img src={img} alt={`Thumb ${idx + 1}`} />
                               </div>
                             ))}
-                            {postDetails.images.length > 8 && (
+                            {postDetails.images.length > 7 && (
                               <div className="gallery-more">
-                                <span>+{postDetails.images.length - 8}</span>
+                                <span>+{postDetails.images.length - 6}</span>
                               </div>
                             )}
                           </div>
@@ -586,7 +609,7 @@ export default function ContentModeration() {
                         )}
                       </div>
                       <div className="detail-author-info">
-                        <div className="detail-author-name">{postDetails.user?.full_name || 'Mobile User'}</div>
+                        <div className="detail-author-name">{postDetails.user?.full_name || 'Unknown User'}</div>
                         <div className="detail-author-email">{postDetails.user?.email || 'Email not available'}</div>
                         {postDetails.user?.phone && (
                           <div className="detail-author-phone"><i className="bi bi-telephone"></i> {postDetails.user.phone}</div>
@@ -1010,55 +1033,13 @@ export default function ContentModeration() {
         .post-user-email { font-size: 11px; color: #9ca3af; }
 
         /* Post Images */
-        .post-card-images {
-          cursor: pointer;
-          background: #f8f9fa;
-        }
-
-        .images-grid {
-          display: flex;
-          position: relative;
-          height: 200px;
-        }
-
-        .main-image {
-          width: 50%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .images-overlay {
-          width: 50%;
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 2px;
-          position: relative;
-        }
-
-        .thumbnail {
-          position: relative;
-          height: 99px;
-        }
-
-        .thumbnail img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .more-images {
-          position: absolute;
-          bottom: 8px;
-          right: 8px;
-          background: rgba(0,0,0,0.7);
-          color: white;
-          padding: 4px 10px;
-          border-radius: 20px;
-          font-size: 12px;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
+        .post-card-images { cursor: pointer; background: #f8f9fa; }
+        .images-grid { display: flex; position: relative; height: 200px; }
+        .main-image { width: 50%; height: 100%; object-fit: cover; }
+        .images-overlay { width: 50%; display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px; position: relative; }
+        .thumbnail { position: relative; height: 99px; }
+        .thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+        .more-images { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; display: flex; align-items: center; gap: 4px; }
 
         .post-card-content { padding: 16px; }
         .post-card-title { font-size: 16px; font-weight: 600; margin: 0 0 8px 0; }
@@ -1224,19 +1205,8 @@ export default function ContentModeration() {
           padding: 16px;
         }
 
-        .gallery-main {
-          cursor: pointer;
-          margin-bottom: 12px;
-          border-radius: 12px;
-          overflow: hidden;
-        }
-
-        .gallery-main img {
-          width: 100%;
-          max-height: 400px;
-          object-fit: contain;
-          background: #1a1f2e;
-        }
+        .gallery-main { cursor: pointer; margin-bottom: 12px; border-radius: 12px; overflow: hidden; }
+        .gallery-main img { width: 100%; max-height: 400px; object-fit: contain; background: #1a1f2e; }
 
         .gallery-thumbnails {
           display: grid;
