@@ -65,6 +65,14 @@ export default function AdminDashboard() {
   const [weeklyActivity, setWeeklyActivity] = useState([0, 0, 0, 0, 0, 0, 0])
   const [topContributors, setTopContributors] = useState([])
 
+  // Helper function to get Supabase storage URL
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return null
+    if (imagePath.startsWith('http')) return imagePath
+    const { data } = supabase.storage.from('post-images').getPublicUrl(imagePath)
+    return data?.publicUrl || imagePath
+  }
+
   // Role-based permissions
   const permissions = {
     SUPER_ADMIN: {
@@ -309,14 +317,18 @@ export default function AdminDashboard() {
 
   const fetchRecentPosts = async () => {
     try {
-      const { data, error } = await supabase
+      // First fetch posts
+      const { data: postsData, error: postsError } = await supabase
         .from('posts')
         .select('post_id, title, content, image_url, created_at, user_id')
         .order('created_at', { ascending: false })
         .limit(3)
 
-      if (!error && data) {
-        const userIds = [...new Set(data.map(p => p.user_id))]
+      if (postsError) throw postsError
+
+      if (postsData && postsData.length > 0) {
+        // Get user info
+        const userIds = [...new Set(postsData.map(p => p.user_id))]
         const { data: usersData } = await supabase
           .from('users')
           .select('user_id, full_name')
@@ -324,15 +336,46 @@ export default function AdminDashboard() {
         
         const userMap = {}
         usersData?.forEach(u => { userMap[u.user_id] = u.full_name })
-        
-        const postsWithUsers = data.map(post => ({
-          ...post,
-          author_name: userMap[post.user_id] || 'Anonymous'
+
+        // Fetch images from post_images table for each post
+        const postsWithImages = await Promise.all(postsData.map(async (post) => {
+          // Fetch images from post_images table
+          const { data: imagesData, error: imagesError } = await supabase
+            .from('post_images')
+            .select('image_url, image_order')
+            .eq('post_id', post.post_id)
+            .order('image_order', { ascending: true })
+
+          let imageToShow = null
+          let allImages = []
+          
+          if (!imagesError && imagesData && imagesData.length > 0) {
+            // Process all images to get public URLs
+            allImages = imagesData.map(img => getImageUrl(img.image_url))
+            // Use the first image as display image
+            imageToShow = allImages[0]
+          } else if (post.image_url) {
+            // Fallback to post's image_url field
+            imageToShow = getImageUrl(post.image_url)
+            if (imageToShow) {
+              allImages = [imageToShow]
+            }
+          }
+
+          return {
+            ...post,
+            author_name: userMap[post.user_id] || 'Anonymous',
+            images: allImages,
+            display_image: imageToShow,
+            image_count: allImages.length
+          }
         }))
         
-        setRecentPosts(postsWithUsers)
+        setRecentPosts(postsWithImages)
       }
-    } catch (err) { console.error('Error:', err) }
+    } catch (err) { 
+      console.error('Error fetching posts:', err) 
+    }
   }
 
   const fetchRecentBarterListings = async () => {
@@ -812,7 +855,7 @@ export default function AdminDashboard() {
                       <td className="user-cell">
                         <div className="user-avatar-sm">{user.profile_image ? <img src={user.profile_image} alt={user.full_name} /> : <span>{user.full_name?.charAt(0)}</span>}</div>
                         <div><div className="user-name-sm">{user.full_name}</div><div className="user-email">{user.email}</div></div>
-                      </td>
+                       </td>
                       <td>{getRoleBadge(user.role_name)}</td>
                       <td>{user.is_verified ? <span className="status-verified"><i className="bi bi-check-circle"></i> Verified</span> : <span className="status-pending"><i className="bi bi-clock"></i> Pending</span>}</td>
                       <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
@@ -824,7 +867,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Recent Posts */}
+        {/* Recent Posts with Images */}
         {(perms.canViewAllPosts || perms.canModerateContent) && (
           <div className="recent-posts-section">
             <div className="section-header">
@@ -834,7 +877,29 @@ export default function AdminDashboard() {
             <div className="posts-grid">
               {recentPosts.map((post) => (
                 <div key={post.post_id} className="post-card">
-                  {post.image_url && <div className="post-card-image"><img src={post.image_url} alt={post.title} /></div>}
+                  {/* Display image from post_images table */}
+                  {post.display_image && (
+                    <div className="post-card-image">
+                      <img 
+                        src={post.display_image} 
+                        alt={post.title}
+                        onError={(e) => {
+                          e.target.src = 'https://placehold.co/400x300/e2e8f0/64748b?text=Image+Not+Found'
+                        }}
+                      />
+                      {post.image_count > 1 && (
+                        <div className="image-count-badge-overlay">
+                          <i className="bi bi-images"></i> {post.image_count}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!post.display_image && (
+                    <div className="post-card-image-placeholder">
+                      <i className="bi bi-image"></i>
+                      <span>No image</span>
+                    </div>
+                  )}
                   <div className="post-card-content">
                     <h6>{post.title}</h6>
                     <p>{post.content?.substring(0, 80)}...</p>
@@ -842,6 +907,11 @@ export default function AdminDashboard() {
                       <span><i className="bi bi-person-circle"></i> {post.author_name}</span>
                       <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>
                     </div>
+                    {post.image_count > 0 && (
+                      <div className="image-count-badge">
+                        <i className="bi bi-images"></i> {post.image_count} image{post.image_count > 1 ? 's' : ''}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1018,17 +1088,25 @@ export default function AdminDashboard() {
         .badge-farmer { background: rgba(16,185,129,0.1); color: #10b981; }
         .badge-vendor { background: rgba(59,130,246,0.1); color: #3b82f6; }
         .badge-pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        
+        /* Recent Posts Styles with Images */
         .recent-posts-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
         .posts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
         .post-card { background: #f8f9fa; border-radius: 16px; overflow: hidden; transition: all 0.3s ease; cursor: pointer; }
         .post-card:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
-        .post-card-image { height: 160px; overflow: hidden; }
+        .post-card-image { position: relative; height: 160px; overflow: hidden; }
         .post-card-image img { width: 100%; height: 100%; object-fit: cover; }
+        .image-count-badge-overlay { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; display: flex; align-items: center; gap: 4px; }
+        .post-card-image-placeholder { height: 160px; background: #f1f5f9; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #94a3b8; }
+        .post-card-image-placeholder i { font-size: 32px; }
+        .post-card-image-placeholder span { font-size: 12px; }
         .post-card-content { padding: 16px; }
         .post-card-content h6 { margin: 0 0 8px 0; font-size: 14px; font-weight: 600; }
         .post-card-content p { margin: 0 0 12px 0; font-size: 12px; color: #6c757d; line-height: 1.4; }
-        .post-card-meta { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; }
+        .post-card-meta { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; margin-bottom: 8px; }
         .post-card-meta i { margin-right: 4px; }
+        .image-count-badge { font-size: 11px; color: #667eea; display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+        
         .recent-barter-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
         .barter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
         .barter-card { background: #f8f9fa; border-radius: 16px; padding: 16px; transition: all 0.3s ease; cursor: pointer; }
@@ -1051,6 +1129,7 @@ export default function AdminDashboard() {
         .action-item:hover { background: #e9ecef; transform: translateY(-2px); }
         .action-item i { font-size: 24px; color: #4f46e5; }
         .action-item span { font-size: 12px; font-weight: 500; }
+        
         @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.1); } }
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -1070,6 +1149,7 @@ export default function AdminDashboard() {
           .welcome-section { flex-direction: column; align-items: flex-start; }
           .online-list, .posts-grid, .barter-grid { grid-template-columns: 1fr; }
           .actions-grid { grid-template-columns: repeat(2,1fr); }
+          .post-card-image { height: 200px; }
         }
       `}</style>
     </AdminLayout>
