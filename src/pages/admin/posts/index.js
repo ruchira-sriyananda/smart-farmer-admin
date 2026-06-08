@@ -47,12 +47,7 @@ export default function ContentModeration() {
     if (!imagePath) return null
     if (imagePath.startsWith('http')) return imagePath
     if (imagePath.startsWith('/')) return imagePath
-    try {
-      const { data } = supabase.storage.from('post-images').getPublicUrl(imagePath)
-      return data?.publicUrl || imagePath
-    } catch {
-      return imagePath
-    }
+    return imagePath
   }
 
   const fetchPosts = async () => {
@@ -80,7 +75,6 @@ export default function ContentModeration() {
 
       if (error) throw error
 
-      // Fetch complete post details for each moderation record
       const postsWithDetails = await Promise.all((data || []).map(async (post) => {
         let postData = null
         let userData = null
@@ -88,7 +82,6 @@ export default function ContentModeration() {
         let postExists = true
         
         if (post.content_type === 'POST' && post.content_id) {
-          // Fetch post content from posts table
           const { data: postDataResult, error: postError } = await supabase
             .from('posts')
             .select('*')
@@ -103,7 +96,6 @@ export default function ContentModeration() {
           if (postDataResult) {
             postData = postDataResult
             
-            // Fetch all images from post_images table
             const { data: imagesData, error: imagesError } = await supabase
               .from('post_images')
               .select('image_url, image_order')
@@ -116,37 +108,51 @@ export default function ContentModeration() {
               images = [getImageUrl(postDataResult.image_url)]
             }
             
-            // Fetch user details - CRITICAL FIX: Use the user_id from the posts table
-            if (postDataResult.user_id) {
+            const userId = postDataResult.user_id || post.user_id
+            
+            if (userId) {
               const { data: userResult, error: userError } = await supabase
                 .from('users')
-                .select('user_id, full_name, email, profile_image, phone, district, location, created_at')
-                .eq('user_id', postDataResult.user_id)
+                .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+                .eq('user_id', userId)
                 .maybeSingle()
               
               if (userError) {
-                console.error(`Error fetching user ${postDataResult.user_id}:`, userError)
+                console.error(`Error fetching user ${userId}:`, userError)
               }
               
               if (userResult) {
                 userData = userResult
-                console.log(`Found user: ${userResult.full_name} for post ${post.content_id}`)
               } else {
-                console.log(`No user found for ID: ${postDataResult.user_id}`)
+                const { data: adminResult } = await supabase
+                  .from('admin_users')
+                  .select('admin_id, full_name, email')
+                  .eq('admin_id', userId)
+                  .maybeSingle()
+                
+                if (adminResult) {
+                  userData = {
+                    user_id: adminResult.admin_id,
+                    full_name: adminResult.full_name,
+                    email: adminResult.email,
+                    profile_image: null,
+                    phone: null,
+                    location: null,
+                    district: null
+                  }
+                }
               }
             }
             
-            // If still no user data, try to get from content_moderation's user_id
-            if (!userData && post.user_id) {
-              const { data: userFromMod } = await supabase
-                .from('users')
-                .select('user_id, full_name, email, profile_image, phone, district')
-                .eq('user_id', post.user_id)
-                .maybeSingle()
-              
-              if (userFromMod) {
-                userData = userFromMod
-                console.log(`Found user from moderation table: ${userData.full_name}`)
+            if (!userData && userId) {
+              userData = {
+                user_id: userId,
+                full_name: `User (${userId.slice(0, 8)}...)`,
+                email: 'Email not available',
+                profile_image: null,
+                phone: null,
+                location: null,
+                district: null
               }
             }
           } else {
@@ -154,22 +160,10 @@ export default function ContentModeration() {
           }
         }
         
-        // Set default user data if still null
-        if (!userData) {
-          userData = {
-            full_name: 'Mobile User',
-            email: 'Email not available',
-            profile_image: null,
-            phone: null,
-            district: 'Not specified',
-            location: 'Not specified'
-          }
-        }
-        
         return { 
           ...post, 
-          title: postData?.title || (postExists ? 'Loading...' : 'Post Deleted'),
-          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted from the database.'),
+          title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
+          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
           images: images,
           image_count: images.length,
           cover_image: images[0] || null,
@@ -177,7 +171,9 @@ export default function ContentModeration() {
           user: userData,
           author_name: userData?.full_name || 'Mobile User',
           author_email: userData?.email || 'Email not available',
-          author_district: userData?.district || userData?.location || 'Not specified',
+          author_phone: userData?.phone || null,
+          author_location: userData?.location || userData?.district || null,
+          user_id: userData?.user_id || post.user_id,
           post_exists: postExists
         }
       }))
@@ -218,7 +214,6 @@ export default function ContentModeration() {
       let details = null
       
       if (contentType === 'POST' && contentId) {
-        // Fetch post from posts table
         const { data: postData, error: postError } = await supabase
           .from('posts')
           .select('*')
@@ -226,7 +221,6 @@ export default function ContentModeration() {
           .maybeSingle()
         
         if (postData) {
-          // Fetch all images from post_images table
           const { data: imagesData, error: imagesError } = await supabase
             .from('post_images')
             .select('image_url, image_order')
@@ -240,21 +234,43 @@ export default function ContentModeration() {
             images = [getImageUrl(postData.image_url)]
           }
           
-          // Fetch user details
           let userData = null
-          if (postData.user_id) {
-            const { data: userResult } = await supabase
+          const userId = postData.user_id
+          
+          if (userId) {
+            const { data: userResult, error: userError } = await supabase
               .from('users')
-              .select('user_id, full_name, email, profile_image, phone, district, location')
-              .eq('user_id', postData.user_id)
+              .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+              .eq('user_id', userId)
               .maybeSingle()
+            
+            if (userError) {
+              console.error('Error fetching user:', userError)
+            }
             
             if (userResult) {
               userData = userResult
+            } else {
+              const { data: adminResult } = await supabase
+                .from('admin_users')
+                .select('admin_id, full_name, email')
+                .eq('admin_id', userId)
+                .maybeSingle()
+              
+              if (adminResult) {
+                userData = {
+                  user_id: adminResult.admin_id,
+                  full_name: adminResult.full_name,
+                  email: adminResult.email,
+                  profile_image: null,
+                  phone: null,
+                  location: null,
+                  district: null
+                }
+              }
             }
           }
           
-          // Fetch category
           let categoryData = null
           if (postData.category_id) {
             const { data: catResult } = await supabase
@@ -272,13 +288,7 @@ export default function ContentModeration() {
             ...postData, 
             images: images,
             image_count: images.length,
-            user: userData || {
-              full_name: 'Mobile User',
-              email: 'Email not available',
-              profile_image: null,
-              phone: null,
-              district: 'Not specified'
-            },
+            user: userData,
             category: categoryData
           }
         }
@@ -385,27 +395,6 @@ export default function ContentModeration() {
           <div className="loading-spinner"></div>
           <p>Loading content...</p>
         </div>
-        <style jsx>{`
-          .loading-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 400px;
-          }
-          .loading-spinner {
-            width: 48px;
-            height: 48px;
-            border: 3px solid #e9ecef;
-            border-top-color: #4f46e5;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 16px;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
       </AdminLayout>
     )
   }
@@ -493,10 +482,26 @@ export default function ContentModeration() {
                       )}
                     </div>
                     <div className="post-user-details">
-                      <div className="post-user-name">{post.author_name}</div>
-                      <div className="post-user-email">{post.author_email}</div>
-                      {post.author_district && post.author_district !== 'Not specified' && (
-                        <div className="post-user-district"><i className="bi bi-geo-alt"></i> {post.author_district}</div>
+                      <div className="post-user-name">
+                        {post.author_name}
+                        {post.user_id && (
+                          <span className="user-id-tooltip" title={`User ID: ${post.user_id}`}>
+                            <i className="bi bi-info-circle"></i>
+                          </span>
+                        )}
+                      </div>
+                      <div className="post-user-email">
+                        <i className="bi bi-envelope"></i> {post.author_email}
+                      </div>
+                      {post.author_phone && (
+                        <div className="post-user-phone">
+                          <i className="bi bi-telephone"></i> {post.author_phone}
+                        </div>
+                      )}
+                      {post.author_location && (
+                        <div className="post-user-location">
+                          <i className="bi bi-geo-alt"></i> {post.author_location}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -584,7 +589,7 @@ export default function ContentModeration() {
                 </div>
                 <div>
                   <h2>Content Details</h2>
-                  <p>Review complete post information</p>
+                  <p>Complete information about this content</p>
                 </div>
               </div>
               <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
@@ -630,13 +635,34 @@ export default function ContentModeration() {
                         )}
                       </div>
                       <div className="detail-author-info">
-                        <div className="detail-author-name">{postDetails.user?.full_name || 'Mobile User'}</div>
-                        <div className="detail-author-email">{postDetails.user?.email || 'Email not available'}</div>
+                        <div className="detail-author-name">
+                          {postDetails.user?.full_name || 'Mobile User'}
+                          {postDetails.user?.user_id && (
+                            <span className="user-id-badge">ID: {postDetails.user.user_id.slice(0, 8)}...</span>
+                          )}
+                        </div>
+                        <div className="detail-author-email">
+                          <i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}
+                        </div>
                         {postDetails.user?.phone && (
-                          <div className="detail-author-phone"><i className="bi bi-telephone"></i> {postDetails.user.phone}</div>
+                          <div className="detail-author-phone">
+                            <i className="bi bi-telephone"></i> {postDetails.user.phone}
+                          </div>
                         )}
-                        {postDetails.user?.district && postDetails.user.district !== 'Not specified' && (
-                          <div className="detail-author-location"><i className="bi bi-geo-alt"></i> {postDetails.user.district}</div>
+                        {postDetails.user?.location && (
+                          <div className="detail-author-location">
+                            <i className="bi bi-geo-alt"></i> {postDetails.user.location}
+                          </div>
+                        )}
+                        {postDetails.user?.district && (
+                          <div className="detail-author-district">
+                            <i className="bi bi-building"></i> {postDetails.user.district}
+                          </div>
+                        )}
+                        {postDetails.user?.created_at && (
+                          <div className="detail-author-joined">
+                            <i className="bi bi-calendar-check"></i> Joined: {new Date(postDetails.user.created_at).toLocaleDateString()}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -846,6 +872,28 @@ export default function ContentModeration() {
           padding: 0 24px;
         }
 
+        .loading-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 400px;
+        }
+
+        .loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid #e9ecef;
+          border-top-color: #4f46e5;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border-radius: 24px;
@@ -980,6 +1028,7 @@ export default function ContentModeration() {
           display: flex;
           align-items: center;
           gap: 12px;
+          flex: 1;
         }
 
         .post-user-avatar {
@@ -995,22 +1044,15 @@ export default function ContentModeration() {
 
         .post-user-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .post-user-avatar i { font-size: 20px; color: white; }
-        .post-user-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
-        .post-user-email { font-size: 11px; color: #9ca3af; }
-        .post-user-district { font-size: 10px; color: #9ca3af; margin-top: 2px; }
-        .post-user-district i { font-size: 9px; }
 
-        .post-images-gallery {
-          padding: 12px;
-          background: #fafbfc;
-        }
+        .post-user-details { flex: 1; }
+        .post-user-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .user-id-tooltip { cursor: help; font-size: 11px; color: #9ca3af; }
+        .post-user-email, .post-user-phone, .post-user-location { font-size: 10px; color: #9ca3af; margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+        .post-user-email i, .post-user-phone i, .post-user-location i { font-size: 9px; }
 
-        .images-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 8px;
-        }
-
+        .post-images-gallery { padding: 12px; background: #fafbfc; }
+        .images-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .gallery-image {
           position: relative;
           aspect-ratio: 1;
@@ -1018,18 +1060,8 @@ export default function ContentModeration() {
           overflow: hidden;
           cursor: pointer;
         }
-
-        .gallery-image img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          transition: transform 0.3s ease;
-        }
-
-        .gallery-image:hover img {
-          transform: scale(1.05);
-        }
-
+        .gallery-image img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+        .gallery-image:hover img { transform: scale(1.05); }
         .gallery-overlay {
           position: absolute;
           top: 0;
@@ -1043,16 +1075,8 @@ export default function ContentModeration() {
           opacity: 0;
           transition: opacity 0.3s ease;
         }
-
-        .gallery-image:hover .gallery-overlay {
-          opacity: 1;
-        }
-
-        .gallery-overlay i {
-          font-size: 24px;
-          color: white;
-        }
-
+        .gallery-image:hover .gallery-overlay { opacity: 1; }
+        .gallery-overlay i { font-size: 24px; color: white; }
         .more-images {
           background: linear-gradient(135deg, #667eea, #764ba2);
           color: white;
@@ -1063,29 +1087,11 @@ export default function ContentModeration() {
           gap: 4px;
           border-radius: 12px;
           cursor: pointer;
-          transition: all 0.3s ease;
         }
-
-        .more-images:hover {
-          transform: scale(1.02);
-        }
-
-        .more-images i {
-          font-size: 24px;
-        }
-
-        .more-images span {
-          font-size: 11px;
-        }
-
-        .image-count-badge {
-          margin-top: 8px;
-          font-size: 11px;
-          color: #667eea;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
+        .more-images:hover { transform: scale(1.02); }
+        .more-images i { font-size: 24px; }
+        .more-images span { font-size: 11px; }
+        .image-count-badge { margin-top: 8px; font-size: 11px; color: #667eea; display: flex; align-items: center; gap: 4px; }
 
         .post-card-content { padding: 16px; }
         .post-card-title { font-size: 16px; font-weight: 600; margin: 0 0 8px 0; }
@@ -1115,7 +1121,6 @@ export default function ContentModeration() {
           font-weight: 500;
           cursor: pointer;
         }
-
         .btn-view:hover { background: #4f46e5; color: white; }
         .action-buttons { display: flex; gap: 8px; flex: 2; }
         .btn-approve, .btn-reject {
@@ -1131,7 +1136,6 @@ export default function ContentModeration() {
           font-weight: 500;
           cursor: pointer;
         }
-
         .btn-approve { background: rgba(16,185,129,0.1); color: #10b981; }
         .btn-approve:hover { background: #10b981; color: white; }
         .btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; }
@@ -1146,7 +1150,6 @@ export default function ContentModeration() {
           font-size: 11px;
           font-weight: 500;
         }
-
         .status-badge.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .status-badge.approved { background: rgba(16,185,129,0.1); color: #10b981; }
         .status-badge.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
@@ -1157,7 +1160,6 @@ export default function ContentModeration() {
           background: white;
           border-radius: 24px;
         }
-
         .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
 
         /* Modal Styles */
@@ -1185,7 +1187,6 @@ export default function ContentModeration() {
           overflow-y: auto;
           animation: slideUp 0.3s ease;
         }
-
         .modal-container.modal-reject { max-width: 550px; }
 
         .modal-header {
@@ -1199,7 +1200,6 @@ export default function ContentModeration() {
           background: white;
           z-index: 10;
         }
-
         .modal-header-content { display: flex; align-items: center; gap: 16px; }
         .modal-icon {
           width: 48px;
@@ -1210,11 +1210,9 @@ export default function ContentModeration() {
           align-items: center;
           justify-content: center;
         }
-
         .modal-icon i { font-size: 24px; color: #667eea; }
         .modal-header h2 { font-size: 20px; margin: 0 0 4px 0; }
         .modal-header p { margin: 0; color: #6c757d; font-size: 13px; }
-
         .modal-close {
           width: 36px;
           height: 36px;
@@ -1223,30 +1221,13 @@ export default function ContentModeration() {
           border-radius: 50%;
           cursor: pointer;
         }
-
         .modal-close:hover { background: #e9ecef; transform: rotate(90deg); }
-
         .modal-body { padding: 24px; }
 
-        .detail-images-section {
-          margin-bottom: 28px;
-        }
-
-        .detail-images-section h4 {
-          font-size: 15px;
-          font-weight: 600;
-          margin-bottom: 12px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .detail-images-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-          gap: 12px;
-        }
-
+        /* Detail Modal Styles */
+        .detail-images-section { margin-bottom: 28px; }
+        .detail-images-section h4 { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .detail-images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
         .detail-image-card {
           position: relative;
           aspect-ratio: 1;
@@ -1256,18 +1237,8 @@ export default function ContentModeration() {
           border: 2px solid #e9ecef;
           transition: all 0.3s ease;
         }
-
-        .detail-image-card img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .detail-image-card:hover {
-          transform: scale(1.02);
-          border-color: #667eea;
-        }
-
+        .detail-image-card img { width: 100%; height: 100%; object-fit: cover; }
+        .detail-image-card:hover { transform: scale(1.02); border-color: #667eea; }
         .detail-image-overlay {
           position: absolute;
           top: 0;
@@ -1284,18 +1255,9 @@ export default function ContentModeration() {
           transition: opacity 0.3s ease;
           color: white;
         }
-
-        .detail-image-card:hover .detail-image-overlay {
-          opacity: 1;
-        }
-
-        .detail-image-overlay i {
-          font-size: 20px;
-        }
-
-        .detail-image-overlay span {
-          font-size: 11px;
-        }
+        .detail-image-card:hover .detail-image-overlay { opacity: 1; }
+        .detail-image-overlay i { font-size: 20px; }
+        .detail-image-overlay span { font-size: 11px; }
 
         .detail-section { margin-bottom: 28px; }
         .detail-section h4 {
@@ -1307,7 +1269,6 @@ export default function ContentModeration() {
           gap: 8px;
           color: #1f2937;
         }
-
         .detail-section h4 i { color: #667eea; }
 
         .detail-author {
@@ -1318,7 +1279,6 @@ export default function ContentModeration() {
           background: #f8f9fa;
           border-radius: 16px;
         }
-
         .detail-author-avatar {
           width: 70px;
           height: 70px;
@@ -1329,18 +1289,28 @@ export default function ContentModeration() {
           justify-content: center;
           overflow: hidden;
         }
-
         .detail-author-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .detail-author-avatar i { font-size: 32px; color: white; }
-        .detail-author-name { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
-        .detail-author-email, .detail-author-phone, .detail-author-location { font-size: 13px; color: #6c757d; margin: 4px 0; display: flex; align-items: center; gap: 6px; }
-
-        .detail-info-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 16px;
+        .detail-author-name { font-weight: 700; font-size: 18px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .user-id-badge {
+          display: inline-block;
+          font-size: 10px;
+          background: #e9ecef;
+          padding: 2px 6px;
+          border-radius: 12px;
+          color: #6c757d;
+          font-weight: normal;
+        }
+        .detail-author-email, .detail-author-phone, .detail-author-location, .detail-author-district, .detail-author-joined {
+          font-size: 13px;
+          color: #6c757d;
+          margin: 4px 0;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
 
+        .detail-info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
         .detail-info-item label {
           display: block;
           font-size: 11px;
@@ -1349,7 +1319,6 @@ export default function ContentModeration() {
           margin-bottom: 4px;
           text-transform: uppercase;
         }
-
         .detail-info-item code { background: #f8f9fa; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
         .detail-title {
           font-size: 18px;
@@ -1358,7 +1327,6 @@ export default function ContentModeration() {
           background: #f8f9fa;
           border-radius: 12px;
         }
-
         .detail-content {
           background: #f8f9fa;
           padding: 20px;
@@ -1367,7 +1335,6 @@ export default function ContentModeration() {
           white-space: pre-wrap;
           font-size: 14px;
         }
-
         .category-badge {
           display: inline-block;
           padding: 6px 14px;
@@ -1376,9 +1343,10 @@ export default function ContentModeration() {
           border-radius: 20px;
           font-size: 13px;
         }
-
         .detail-rejection { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
         .detail-moderation { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+        .no-details { text-align: center; padding: 60px; color: #9ca3af; }
+        .loading-details { text-align: center; padding: 60px; }
 
         /* Lightbox Styles */
         .lightbox-overlay {
@@ -1394,19 +1362,8 @@ export default function ContentModeration() {
           z-index: 1200;
           animation: fadeIn 0.2s ease;
         }
-
-        .lightbox-content {
-          position: relative;
-          max-width: 90vw;
-          max-height: 90vh;
-        }
-
-        .lightbox-content img {
-          max-width: 90vw;
-          max-height: 85vh;
-          object-fit: contain;
-        }
-
+        .lightbox-content { position: relative; max-width: 90vw; max-height: 90vh; }
+        .lightbox-content img { max-width: 90vw; max-height: 85vh; object-fit: contain; }
         .lightbox-close {
           position: absolute;
           top: -50px;
@@ -1424,12 +1381,7 @@ export default function ContentModeration() {
           font-size: 20px;
           transition: all 0.3s ease;
         }
-
-        .lightbox-close:hover {
-          background: rgba(255,255,255,0.3);
-          transform: rotate(90deg);
-        }
-
+        .lightbox-close:hover { background: rgba(255,255,255,0.3); transform: rotate(90deg); }
         .lightbox-prev, .lightbox-next {
           position: absolute;
           top: 50%;
@@ -1447,15 +1399,9 @@ export default function ContentModeration() {
           font-size: 24px;
           transition: all 0.3s ease;
         }
-
         .lightbox-prev { left: -60px; }
         .lightbox-next { right: -60px; }
-
-        .lightbox-prev:hover, .lightbox-next:hover {
-          background: rgba(255,255,255,0.3);
-          transform: translateY(-50%) scale(1.1);
-        }
-
+        .lightbox-prev:hover, .lightbox-next:hover { background: rgba(255,255,255,0.3); transform: translateY(-50%) scale(1.1); }
         .lightbox-counter {
           position: absolute;
           bottom: -40px;
@@ -1467,13 +1413,11 @@ export default function ContentModeration() {
           border-radius: 20px;
           font-size: 13px;
         }
-
         .lightbox-actions {
           position: absolute;
           bottom: -40px;
           right: 0;
         }
-
         .lightbox-actions button {
           padding: 6px 12px;
           background: rgba(0,0,0,0.7);
@@ -1487,18 +1431,9 @@ export default function ContentModeration() {
           font-size: 12px;
           transition: all 0.3s ease;
         }
+        .lightbox-actions button:hover { background: rgba(0,0,0,0.9); }
 
-        .lightbox-actions button:hover {
-          background: rgba(0,0,0,0.9);
-        }
-
-        .quick-reasons {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
+        .quick-reasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
         .quick-reason {
           display: flex;
           align-items: center;
@@ -1510,7 +1445,6 @@ export default function ContentModeration() {
           cursor: pointer;
           position: relative;
         }
-
         .quick-reason.selected { background: #fef3c7; border-color: #f59e0b; }
         .quick-reason i { font-size: 18px; color: var(--reason-color); }
         .quick-reason .check { position: absolute; right: 12px; top: 12px; color: #10b981; }
@@ -1524,18 +1458,7 @@ export default function ContentModeration() {
           border-radius: 12px;
           resize: vertical;
         }
-
-        .warning-note {
-          background: #fff3cd;
-          padding: 12px;
-          border-radius: 12px;
-          margin-top: 16px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          color: #856404;
-        }
+        .warning-note { background: #fff3cd; padding: 12px; border-radius: 12px; margin-top: 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #856404; }
 
         .modal-footer {
           padding: 16px 24px;
@@ -1547,15 +1470,11 @@ export default function ContentModeration() {
           position: sticky;
           bottom: 0;
         }
-
         .footer-actions { display: flex; gap: 12px; flex: 1; }
         .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; }
         .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
         .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
         .btn-danger { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-
-        .loading-details { text-align: center; padding: 60px; }
-        .no-details { text-align: center; padding: 60px; color: #9ca3af; }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -1573,14 +1492,13 @@ export default function ContentModeration() {
           .quick-reasons { grid-template-columns: 1fr; }
           .footer-actions { flex-direction: column; }
           .btn-approve-modal, .btn-reject-modal { width: 100%; }
-          .lightbox-prev, .lightbox-next {
-            width: 40px;
-            height: 40px;
-            font-size: 18px;
-          }
+          .lightbox-prev, .lightbox-next { width: 40px; height: 40px; font-size: 18px; }
           .lightbox-prev { left: -50px; }
           .lightbox-next { right: -50px; }
           .detail-images-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+          .post-user-details { min-width: 0; }
+          .post-user-name { font-size: 12px; }
+          .post-user-email, .post-user-phone, .post-user-location { font-size: 9px; }
         }
       `}</style>
     </AdminLayout>
