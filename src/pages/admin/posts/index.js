@@ -55,6 +55,7 @@ export default function ContentModeration() {
       setLoading(true)
       setError(null)
       
+      // First, get all moderation records
       let query = supabase
         .from('content_moderation')
         .select(`
@@ -75,124 +76,113 @@ export default function ContentModeration() {
 
       if (error) throw error
 
-      const postsWithDetails = await Promise.all((data || []).map(async (post) => {
-        let postData = null
-        let userData = null
-        let images = []
-        let postExists = true
+      if (!data || data.length === 0) {
+        setPosts([])
+        setLoading(false)
+        return
+      }
+
+      // Get all unique post IDs from moderation records
+      const postIds = data
+        .filter(item => item.content_type === 'POST' && item.content_id)
+        .map(item => item.content_id)
+      
+      // Fetch all posts in one query
+      let postsData = []
+      if (postIds.length > 0) {
+        const { data: postsResult, error: postsError } = await supabase
+          .from('posts')
+          .select('*')
+          .in('post_id', postIds)
         
-        if (post.content_type === 'POST' && post.content_id) {
-          const { data: postDataResult, error: postError } = await supabase
-            .from('posts')
-            .select('*')
-            .eq('post_id', post.content_id)
-            .maybeSingle()
-          
-          if (postError) {
-            console.error(`Error fetching post ${post.content_id}:`, postError)
-            postExists = false
-          }
-          
-          if (postDataResult) {
-            postData = postDataResult
-            
-            const { data: imagesData, error: imagesError } = await supabase
-              .from('post_images')
-              .select('image_url, image_order')
-              .eq('post_id', post.content_id)
-              .order('image_order', { ascending: true })
-            
-            if (!imagesError && imagesData && imagesData.length > 0) {
-              images = imagesData.map(img => getImageUrl(img.image_url))
-            } else if (postDataResult.image_url) {
-              images = [getImageUrl(postDataResult.image_url)]
-            }
-            
-            const userId = postDataResult.user_id || post.user_id
-            
-            if (userId) {
-              const { data: userResult, error: userError } = await supabase
-                .from('users')
-                .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
-                .eq('user_id', userId)
-                .maybeSingle()
-              
-              if (userError) {
-                console.error(`Error fetching user ${userId}:`, userError)
-              }
-              
-              if (userResult && userResult.full_name) {
-                userData = userResult
-              } else {
-                const { data: adminResult } = await supabase
-                  .from('admin_users')
-                  .select('admin_id, full_name, email')
-                  .eq('admin_id', userId)
-                  .maybeSingle()
-                
-                if (adminResult && adminResult.full_name) {
-                  userData = {
-                    user_id: adminResult.admin_id,
-                    full_name: adminResult.full_name,
-                    email: adminResult.email,
-                    profile_image: null,
-                    phone: null,
-                    location: null,
-                    district: null,
-                    created_at: new Date().toISOString()
-                  }
-                }
-              }
-            }
-            
-            if (!userData) {
-              userData = {
-                user_id: null,
-                full_name: postDataResult.author_name || 'Mobile User',
-                email: postDataResult.user_email || 'Email not available',
-                profile_image: null,
-                phone: null,
-                location: postDataResult.location || null,
-                district: null,
-                created_at: postDataResult.created_at || new Date().toISOString()
-              }
-            }
-          } else {
-            postExists = false
-            userData = {
-              user_id: null,
-              full_name: 'Unknown User',
-              email: 'Email not available',
-              profile_image: null,
-              phone: null,
-              location: null,
-              district: null,
-              created_at: new Date().toISOString()
-            }
+        if (!postsError && postsResult) {
+          postsData = postsResult
+        }
+      }
+      
+      // Get all unique user IDs from posts
+      const userIds = [...new Set(postsData.map(post => post.user_id).filter(id => id))]
+      
+      // Fetch all users in one query
+      let usersData = []
+      if (userIds.length > 0) {
+        const { data: usersResult, error: usersError } = await supabase
+          .from('users')
+          .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+          .in('user_id', userIds)
+        
+        if (!usersError && usersResult) {
+          usersData = usersResult
+        }
+      }
+      
+      // Create maps for quick lookup
+      const postsMap = {}
+      postsData.forEach(post => {
+        postsMap[post.post_id] = post
+      })
+      
+      const usersMap = {}
+      usersData.forEach(user => {
+        usersMap[user.user_id] = user
+      })
+      
+      // Fetch images for all posts
+      let allImages = []
+      if (postIds.length > 0) {
+        const { data: imagesResult, error: imagesError } = await supabase
+          .from('post_images')
+          .select('post_id, image_url, image_order')
+          .in('post_id', postIds)
+          .order('image_order', { ascending: true })
+        
+        if (!imagesError && imagesResult) {
+          allImages = imagesResult
+        }
+      }
+      
+      // Group images by post_id
+      const imagesMap = {}
+      allImages.forEach(image => {
+        if (!imagesMap[image.post_id]) {
+          imagesMap[image.post_id] = []
+        }
+        imagesMap[image.post_id].push(getImageUrl(image.image_url))
+      })
+      
+      // Combine all data
+      const postsWithDetails = data.map(post => {
+        const postData = postsMap[post.content_id]
+        const userData = postData ? usersMap[postData.user_id] : null
+        const postImages = imagesMap[post.content_id] || []
+        
+        let userCreatedDate = null
+        if (userData?.created_at) {
+          const date = new Date(userData.created_at)
+          if (!isNaN(date.getTime())) {
+            userCreatedDate = date
           }
         }
-        
-        const userCreatedDate = userData?.created_at ? new Date(userData.created_at) : null
-        const isValidDate = userCreatedDate && !isNaN(userCreatedDate.getTime())
         
         return { 
           ...post, 
-          title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
-          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
-          images: images,
-          image_count: images.length,
-          cover_image: images[0] || null,
+          title: postData?.title || 'Untitled Post',
+          content: postData?.content || 'No content available',
+          images: postImages,
+          image_count: postImages.length,
+          cover_image: postImages[0] || null,
           post_created_at: postData?.created_at || post.created_at,
           user: userData,
-          author_name: userData?.full_name || 'Mobile User',
-          author_email: userData?.email || 'Email not available',
-          author_phone: userData?.phone || null,
-          author_location: userData?.location || userData?.district || null,
-          user_id: userData?.user_id || post.user_id,
-          post_exists: postExists,
-          user_created_at: isValidDate ? userCreatedDate : null
+          author_name: userData?.full_name || postData?.author_name || 'Mobile User',
+          author_email: userData?.email || postData?.user_email || 'Email not available',
+          author_phone: userData?.phone || postData?.phone || null,
+          author_location: userData?.location || userData?.district || postData?.location || null,
+          user_id: userData?.user_id || postData?.user_id || post.user_id,
+          post_exists: !!postData,
+          user_created_at: userCreatedDate,
+          profile_image: userData?.profile_image ? getImageUrl(userData.profile_image) : null
         }
-      }))
+      })
 
       setPosts(postsWithDetails || [])
     } catch (err) {
@@ -227,80 +217,70 @@ export default function ContentModeration() {
     setPostDetails(null)
     
     try {
-      let details = null
-      
       if (contentType === 'POST' && contentId) {
+        // Fetch post
         const { data: postData, error: postError } = await supabase
           .from('posts')
           .select('*')
           .eq('post_id', contentId)
           .maybeSingle()
         
-        if (postData) {
-          const { data: imagesData, error: imagesError } = await supabase
-            .from('post_images')
-            .select('image_url, image_order')
-            .eq('post_id', contentId)
-            .order('image_order', { ascending: true })
+        if (postError || !postData) {
+          setPostDetails(null)
+          setLoadingDetails(false)
+          return
+        }
+        
+        // Fetch images
+        const { data: imagesData, error: imagesError } = await supabase
+          .from('post_images')
+          .select('image_url, image_order')
+          .eq('post_id', contentId)
+          .order('image_order', { ascending: true })
+        
+        let images = []
+        if (!imagesError && imagesData && imagesData.length > 0) {
+          images = imagesData.map(img => getImageUrl(img.image_url))
+        } else if (postData.image_url) {
+          images = [getImageUrl(postData.image_url)]
+        }
+        
+        // Fetch user
+        let userData = null
+        if (postData.user_id) {
+          const { data: userResult } = await supabase
+            .from('users')
+            .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+            .eq('user_id', postData.user_id)
+            .maybeSingle()
           
-          let images = []
-          if (!imagesError && imagesData && imagesData.length > 0) {
-            images = imagesData.map(img => getImageUrl(img.image_url))
-          } else if (postData.image_url) {
-            images = [getImageUrl(postData.image_url)]
-          }
-          
-          let userData = null
-          const userId = postData.user_id
-          
-          if (userId) {
-            const { data: userResult } = await supabase
-              .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
-              .eq('user_id', userId)
-              .maybeSingle()
-            
-            if (userResult && userResult.full_name) {
-              userData = userResult
-            }
-          }
-          
-          if (!userData) {
-            userData = {
-              full_name: postData.author_name || 'Mobile User',
-              email: postData.user_email || 'Email not available',
-              profile_image: null,
-              phone: null,
-              location: postData.location || null,
-              district: null,
-              created_at: postData.created_at
-            }
-          }
-          
-          let categoryData = null
-          if (postData.category_id) {
-            const { data: catResult } = await supabase
-              .from('post_categories')
-              .select('category_name, description')
-              .eq('category_id', postData.category_id)
-              .maybeSingle()
-            
-            if (catResult) {
-              categoryData = catResult
-            }
-          }
-          
-          details = { 
-            ...postData, 
-            images: images,
-            image_count: images.length,
-            user: userData,
-            category: categoryData
+          if (userResult) {
+            userData = userResult
           }
         }
+        
+        // Fetch category
+        let categoryData = null
+        if (postData.category_id) {
+          const { data: catResult } = await supabase
+            .from('post_categories')
+            .select('category_name, description')
+            .eq('category_id', postData.category_id)
+            .maybeSingle()
+          
+          if (catResult) {
+            categoryData = catResult
+          }
+        }
+        
+        setPostDetails({ 
+          ...postData, 
+          images: images,
+          image_count: images.length,
+          user: userData,
+          category: categoryData
+        })
       }
-      
-      setPostDetails(details)
     } catch (err) {
       console.error('Error fetching post details:', err)
       setPostDetails(null)
@@ -491,8 +471,8 @@ export default function ContentModeration() {
                 {/* User Info */}
                 <div className="post-user">
                   <div className="user-avatar">
-                    {post.user?.profile_image ? (
-                      <img src={getImageUrl(post.user.profile_image)} alt={post.user.full_name} />
+                    {post.profile_image ? (
+                      <img src={post.profile_image} alt={post.author_name} />
                     ) : (
                       <span>{post.author_name?.charAt(0) || 'U'}</span>
                     )}
@@ -582,7 +562,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Details Modal - Keep as is from previous version */}
       {showDetailsModal && selectedPost && postDetails && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
@@ -1027,11 +1007,10 @@ export default function ContentModeration() {
         .filter-count.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .filter-count.success { background: rgba(16,185,129,0.1); color: #10b981; }
         .filter-count.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .filter-btn.active .filter-count { color: white; background: rgba(255,255,255,0.2); }
 
         .posts-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
           gap: 24px;
         }
 
