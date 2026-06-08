@@ -17,6 +17,9 @@ export default function ContentModeration() {
   const [actionLoading, setActionLoading] = useState(false)
   const [postDetails, setPostDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
+  const [showFullImage, setShowFullImage] = useState(false)
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -24,7 +27,6 @@ export default function ContentModeration() {
     rejected: 0
   })
 
-  // Quick rejection reasons
   const quickReasons = [
     { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
     { id: 2, reason: 'Spam or promotional', icon: 'bi-megaphone', color: '#f59e0b' },
@@ -73,11 +75,12 @@ export default function ContentModeration() {
 
       if (error) throw error
 
-      // Fetch complete post details
+      // Fetch complete post details for each moderation record
       const postsWithDetails = await Promise.all((data || []).map(async (post) => {
         let postData = null
         let userData = null
-        let imageUrl = null
+        let images = []
+        let postExists = true
         
         if (post.content_type === 'POST' && post.content_id) {
           // Fetch post content from posts table
@@ -87,9 +90,26 @@ export default function ContentModeration() {
             .eq('post_id', post.content_id)
             .maybeSingle()
           
-          if (!postError && postDataResult) {
+          if (postError) {
+            console.error(`Error fetching post ${post.content_id}:`, postError)
+            postExists = false
+          }
+          
+          if (postDataResult) {
             postData = postDataResult
-            imageUrl = getImageUrl(postDataResult.image_url)
+            
+            // Fetch all images from post_images table
+            const { data: imagesData, error: imagesError } = await supabase
+              .from('post_images')
+              .select('image_url, image_order')
+              .eq('post_id', post.content_id)
+              .order('image_order', { ascending: true })
+            
+            if (!imagesError && imagesData && imagesData.length > 0) {
+              images = imagesData.map(img => getImageUrl(img.image_url))
+            } else if (postDataResult.image_url) {
+              images = [getImageUrl(postDataResult.image_url)]
+            }
             
             // Fetch user details
             if (postDataResult.user_id) {
@@ -103,19 +123,24 @@ export default function ContentModeration() {
                 userData = userResult
               }
             }
+          } else {
+            postExists = false
           }
         }
         
         return { 
           ...post, 
-          title: postData?.title || 'Untitled Post',
-          content: postData?.content || 'No content available',
-          image_url: imageUrl,
+          title: postData?.title || (postExists ? 'Loading...' : 'Post Deleted'),
+          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted from the database.'),
+          images: images,
+          image_count: images.length,
+          cover_image: images[0] || null,
           post_created_at: postData?.created_at || post.created_at,
           user: userData,
-          author_name: userData?.full_name || 'Mobile User',
+          author_name: userData?.full_name || 'Unknown User',
           author_email: userData?.email || 'Email not available',
-          author_district: userData?.district || 'Not specified'
+          author_district: userData?.district || 'Not specified',
+          post_exists: postExists
         }
       }))
 
@@ -162,11 +187,21 @@ export default function ContentModeration() {
           .eq('post_id', contentId)
           .maybeSingle()
         
-        if (postError) {
-          console.error('Error fetching post:', postError)
-        }
-        
         if (postData) {
+          // Fetch all images from post_images table
+          const { data: imagesData, error: imagesError } = await supabase
+            .from('post_images')
+            .select('image_url, image_order')
+            .eq('post_id', contentId)
+            .order('image_order', { ascending: true })
+          
+          let images = []
+          if (!imagesError && imagesData && imagesData.length > 0) {
+            images = imagesData.map(img => getImageUrl(img.image_url))
+          } else if (postData.image_url) {
+            images = [getImageUrl(postData.image_url)]
+          }
+          
           // Fetch user details
           let userData = null
           if (postData.user_id) {
@@ -175,7 +210,10 @@ export default function ContentModeration() {
               .select('user_id, full_name, email, profile_image, phone, district')
               .eq('user_id', postData.user_id)
               .maybeSingle()
-            userData = userResult
+            
+            if (userResult) {
+              userData = userResult
+            }
           }
           
           // Fetch category
@@ -186,38 +224,26 @@ export default function ContentModeration() {
               .select('category_name, description')
               .eq('category_id', postData.category_id)
               .maybeSingle()
-            categoryData = catResult
+            
+            if (catResult) {
+              categoryData = catResult
+            }
           }
           
           details = { 
             ...postData, 
-            image_url: getImageUrl(postData.image_url),
+            images: images,
+            image_count: images.length,
             user: userData,
             category: categoryData
           }
         }
       }
       
-      if (details) {
-        setPostDetails(details)
-      } else {
-        setPostDetails({
-          title: 'Content not found',
-          content: 'Unable to load content details. The post may have been deleted.',
-          image_url: null,
-          user: null,
-          category: null
-        })
-      }
+      setPostDetails(details)
     } catch (err) {
       console.error('Error fetching post details:', err)
-      setPostDetails({
-        title: 'Error loading content',
-        content: 'An error occurred while loading the content details.',
-        image_url: null,
-        user: null,
-        category: null
-      })
+      setPostDetails(null)
     } finally {
       setLoadingDetails(false)
     }
@@ -277,6 +303,26 @@ export default function ContentModeration() {
     setSelectedPost(post)
     await fetchPostDetails(post.content_id, post.content_type)
     setShowDetailsModal(true)
+  }
+
+  const openFullImage = (imageUrl, index) => {
+    setSelectedImage(imageUrl)
+    setCurrentImageIndex(index)
+    setShowFullImage(true)
+  }
+
+  const nextImage = () => {
+    if (postDetails && postDetails.images && currentImageIndex < postDetails.images.length - 1) {
+      setCurrentImageIndex(currentImageIndex + 1)
+      setSelectedImage(postDetails.images[currentImageIndex + 1])
+    }
+  }
+
+  const prevImage = () => {
+    if (postDetails && postDetails.images && currentImageIndex > 0) {
+      setCurrentImageIndex(currentImageIndex - 1)
+      setSelectedImage(postDetails.images[currentImageIndex - 1])
+    }
   }
 
   const getStatusBadge = (status) => {
@@ -413,10 +459,30 @@ export default function ContentModeration() {
                   {getStatusBadge(post.moderation_status)}
                 </div>
 
-                {/* Post Image */}
-                {post.image_url && (
-                  <div className="post-card-image">
-                    <img src={post.image_url} alt={post.title} />
+                {/* Post Images Gallery */}
+                {post.images && post.images.length > 0 && (
+                  <div className="post-images-gallery">
+                    <div className="images-grid">
+                      {post.images.slice(0, 3).map((img, idx) => (
+                        <div key={idx} className="gallery-image" onClick={() => openFullImage(img, idx)}>
+                          <img src={img} alt={`Image ${idx + 1}`} />
+                          <div className="gallery-overlay">
+                            <i className="bi bi-zoom-in"></i>
+                          </div>
+                        </div>
+                      ))}
+                      {post.images.length > 3 && (
+                        <div className="more-images" onClick={() => viewDetails(post)}>
+                          <i className="bi bi-images"></i>
+                          <span>+{post.images.length - 3}</span>
+                        </div>
+                      )}
+                    </div>
+                    {post.images.length > 1 && (
+                      <div className="image-count-badge">
+                        <i className="bi bi-images"></i> {post.images.length} images
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -437,7 +503,7 @@ export default function ContentModeration() {
                   <button className="btn-view" onClick={() => viewDetails(post)}>
                     <i className="bi bi-eye"></i> View Details
                   </button>
-                  {post.moderation_status === 'PENDING' && (
+                  {post.moderation_status === 'PENDING' && post.post_exists !== false && (
                     <div className="action-buttons">
                       <button className="btn-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
                         <i className="bi bi-check-lg"></i> Approve
@@ -463,7 +529,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Details Modal with Full Content and All Images */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -490,10 +556,21 @@ export default function ContentModeration() {
                 </div>
               ) : postDetails ? (
                 <>
-                  {/* Post Image */}
-                  {postDetails.image_url && (
-                    <div className="detail-image-section">
-                      <img src={postDetails.image_url} alt={postDetails.title} className="detail-image" />
+                  {/* Full Images Gallery */}
+                  {postDetails.images && postDetails.images.length > 0 && (
+                    <div className="detail-images-section">
+                      <h4><i className="bi bi-images"></i> All Images ({postDetails.images.length})</h4>
+                      <div className="detail-images-grid">
+                        {postDetails.images.map((img, idx) => (
+                          <div key={idx} className="detail-image-card" onClick={() => openFullImage(img, idx)}>
+                            <img src={img} alt={`Image ${idx + 1}`} />
+                            <div className="detail-image-overlay">
+                              <i className="bi bi-zoom-in"></i>
+                              <span>View</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -593,13 +670,13 @@ export default function ContentModeration() {
               ) : (
                 <div className="no-details">
                   <i className="bi bi-file-text"></i>
-                  <p>No details available for this content</p>
+                  <p>The original post could not be found.</p>
                 </div>
               )}
             </div>
             
             <div className="modal-footer">
-              {selectedPost.moderation_status === 'PENDING' && (
+              {selectedPost.moderation_status === 'PENDING' && postDetails && (
                 <div className="footer-actions">
                   <button className="btn-approve-modal" onClick={() => handleApprove(selectedPost)}>
                     <i className="bi bi-check-lg"></i> Approve
@@ -613,6 +690,39 @@ export default function ContentModeration() {
                 </div>
               )}
               <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Image Lightbox with Navigation */}
+      {showFullImage && selectedImage && postDetails && (
+        <div className="lightbox-overlay" onClick={() => setShowFullImage(false)}>
+          <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+            <button className="lightbox-close" onClick={() => setShowFullImage(false)}>
+              <i className="bi bi-x-lg"></i>
+            </button>
+            
+            {postDetails.images && postDetails.images.length > 1 && (
+              <>
+                <button className="lightbox-prev" onClick={prevImage}>
+                  <i className="bi bi-chevron-left"></i>
+                </button>
+                <button className="lightbox-next" onClick={nextImage}>
+                  <i className="bi bi-chevron-right"></i>
+                </button>
+                <div className="lightbox-counter">
+                  {currentImageIndex + 1} / {postDetails.images.length}
+                </div>
+              </>
+            )}
+            
+            <img src={selectedImage} alt="Full size" />
+            
+            <div className="lightbox-actions">
+              <button onClick={() => window.open(selectedImage, '_blank')}>
+                <i className="bi bi-box-arrow-up-right"></i> Open in new tab
+              </button>
             </div>
           </div>
         </div>
@@ -849,8 +959,93 @@ export default function ContentModeration() {
         .post-user-district { font-size: 10px; color: #9ca3af; margin-top: 2px; }
         .post-user-district i { font-size: 9px; }
 
-        .post-card-image { height: 200px; overflow: hidden; }
-        .post-card-image img { width: 100%; height: 100%; object-fit: cover; }
+        /* Images Gallery in Card */
+        .post-images-gallery {
+          padding: 12px;
+          background: #fafbfc;
+        }
+
+        .images-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 8px;
+        }
+
+        .gallery-image {
+          position: relative;
+          aspect-ratio: 1;
+          border-radius: 12px;
+          overflow: hidden;
+          cursor: pointer;
+        }
+
+        .gallery-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease;
+        }
+
+        .gallery-image:hover img {
+          transform: scale(1.05);
+        }
+
+        .gallery-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        }
+
+        .gallery-image:hover .gallery-overlay {
+          opacity: 1;
+        }
+
+        .gallery-overlay i {
+          font-size: 24px;
+          color: white;
+        }
+
+        .more-images {
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          color: white;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .more-images:hover {
+          transform: scale(1.02);
+        }
+
+        .more-images i {
+          font-size: 24px;
+        }
+
+        .more-images span {
+          font-size: 11px;
+        }
+
+        .image-count-badge {
+          margin-top: 8px;
+          font-size: 11px;
+          color: #667eea;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
 
         .post-card-content { padding: 16px; }
         .post-card-title { font-size: 16px; font-weight: 600; margin: 0 0 8px 0; }
@@ -993,8 +1188,75 @@ export default function ContentModeration() {
 
         .modal-body { padding: 24px; }
 
-        .detail-image-section { margin-bottom: 24px; text-align: center; }
-        .detail-image { max-width: 100%; max-height: 400px; border-radius: 16px; object-fit: contain; }
+        /* Detail Images Section */
+        .detail-images-section {
+          margin-bottom: 28px;
+        }
+
+        .detail-images-section h4 {
+          font-size: 15px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .detail-images-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+          gap: 12px;
+        }
+
+        .detail-image-card {
+          position: relative;
+          aspect-ratio: 1;
+          border-radius: 12px;
+          overflow: hidden;
+          cursor: pointer;
+          border: 2px solid #e9ecef;
+          transition: all 0.3s ease;
+        }
+
+        .detail-image-card img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .detail-image-card:hover {
+          transform: scale(1.02);
+          border-color: #667eea;
+        }
+
+        .detail-image-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.6);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+          color: white;
+        }
+
+        .detail-image-card:hover .detail-image-overlay {
+          opacity: 1;
+        }
+
+        .detail-image-overlay i {
+          font-size: 20px;
+        }
+
+        .detail-image-overlay span {
+          font-size: 11px;
+        }
 
         .detail-section { margin-bottom: 28px; }
         .detail-section h4 {
@@ -1080,6 +1342,118 @@ export default function ContentModeration() {
         .detail-rejection { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
         .detail-moderation { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
 
+        /* Lightbox Styles */
+        .lightbox-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.95);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1200;
+          animation: fadeIn 0.2s ease;
+        }
+
+        .lightbox-content {
+          position: relative;
+          max-width: 90vw;
+          max-height: 90vh;
+        }
+
+        .lightbox-content img {
+          max-width: 90vw;
+          max-height: 85vh;
+          object-fit: contain;
+        }
+
+        .lightbox-close {
+          position: absolute;
+          top: -50px;
+          right: 0;
+          width: 40px;
+          height: 40px;
+          background: rgba(255,255,255,0.2);
+          border: none;
+          border-radius: 50%;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          transition: all 0.3s ease;
+        }
+
+        .lightbox-close:hover {
+          background: rgba(255,255,255,0.3);
+          transform: rotate(90deg);
+        }
+
+        .lightbox-prev, .lightbox-next {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 50px;
+          height: 50px;
+          background: rgba(255,255,255,0.2);
+          border: none;
+          border-radius: 50%;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+          transition: all 0.3s ease;
+        }
+
+        .lightbox-prev { left: -60px; }
+        .lightbox-next { right: -60px; }
+
+        .lightbox-prev:hover, .lightbox-next:hover {
+          background: rgba(255,255,255,0.3);
+          transform: translateY(-50%) scale(1.1);
+        }
+
+        .lightbox-counter {
+          position: absolute;
+          bottom: -40px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(0,0,0,0.7);
+          color: white;
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 13px;
+        }
+
+        .lightbox-actions {
+          position: absolute;
+          bottom: -40px;
+          right: 0;
+        }
+
+        .lightbox-actions button {
+          padding: 6px 12px;
+          background: rgba(0,0,0,0.7);
+          border: none;
+          border-radius: 8px;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          transition: all 0.3s ease;
+        }
+
+        .lightbox-actions button:hover {
+          background: rgba(0,0,0,0.9);
+        }
+
         .quick-reasons {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1161,6 +1535,14 @@ export default function ContentModeration() {
           .quick-reasons { grid-template-columns: 1fr; }
           .footer-actions { flex-direction: column; }
           .btn-approve-modal, .btn-reject-modal { width: 100%; }
+          .lightbox-prev, .lightbox-next {
+            width: 40px;
+            height: 40px;
+            font-size: 18px;
+          }
+          .lightbox-prev { left: -50px; }
+          .lightbox-next { right: -50px; }
+          .detail-images-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
         }
       `}</style>
     </AdminLayout>
