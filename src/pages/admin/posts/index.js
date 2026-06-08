@@ -51,155 +51,118 @@ export default function ContentModeration() {
   }
 
   const fetchPosts = async () => {
-  try {
-    setLoading(true)
-    setError(null)
-    
-    let query = supabase
-      .from('content_moderation')
-      .select(`
-        *,
-        reviewed_by_admin:admin_users!reviewed_by (
-          admin_id,
-          full_name,
-          email
-        )
-      `)
-      .order('created_at', { ascending: false })
-
-    if (filter !== 'ALL') {
-      query = query.eq('moderation_status', filter)
-    }
-
-    const { data, error } = await query
-
-    if (error) throw error
-
-    console.log('Content moderation records:', data?.length || 0)
-
-    const postsWithDetails = await Promise.all((data || []).map(async (post) => {
-      let postData = null
-      let userData = null
-      let images = []
-      let postExists = true
+    try {
+      setLoading(true)
+      setError(null)
       
-      console.log(`Processing post ${post.content_id}, user_id from moderation:`, post.user_id)
-      
-      if (post.content_type === 'POST' && post.content_id) {
-        // Fetch post content from posts table
-        const { data: postDataResult, error: postError } = await supabase
-          .from('posts')
-          .select('*')
-          .eq('post_id', post.content_id)
-          .maybeSingle()
+      let query = supabase
+        .from('content_moderation')
+        .select(`
+          *,
+          reviewed_by_admin:admin_users!reviewed_by (
+            admin_id,
+            full_name,
+            email
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      if (filter !== 'ALL') {
+        query = query.eq('moderation_status', filter)
+      }
+
+      const { data, error } = await query
+
+      if (error) throw error
+
+      const postsWithDetails = await Promise.all((data || []).map(async (post) => {
+        let postData = null
+        let userData = null
+        let images = []
+        let postExists = true
         
-        if (postError) {
-          console.error(`Error fetching post ${post.content_id}:`, postError)
-          postExists = false
-        }
-        
-        if (postDataResult) {
-          postData = postDataResult
-          console.log(`Found post: ${postDataResult.title}, user_id from post:`, postDataResult.user_id)
-          
-          // Fetch images from post_images table
-          const { data: imagesData, error: imagesError } = await supabase
-            .from('post_images')
-            .select('image_url, image_order')
+        if (post.content_type === 'POST' && post.content_id) {
+          const { data: postDataResult, error: postError } = await supabase
+            .from('posts')
+            .select('*')
             .eq('post_id', post.content_id)
-            .order('image_order', { ascending: true })
+            .maybeSingle()
           
-          if (!imagesError && imagesData && imagesData.length > 0) {
-            images = imagesData.map(img => getImageUrl(img.image_url))
-          } else if (postDataResult.image_url) {
-            images = [getImageUrl(postDataResult.image_url)]
+          if (postError) {
+            console.error(`Error fetching post ${post.content_id}:`, postError)
+            postExists = false
           }
           
-          // Try different methods to get user data
-          const userId = postDataResult.user_id || post.user_id
-          
-          if (userId) {
-            console.log(`Looking up user with ID: ${userId}`)
+          if (postDataResult) {
+            postData = postDataResult
             
-            // Method 1: Try to get from users table using the ID directly
-            const { data: userResult, error: userError } = await supabase
-              .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
-              .eq('user_id', userId)
-              .maybeSingle()
+            const { data: imagesData, error: imagesError } = await supabase
+              .from('post_images')
+              .select('image_url, image_order')
+              .eq('post_id', post.content_id)
+              .order('image_order', { ascending: true })
             
-            if (userError) {
-              console.error(`Error fetching user ${userId}:`, userError)
+            if (!imagesError && imagesData && imagesData.length > 0) {
+              images = imagesData.map(img => getImageUrl(img.image_url))
+            } else if (postDataResult.image_url) {
+              images = [getImageUrl(postDataResult.image_url)]
             }
             
-            if (userResult) {
-              console.log(`User found in users table:`, userResult.full_name)
-              userData = userResult
-            } else {
-              console.log(`User ${userId} not found in users table, trying other methods...`)
-              
-              // Method 2: Try to get from admin_users table
-              const { data: adminResult, error: adminError } = await supabase
-                .from('admin_users')
-                .select('admin_id, full_name, email')
-                .eq('admin_id', userId)
+            const userId = postDataResult.user_id || post.user_id
+            
+            if (userId) {
+              const { data: userResult, error: userError } = await supabase
+                .from('users')
+                .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+                .eq('user_id', userId)
                 .maybeSingle()
               
-              if (adminError) {
-                console.error(`Error fetching admin user:`, adminError)
+              if (userError) {
+                console.error(`Error fetching user ${userId}:`, userError)
               }
               
-              if (adminResult) {
-                console.log(`User found in admin_users table:`, adminResult.full_name)
-                userData = {
-                  user_id: adminResult.admin_id,
-                  full_name: adminResult.full_name,
-                  email: adminResult.email,
-                  profile_image: null,
-                  phone: null,
-                  location: null,
-                  district: null,
-                  created_at: null
-                }
+              if (userResult && userResult.full_name) {
+                userData = userResult
               } else {
-                // Method 3: Try to search users by email if we have it in posts
-                if (postDataResult.user_email) {
-                  console.log(`Trying to find user by email: ${postDataResult.user_email}`)
-                  const { data: emailUser } = await supabase
-                    .from('users')
-                    .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
-                    .eq('email', postDataResult.user_email)
-                    .maybeSingle()
-                  
-                  if (emailUser) {
-                    console.log(`User found by email:`, emailUser.full_name)
-                    userData = emailUser
-                  }
-                }
+                const { data: adminResult } = await supabase
+                  .from('admin_users')
+                  .select('admin_id, full_name, email')
+                  .eq('admin_id', userId)
+                  .maybeSingle()
                 
-                // Method 4: Create a fallback user with what we know
-                if (!userData) {
-                  console.log(`Creating fallback user data for ID: ${userId}`)
+                if (adminResult && adminResult.full_name) {
                   userData = {
-                    user_id: userId,
-                    full_name: postDataResult.author_name || `User ${userId.slice(0, 8)}`,
-                    email: postDataResult.user_email || 'Email not available',
+                    user_id: adminResult.admin_id,
+                    full_name: adminResult.full_name,
+                    email: adminResult.email,
                     profile_image: null,
                     phone: null,
-                    location: postDataResult.location || null,
+                    location: null,
                     district: null,
-                    created_at: postDataResult.created_at || new Date().toISOString()
+                    created_at: new Date().toISOString()
                   }
                 }
+              }
+            }
+            
+            if (!userData) {
+              userData = {
+                user_id: null,
+                full_name: postDataResult.author_name || 'Mobile User',
+                email: postDataResult.user_email || 'Email not available',
+                profile_image: null,
+                phone: null,
+                location: postDataResult.location || null,
+                district: null,
+                created_at: postDataResult.created_at || new Date().toISOString()
               }
             }
           } else {
-            console.log(`No user_id found for post ${post.content_id}`)
-            // Create a default user
+            postExists = false
             userData = {
               user_id: null,
-              full_name: 'Guest User',
-              email: 'No email provided',
+              full_name: 'Unknown User',
+              email: 'Email not available',
               profile_image: null,
               phone: null,
               location: null,
@@ -207,40 +170,38 @@ export default function ContentModeration() {
               created_at: new Date().toISOString()
             }
           }
-        } else {
-          postExists = false
-          console.log(`Post ${post.content_id} not found in posts table`)
         }
-      }
-      
-      return { 
-        ...post, 
-        title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
-        content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
-        images: images,
-        image_count: images.length,
-        cover_image: images[0] || null,
-        post_created_at: postData?.created_at || post.created_at,
-        user: userData,
-        author_name: userData?.full_name || 'Mobile User',
-        author_email: userData?.email || 'Email not available',
-        author_phone: userData?.phone || null,
-        author_location: userData?.location || userData?.district || null,
-        user_id: userData?.user_id || post.user_id,
-        post_exists: postExists,
-        user_created_at: userData?.created_at
-      }
-    }))
+        
+        const userCreatedDate = userData?.created_at ? new Date(userData.created_at) : null
+        const isValidDate = userCreatedDate && !isNaN(userCreatedDate.getTime())
+        
+        return { 
+          ...post, 
+          title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
+          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
+          images: images,
+          image_count: images.length,
+          cover_image: images[0] || null,
+          post_created_at: postData?.created_at || post.created_at,
+          user: userData,
+          author_name: userData?.full_name || 'Mobile User',
+          author_email: userData?.email || 'Email not available',
+          author_phone: userData?.phone || null,
+          author_location: userData?.location || userData?.district || null,
+          user_id: userData?.user_id || post.user_id,
+          post_exists: postExists,
+          user_created_at: isValidDate ? userCreatedDate : null
+        }
+      }))
 
-    console.log('Final posts with user data:', postsWithDetails.length)
-    setPosts(postsWithDetails || [])
-  } catch (err) {
-    console.error('Error fetching posts:', err)
-    setError(err.message)
-  } finally {
-    setLoading(false)
+      setPosts(postsWithDetails || [])
+    } catch (err) {
+      console.error('Error fetching posts:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }
-}
 
   const fetchStats = async () => {
     try {
@@ -293,36 +254,26 @@ export default function ContentModeration() {
           const userId = postData.user_id
           
           if (userId) {
-            const { data: userResult, error: userError } = await supabase
+            const { data: userResult } = await supabase
               .from('users')
               .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
               .eq('user_id', userId)
               .maybeSingle()
             
-            if (userError) {
-              console.error('Error fetching user:', userError)
-            }
-            
-            if (userResult) {
+            if (userResult && userResult.full_name) {
               userData = userResult
-            } else {
-              const { data: adminResult } = await supabase
-                .from('admin_users')
-                .select('admin_id, full_name, email')
-                .eq('admin_id', userId)
-                .maybeSingle()
-              
-              if (adminResult) {
-                userData = {
-                  user_id: adminResult.admin_id,
-                  full_name: adminResult.full_name,
-                  email: adminResult.email,
-                  profile_image: null,
-                  phone: null,
-                  location: null,
-                  district: null
-                }
-              }
+            }
+          }
+          
+          if (!userData) {
+            userData = {
+              full_name: postData.author_name || 'Mobile User',
+              email: postData.user_email || 'Email not available',
+              profile_image: null,
+              phone: null,
+              location: postData.location || null,
+              district: null,
+              created_at: postData.created_at
             }
           }
           
@@ -557,7 +508,7 @@ export default function ContentModeration() {
                       <p><i className="bi bi-geo-alt"></i> {post.author_location}</p>
                     )}
                     {post.user_created_at && (
-                      <p><i className="bi bi-calendar-check"></i> Joined: {new Date(post.user_created_at).toLocaleDateString()}</p>
+                      <p><i className="bi bi-calendar-check"></i> Joined: {post.user_created_at.toLocaleDateString()}</p>
                     )}
                   </div>
                   {getStatusBadge(post.moderation_status)}
@@ -593,12 +544,9 @@ export default function ContentModeration() {
                   <h3>{post.title}</h3>
                   <p>{post.content?.substring(0, 100)}...</p>
                   <div className="post-meta">
-                  <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at).toLocaleDateString()}</span>
-                  <span><i className="bi bi-clock"></i> {new Date(post.post_created_at).toLocaleTimeString()}</span>
-                  {post.user_created_at && (
-                    <span><i className="bi bi-person-plus"></i> Joined: {new Date(post.user_created_at).toLocaleDateString()}</span>
-                  )}
-                </div>
+                    <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at).toLocaleDateString()}</span>
+                    <span><i className="bi bi-clock"></i> {new Date(post.post_created_at).toLocaleTimeString()}</span>
+                  </div>
                 </div>
 
                 {/* Actions */}
@@ -694,7 +642,9 @@ export default function ContentModeration() {
                         <p><i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}</p>
                         {postDetails.user?.phone && <p><i className="bi bi-telephone"></i> {postDetails.user.phone}</p>}
                         {postDetails.user?.location && <p><i className="bi bi-geo-alt"></i> {postDetails.user.location}</p>}
-                        <p><i className="bi bi-calendar-check"></i> Joined: {new Date(postDetails.user?.created_at).toLocaleDateString()}</p>
+                        {postDetails.user?.created_at && (
+                          <p><i className="bi bi-calendar-check"></i> Joined: {new Date(postDetails.user.created_at).toLocaleDateString()}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -891,7 +841,6 @@ export default function ContentModeration() {
           padding: 24px;
         }
 
-        /* Loading Screen */
         .loading-screen {
           display: flex;
           flex-direction: column;
@@ -914,7 +863,6 @@ export default function ContentModeration() {
           to { transform: rotate(360deg); }
         }
 
-        /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%);
           border-radius: 24px;
@@ -977,7 +925,6 @@ export default function ContentModeration() {
           margin: 0;
         }
 
-        /* Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -1025,7 +972,6 @@ export default function ContentModeration() {
         .text-danger { color: #ef4444; }
         .stat-trend { font-size: 11px; color: #9ca3af; margin-top: 4px; display: block; }
 
-        /* Filter Section */
         .filter-section {
           margin-bottom: 32px;
         }
@@ -1083,7 +1029,6 @@ export default function ContentModeration() {
         .filter-count.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
         .filter-btn.active .filter-count { color: white; background: rgba(255,255,255,0.2); }
 
-        /* Posts Grid */
         .posts-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
@@ -1115,7 +1060,6 @@ export default function ContentModeration() {
           box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.02);
         }
 
-        /* User Section */
         .post-user {
           padding: 20px;
           background: #fafbfc;
@@ -1172,20 +1116,18 @@ export default function ContentModeration() {
 
         .user-info p {
           font-size: 12px;
-          color: #9ca3af;
-          margin: 0;
-        }
-
-        .user-location {
-          font-size: 10px;
-          color: #9ca3af;
+          color: #6b7280;
+          margin: 2px 0;
           display: flex;
           align-items: center;
-          gap: 4px;
-          margin-top: 4px;
+          gap: 6px;
         }
 
-        /* Images Section */
+        .user-info p i {
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
         .post-images {
           padding: 16px;
           background: #fafbfc;
@@ -1273,7 +1215,6 @@ export default function ContentModeration() {
           gap: 4px;
         }
 
-        /* Content Section */
         .post-content {
           padding: 20px;
         }
@@ -1303,7 +1244,6 @@ export default function ContentModeration() {
           margin-right: 4px;
         }
 
-        /* Actions */
         .post-actions {
           padding: 16px 20px 20px;
           border-top: 1px solid #f1f5f9;
@@ -1373,7 +1313,6 @@ export default function ContentModeration() {
           color: white;
         }
 
-        /* Status Badge */
         .status-badge {
           display: inline-flex;
           align-items: center;
@@ -1388,7 +1327,6 @@ export default function ContentModeration() {
         .status-badge.approved { background: #d1fae5; color: #10b981; }
         .status-badge.rejected { background: #fee2e2; color: #ef4444; }
 
-        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 80px 20px;
@@ -1421,7 +1359,6 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
-        /* Modal Styles */
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -1529,7 +1466,6 @@ export default function ContentModeration() {
           flex: 1;
         }
 
-        /* Modal Content */
         .modal-images {
           margin-bottom: 28px;
         }
@@ -1611,7 +1547,6 @@ export default function ContentModeration() {
           color: #4f46e5;
         }
 
-        /* Author Card */
         .author-card {
           display: flex;
           align-items: center;
@@ -1661,7 +1596,6 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
-        /* Info Grid */
         .info-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1684,7 +1618,6 @@ export default function ContentModeration() {
           font-size: 12px;
         }
 
-        /* Post Content */
         .post-title {
           font-size: 18px;
           font-weight: 600;
@@ -1734,7 +1667,151 @@ export default function ContentModeration() {
           margin-bottom: 0;
         }
 
-        /* Lightbox */
+        .quick-reasons {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+
+        .quick-reason {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 16px;
+          background: #f9fafb;
+          border: 2px solid #e5e7eb;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
+        }
+
+        .quick-reason:hover {
+          background: #f3f4f6;
+          transform: translateY(-2px);
+        }
+
+        .quick-reason.selected {
+          background: #fef3c7;
+          border-color: #f59e0b;
+        }
+
+        .quick-reason i {
+          font-size: 18px;
+          color: var(--reason-color);
+        }
+
+        .quick-reason .check {
+          position: absolute;
+          right: 12px;
+          top: 12px;
+          color: #10b981;
+          font-size: 16px;
+        }
+
+        .custom-reason {
+          margin-top: 20px;
+        }
+
+        .custom-reason label {
+          display: block;
+          font-size: 13px;
+          font-weight: 600;
+          margin-bottom: 8px;
+        }
+
+        .custom-reason textarea {
+          width: 100%;
+          padding: 12px;
+          border: 2px solid #e5e7eb;
+          border-radius: 12px;
+          resize: vertical;
+          font-size: 14px;
+        }
+
+        .custom-reason textarea:focus {
+          outline: none;
+          border-color: #4f46e5;
+        }
+
+        .warning-note {
+          background: #fef3c7;
+          padding: 12px;
+          border-radius: 12px;
+          margin-top: 16px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: #856404;
+        }
+
+        .btn-secondary {
+          padding: 10px 20px;
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 500;
+          transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+          background: #f3f4f6;
+        }
+
+        .btn-approve-modal {
+          padding: 10px 24px;
+          background: #10b981;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-approve-modal:hover {
+          background: #059669;
+          transform: translateY(-2px);
+        }
+
+        .btn-reject-modal {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-reject-modal:hover {
+          background: #dc2626;
+          transform: translateY(-2px);
+        }
+
+        .btn-danger {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .btn-close {
+          padding: 10px 24px;
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 500;
+        }
+
         .lightbox-overlay {
           position: fixed;
           top: 0;
@@ -1846,153 +1923,6 @@ export default function ContentModeration() {
           background: rgba(0,0,0,0.9);
         }
 
-        /* Quick Reasons */
-        .quick-reasons {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .quick-reason {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px 16px;
-          background: #f9fafb;
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          position: relative;
-        }
-
-        .quick-reason:hover {
-          background: #f3f4f6;
-          transform: translateY(-2px);
-        }
-
-        .quick-reason.selected {
-          background: #fef3c7;
-          border-color: #f59e0b;
-        }
-
-        .quick-reason i {
-          font-size: 18px;
-          color: var(--reason-color);
-        }
-
-        .quick-reason .check {
-          position: absolute;
-          right: 12px;
-          top: 12px;
-          color: #10b981;
-          font-size: 16px;
-        }
-
-        .custom-reason {
-          margin-top: 20px;
-        }
-
-        .custom-reason label {
-          display: block;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 8px;
-        }
-
-        .custom-reason textarea {
-          width: 100%;
-          padding: 12px;
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          resize: vertical;
-          font-size: 14px;
-        }
-
-        .custom-reason textarea:focus {
-          outline: none;
-          border-color: #4f46e5;
-        }
-
-        .warning-note {
-          background: #fef3c7;
-          padding: 12px;
-          border-radius: 12px;
-          margin-top: 16px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          color: #856404;
-        }
-
-        /* Buttons */
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-          transition: all 0.3s ease;
-        }
-
-        .btn-secondary:hover {
-          background: #f3f4f6;
-        }
-
-        .btn-approve-modal {
-          padding: 10px 24px;
-          background: #10b981;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-approve-modal:hover {
-          background: #059669;
-          transform: translateY(-2px);
-        }
-
-        .btn-reject-modal {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-reject-modal:hover {
-          background: #dc2626;
-          transform: translateY(-2px);
-        }
-
-        .btn-danger {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .btn-close {
-          padding: 10px 24px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-        }
-
         .loading-details {
           text-align: center;
           padding: 60px;
@@ -2014,7 +1944,6 @@ export default function ContentModeration() {
           }
         }
 
-        /* Responsive */
         @media (max-width: 1024px) {
           .moderation-container { padding: 20px; }
           .posts-grid { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
