@@ -171,56 +171,55 @@ export default function ContentModeration() {
     }
   }
 
-  const fetchPostDetails = async (contentId, contentType) => {
-    setLoadingDetails(true)
-    setPostDetails(null)
+  const fetchPosts = async () => {
+  try {
+    setLoading(true)
+    setError(null)
     
-    try {
-      let details = null
+    let query = supabase
+      .from('content_moderation')
+      .select(`
+        *,
+        reviewed_by_admin:admin_users!reviewed_by (
+          admin_id,
+          full_name,
+          email
+        )
+      `)
+      .order('created_at', { ascending: false })
+
+    if (filter !== 'ALL') {
+      query = query.eq('moderation_status', filter)
+    }
+
+    const { data, error } = await query
+
+    if (error) throw error
+
+    // Fetch complete post details including all images
+    const postsWithDetails = await Promise.all((data || []).map(async (post) => {
+      let imageUrls = []
+      let postData = null
+      let userData = null
       
-      if (contentType === 'POST') {
-        // Fetch post from posts table
-        const { data: postData, error: postError } = await supabase
+      if (post.content_type === 'POST') {
+        // Fetch post content from posts table
+        const { data: postDataResult, error: postError } = await supabase
           .from('posts')
           .select('*')
-          .eq('post_id', contentId)
+          .eq('post_id', post.content_id)
           .maybeSingle()
         
-        if (postError) {
-          console.error('Error fetching post:', postError)
-        }
-        
-        if (postData) {
-          // Fetch user details
-          let userData = null
-          if (postData.user_id) {
-            const { data: userResult } = await supabase
-              .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location, district')
-              .eq('user_id', postData.user_id)
-              .maybeSingle()
-            userData = userResult
-          }
+        if (!postError && postDataResult) {
+          postData = postDataResult
           
-          // Fetch category
-          let categoryData = null
-          if (postData.category_id) {
-            const { data: catResult } = await supabase
-              .from('post_categories')
-              .select('category_name, description')
-              .eq('category_id', postData.category_id)
-              .maybeSingle()
-            categoryData = catResult
-          }
-          
-          // Fetch all images
+          // Fetch all images from post_images table
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
             .select('image_url, image_order')
-            .eq('post_id', contentId)
+            .eq('post_id', post.content_id)
             .order('image_order', { ascending: true })
-          
-          let imageUrls = []
+
           if (!imagesError && images && images.length > 0) {
             imageUrls = images.map(img => getImageUrl(img.image_url)).filter(url => url)
           } else if (postData.image_url) {
@@ -228,47 +227,63 @@ export default function ContentModeration() {
             if (singleImage) imageUrls.push(singleImage)
           }
           
-          details = { 
-            ...postData, 
-            images: imageUrls, 
-            image_count: imageUrls.length,
-            user: userData,
-            category: categoryData
+          // Fetch user details from users table - THIS IS KEY
+          if (postData.user_id) {
+            const { data: userResult } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location, district')
+              .eq('user_id', postData.user_id)
+              .maybeSingle()
+            
+            if (userResult) {
+              userData = userResult
+            }
           }
         }
       }
       
-      if (details) {
-        setPostDetails(details)
-        if (details?.images?.length > 0) {
-          setGalleryImages(details.images)
-          setGalleryIndex(0)
+      // Also check if there's a user_id directly in the moderation record
+      if (!userData && post.user_id) {
+        const { data: userResult } = await supabase
+          .from('users')
+          .select('user_id, full_name, email, profile_image, phone, location, district')
+          .eq('user_id', post.user_id)
+          .maybeSingle()
+        
+        if (userResult) {
+          userData = userResult
         }
-      } else {
-        // Set fallback data
-        setPostDetails({
-          title: 'Content not found',
-          content: 'Unable to load content details. The post may have been deleted.',
-          images: [],
-          image_count: 0,
-          user: null,
-          category: null
-        })
       }
-    } catch (err) {
-      console.error('Error fetching post details:', err)
-      setPostDetails({
-        title: 'Error loading content',
-        content: 'An error occurred while loading the content details.',
-        images: [],
-        image_count: 0,
-        user: null,
-        category: null
-      })
-    } finally {
-      setLoadingDetails(false)
-    }
+      
+      // Get author name - use actual user name or fallback
+      const authorName = userData?.full_name || postData?.author_name || 'Anonymous User'
+      const authorEmail = userData?.email || postData?.author_email || 'Email not available'
+      
+      return { 
+        ...post, 
+        title: postData?.title || 'Untitled',
+        content: postData?.content || postData?.description || 'No content available',
+        description: postData?.description || '',
+        post_created_at: postData?.created_at || post.created_at,
+        images: imageUrls, 
+        image_count: imageUrls.length,
+        user: userData,
+        author_name: authorName,
+        author_email: authorEmail,
+        author_avatar: userData?.profile_image || null,
+        author_phone: userData?.phone || null,
+        author_location: userData?.district || userData?.location || null
+      }
+    }))
+
+    setPosts(postsWithDetails || [])
+  } catch (err) {
+    console.error('Error fetching posts:', err)
+    setError(err.message)
+  } finally {
+    setLoading(false)
   }
+}
 
   const updateStatus = async (postId, status, reason = null) => {
     setActionLoading(true)
