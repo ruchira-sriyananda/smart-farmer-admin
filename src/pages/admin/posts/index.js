@@ -50,12 +50,23 @@ export default function ContentModeration() {
     return imagePath
   }
 
+  // Helper function to format date safely
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Date not available'
+    try {
+      const date = new Date(dateString)
+      if (isNaN(date.getTime())) return 'Date not available'
+      return date.toLocaleDateString()
+    } catch {
+      return 'Date not available'
+    }
+  }
+
   const fetchPosts = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      // First, get all moderation records
       let query = supabase
         .from('content_moderation')
         .select(`
@@ -76,113 +87,114 @@ export default function ContentModeration() {
 
       if (error) throw error
 
-      if (!data || data.length === 0) {
-        setPosts([])
-        setLoading(false)
-        return
-      }
-
-      // Get all unique post IDs from moderation records
-      const postIds = data
-        .filter(item => item.content_type === 'POST' && item.content_id)
-        .map(item => item.content_id)
-      
-      // Fetch all posts in one query
-      let postsData = []
-      if (postIds.length > 0) {
-        const { data: postsResult, error: postsError } = await supabase
-          .from('posts')
-          .select('*')
-          .in('post_id', postIds)
+      const postsWithDetails = await Promise.all((data || []).map(async (post) => {
+        let postData = null
+        let userData = null
+        let images = []
+        let postExists = true
         
-        if (!postsError && postsResult) {
-          postsData = postsResult
-        }
-      }
-      
-      // Get all unique user IDs from posts
-      const userIds = [...new Set(postsData.map(post => post.user_id).filter(id => id))]
-      
-      // Fetch all users in one query
-      let usersData = []
-      if (userIds.length > 0) {
-        const { data: usersResult, error: usersError } = await supabase
-          .from('users')
-          .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
-          .in('user_id', userIds)
-        
-        if (!usersError && usersResult) {
-          usersData = usersResult
-        }
-      }
-      
-      // Create maps for quick lookup
-      const postsMap = {}
-      postsData.forEach(post => {
-        postsMap[post.post_id] = post
-      })
-      
-      const usersMap = {}
-      usersData.forEach(user => {
-        usersMap[user.user_id] = user
-      })
-      
-      // Fetch images for all posts
-      let allImages = []
-      if (postIds.length > 0) {
-        const { data: imagesResult, error: imagesError } = await supabase
-          .from('post_images')
-          .select('post_id, image_url, image_order')
-          .in('post_id', postIds)
-          .order('image_order', { ascending: true })
-        
-        if (!imagesError && imagesResult) {
-          allImages = imagesResult
-        }
-      }
-      
-      // Group images by post_id
-      const imagesMap = {}
-      allImages.forEach(image => {
-        if (!imagesMap[image.post_id]) {
-          imagesMap[image.post_id] = []
-        }
-        imagesMap[image.post_id].push(getImageUrl(image.image_url))
-      })
-      
-      // Combine all data
-      const postsWithDetails = data.map(post => {
-        const postData = postsMap[post.content_id]
-        const userData = postData ? usersMap[postData.user_id] : null
-        const postImages = imagesMap[post.content_id] || []
-        
-        let userCreatedDate = null
-        if (userData?.created_at) {
-          const date = new Date(userData.created_at)
-          if (!isNaN(date.getTime())) {
-            userCreatedDate = date
+        if (post.content_type === 'POST' && post.content_id) {
+          const { data: postDataResult, error: postError } = await supabase
+            .from('posts')
+            .select('*')
+            .eq('post_id', post.content_id)
+            .maybeSingle()
+          
+          if (postError) {
+            console.error(`Error fetching post ${post.content_id}:`, postError)
+            postExists = false
+          }
+          
+          if (postDataResult) {
+            postData = postDataResult
+            
+            const { data: imagesData, error: imagesError } = await supabase
+              .from('post_images')
+              .select('image_url, image_order')
+              .eq('post_id', post.content_id)
+              .order('image_order', { ascending: true })
+            
+            if (!imagesError && imagesData && imagesData.length > 0) {
+              images = imagesData.map(img => getImageUrl(img.image_url))
+            } else if (postDataResult.image_url) {
+              images = [getImageUrl(postDataResult.image_url)]
+            }
+            
+            const userId = postDataResult.user_id || post.user_id
+            
+            if (userId) {
+              // Try to get from users table
+              const { data: userResult, error: userError } = await supabase
+                .from('users')
+                .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+                .eq('user_id', userId)
+                .maybeSingle()
+              
+              if (userError) {
+                console.error(`Error fetching user ${userId}:`, userError)
+              }
+              
+              if (userResult) {
+                userData = userResult
+              } else {
+                // Try admin_users
+                const { data: adminResult } = await supabase
+                  .from('admin_users')
+                  .select('admin_id, full_name, email')
+                  .eq('admin_id', userId)
+                  .maybeSingle()
+                
+                if (adminResult) {
+                  userData = {
+                    user_id: adminResult.admin_id,
+                    full_name: adminResult.full_name || 'Admin User',
+                    email: adminResult.email || 'Email not available',
+                    profile_image: null,
+                    phone: null,
+                    location: null,
+                    district: null,
+                    created_at: null
+                  }
+                }
+              }
+            }
+            
+            // If no user data found, create placeholder with ID
+            if (!userData && userId) {
+              userData = {
+                user_id: userId,
+                full_name: `User ${userId.slice(0, 8)}`,
+                email: 'Email not available',
+                profile_image: null,
+                phone: null,
+                location: null,
+                district: null,
+                created_at: null
+              }
+            }
+          } else {
+            postExists = false
           }
         }
         
         return { 
           ...post, 
-          title: postData?.title || 'Untitled Post',
-          content: postData?.content || 'No content available',
-          images: postImages,
-          image_count: postImages.length,
-          cover_image: postImages[0] || null,
+          title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
+          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
+          images: images,
+          image_count: images.length,
+          cover_image: images[0] || null,
           post_created_at: postData?.created_at || post.created_at,
           user: userData,
-          author_name: userData?.full_name || postData?.author_name || 'Mobile User',
-          author_email: userData?.email || postData?.user_email || 'Email not available',
-          author_phone: userData?.phone || postData?.phone || null,
-          author_location: userData?.location || userData?.district || postData?.location || null,
-          user_id: userData?.user_id || postData?.user_id || post.user_id,
-          post_exists: !!postData,
-          user_created_at: userCreatedDate,
-          profile_image: userData?.profile_image ? getImageUrl(userData.profile_image) : null
+          author_name: userData?.full_name || 'Mobile User',
+          author_email: userData?.email || 'Email not available',
+          author_phone: userData?.phone || null,
+          author_location: userData?.location || userData?.district || null,
+          author_joined_date: userData?.created_at || null,
+          user_id: userData?.user_id || post.user_id,
+          post_exists: postExists
         }
-      })
+      }))
 
       setPosts(postsWithDetails || [])
     } catch (err) {
@@ -217,70 +229,91 @@ export default function ContentModeration() {
     setPostDetails(null)
     
     try {
+      let details = null
+      
       if (contentType === 'POST' && contentId) {
-        // Fetch post
         const { data: postData, error: postError } = await supabase
           .from('posts')
           .select('*')
           .eq('post_id', contentId)
           .maybeSingle()
         
-        if (postError || !postData) {
-          setPostDetails(null)
-          setLoadingDetails(false)
-          return
-        }
-        
-        // Fetch images
-        const { data: imagesData, error: imagesError } = await supabase
-          .from('post_images')
-          .select('image_url, image_order')
-          .eq('post_id', contentId)
-          .order('image_order', { ascending: true })
-        
-        let images = []
-        if (!imagesError && imagesData && imagesData.length > 0) {
-          images = imagesData.map(img => getImageUrl(img.image_url))
-        } else if (postData.image_url) {
-          images = [getImageUrl(postData.image_url)]
-        }
-        
-        // Fetch user
-        let userData = null
-        if (postData.user_id) {
-          const { data: userResult } = await supabase
-            .from('users')
-            .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
-            .eq('user_id', postData.user_id)
-            .maybeSingle()
+        if (postData) {
+          const { data: imagesData, error: imagesError } = await supabase
+            .from('post_images')
+            .select('image_url, image_order')
+            .eq('post_id', contentId)
+            .order('image_order', { ascending: true })
           
-          if (userResult) {
-            userData = userResult
+          let images = []
+          if (!imagesError && imagesData && imagesData.length > 0) {
+            images = imagesData.map(img => getImageUrl(img.image_url))
+          } else if (postData.image_url) {
+            images = [getImageUrl(postData.image_url)]
+          }
+          
+          let userData = null
+          const userId = postData.user_id
+          
+          if (userId) {
+            const { data: userResult, error: userError } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+              .eq('user_id', userId)
+              .maybeSingle()
+            
+            if (userError) {
+              console.error('Error fetching user:', userError)
+            }
+            
+            if (userResult) {
+              userData = userResult
+            } else {
+              const { data: adminResult } = await supabase
+                .from('admin_users')
+                .select('admin_id, full_name, email')
+                .eq('admin_id', userId)
+                .maybeSingle()
+              
+              if (adminResult) {
+                userData = {
+                  user_id: adminResult.admin_id,
+                  full_name: adminResult.full_name || 'Admin User',
+                  email: adminResult.email || 'Email not available',
+                  profile_image: null,
+                  phone: null,
+                  location: null,
+                  district: null,
+                  created_at: null
+                }
+              }
+            }
+          }
+          
+          let categoryData = null
+          if (postData.category_id) {
+            const { data: catResult } = await supabase
+              .from('post_categories')
+              .select('category_name, description')
+              .eq('category_id', postData.category_id)
+              .maybeSingle()
+            
+            if (catResult) {
+              categoryData = catResult
+            }
+          }
+          
+          details = { 
+            ...postData, 
+            images: images,
+            image_count: images.length,
+            user: userData,
+            category: categoryData
           }
         }
-        
-        // Fetch category
-        let categoryData = null
-        if (postData.category_id) {
-          const { data: catResult } = await supabase
-            .from('post_categories')
-            .select('category_name, description')
-            .eq('category_id', postData.category_id)
-            .maybeSingle()
-          
-          if (catResult) {
-            categoryData = catResult
-          }
-        }
-        
-        setPostDetails({ 
-          ...postData, 
-          images: images,
-          image_count: images.length,
-          user: userData,
-          category: categoryData
-        })
       }
+      
+      setPostDetails(details)
     } catch (err) {
       console.error('Error fetching post details:', err)
       setPostDetails(null)
@@ -471,8 +504,8 @@ export default function ContentModeration() {
                 {/* User Info */}
                 <div className="post-user">
                   <div className="user-avatar">
-                    {post.profile_image ? (
-                      <img src={post.profile_image} alt={post.author_name} />
+                    {post.user?.profile_image ? (
+                      <img src={getImageUrl(post.user.profile_image)} alt={post.user.full_name} />
                     ) : (
                       <span>{post.author_name?.charAt(0) || 'U'}</span>
                     )}
@@ -481,14 +514,11 @@ export default function ContentModeration() {
                   <div className="user-info">
                     <h4>{post.author_name}</h4>
                     <p><i className="bi bi-envelope"></i> {post.author_email}</p>
-                    {post.author_phone && (
-                      <p><i className="bi bi-telephone"></i> {post.author_phone}</p>
-                    )}
                     {post.author_location && (
-                      <p><i className="bi bi-geo-alt"></i> {post.author_location}</p>
+                      <span className="user-location"><i className="bi bi-geo-alt"></i> {post.author_location}</span>
                     )}
-                    {post.user_created_at && (
-                      <p><i className="bi bi-calendar-check"></i> Joined: {post.user_created_at.toLocaleDateString()}</p>
+                    {post.author_joined_date && (
+                      <span className="user-joined"><i className="bi bi-calendar-check"></i> Joined: {formatDate(post.author_joined_date)}</span>
                     )}
                   </div>
                   {getStatusBadge(post.moderation_status)}
@@ -562,7 +592,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal - Keep as is from previous version */}
+      {/* Details Modal */}
       {showDetailsModal && selectedPost && postDetails && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
@@ -622,9 +652,7 @@ export default function ContentModeration() {
                         <p><i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}</p>
                         {postDetails.user?.phone && <p><i className="bi bi-telephone"></i> {postDetails.user.phone}</p>}
                         {postDetails.user?.location && <p><i className="bi bi-geo-alt"></i> {postDetails.user.location}</p>}
-                        {postDetails.user?.created_at && (
-                          <p><i className="bi bi-calendar-check"></i> Joined: {new Date(postDetails.user.created_at).toLocaleDateString()}</p>
-                        )}
+                        <p><i className="bi bi-calendar-check"></i> Joined: {formatDate(postDetails.user?.created_at)}</p>
                       </div>
                     </div>
                   </div>
@@ -821,6 +849,7 @@ export default function ContentModeration() {
           padding: 24px;
         }
 
+        /* Loading Screen */
         .loading-screen {
           display: flex;
           flex-direction: column;
@@ -843,6 +872,7 @@ export default function ContentModeration() {
           to { transform: rotate(360deg); }
         }
 
+        /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%);
           border-radius: 24px;
@@ -905,6 +935,7 @@ export default function ContentModeration() {
           margin: 0;
         }
 
+        /* Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -952,6 +983,7 @@ export default function ContentModeration() {
         .text-danger { color: #ef4444; }
         .stat-trend { font-size: 11px; color: #9ca3af; margin-top: 4px; display: block; }
 
+        /* Filter Section */
         .filter-section {
           margin-bottom: 32px;
         }
@@ -1007,10 +1039,12 @@ export default function ContentModeration() {
         .filter-count.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .filter-count.success { background: rgba(16,185,129,0.1); color: #10b981; }
         .filter-count.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .filter-btn.active .filter-count { color: white; background: rgba(255,255,255,0.2); }
 
+        /* Posts Grid */
         .posts-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
           gap: 24px;
         }
 
@@ -1039,6 +1073,7 @@ export default function ContentModeration() {
           box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.02);
         }
 
+        /* User Section */
         .post-user {
           padding: 20px;
           background: #fafbfc;
@@ -1046,6 +1081,7 @@ export default function ContentModeration() {
           display: flex;
           align-items: center;
           gap: 12px;
+          flex-wrap: wrap;
         }
 
         .user-avatar {
@@ -1085,18 +1121,20 @@ export default function ContentModeration() {
 
         .user-info {
           flex: 1;
+          min-width: 200px;
         }
 
         .user-info h4 {
           font-size: 15px;
           font-weight: 600;
-          margin: 0 0 4px 0;
+          margin: 0 0 8px 0;
+          color: #1f2937;
         }
 
         .user-info p {
           font-size: 12px;
           color: #6b7280;
-          margin: 2px 0;
+          margin: 4px 0;
           display: flex;
           align-items: center;
           gap: 6px;
@@ -1107,6 +1145,16 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
+        .user-location, .user-joined {
+          font-size: 11px;
+          color: #9ca3af;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-top: 4px;
+        }
+
+        /* Images Section */
         .post-images {
           padding: 16px;
           background: #fafbfc;
@@ -1194,6 +1242,7 @@ export default function ContentModeration() {
           gap: 4px;
         }
 
+        /* Content Section */
         .post-content {
           padding: 20px;
         }
@@ -1223,6 +1272,7 @@ export default function ContentModeration() {
           margin-right: 4px;
         }
 
+        /* Actions */
         .post-actions {
           padding: 16px 20px 20px;
           border-top: 1px solid #f1f5f9;
@@ -1292,6 +1342,7 @@ export default function ContentModeration() {
           color: white;
         }
 
+        /* Status Badge */
         .status-badge {
           display: inline-flex;
           align-items: center;
@@ -1306,6 +1357,7 @@ export default function ContentModeration() {
         .status-badge.approved { background: #d1fae5; color: #10b981; }
         .status-badge.rejected { background: #fee2e2; color: #ef4444; }
 
+        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 80px 20px;
@@ -1338,6 +1390,7 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
+        /* Modal Styles */
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -1445,6 +1498,7 @@ export default function ContentModeration() {
           flex: 1;
         }
 
+        /* Modal Content */
         .modal-images {
           margin-bottom: 28px;
         }
@@ -1526,6 +1580,7 @@ export default function ContentModeration() {
           color: #4f46e5;
         }
 
+        /* Author Card */
         .author-card {
           display: flex;
           align-items: center;
@@ -1533,6 +1588,7 @@ export default function ContentModeration() {
           padding: 20px;
           background: #f9fafb;
           border-radius: 20px;
+          flex-wrap: wrap;
         }
 
         .author-avatar {
@@ -1555,15 +1611,20 @@ export default function ContentModeration() {
           object-fit: cover;
         }
 
+        .author-details {
+          flex: 1;
+          min-width: 200px;
+        }
+
         .author-details h5 {
           font-size: 16px;
           font-weight: 600;
-          margin: 0 0 8px 0;
+          margin: 0 0 12px 0;
         }
 
         .author-details p {
           font-size: 13px;
-          margin: 4px 0;
+          margin: 6px 0;
           display: flex;
           align-items: center;
           gap: 8px;
@@ -1575,6 +1636,7 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
+        /* Info Grid */
         .info-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1597,6 +1659,7 @@ export default function ContentModeration() {
           font-size: 12px;
         }
 
+        /* Post Content */
         .post-title {
           font-size: 18px;
           font-weight: 600;
@@ -1646,151 +1709,7 @@ export default function ContentModeration() {
           margin-bottom: 0;
         }
 
-        .quick-reasons {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .quick-reason {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px 16px;
-          background: #f9fafb;
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          position: relative;
-        }
-
-        .quick-reason:hover {
-          background: #f3f4f6;
-          transform: translateY(-2px);
-        }
-
-        .quick-reason.selected {
-          background: #fef3c7;
-          border-color: #f59e0b;
-        }
-
-        .quick-reason i {
-          font-size: 18px;
-          color: var(--reason-color);
-        }
-
-        .quick-reason .check {
-          position: absolute;
-          right: 12px;
-          top: 12px;
-          color: #10b981;
-          font-size: 16px;
-        }
-
-        .custom-reason {
-          margin-top: 20px;
-        }
-
-        .custom-reason label {
-          display: block;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 8px;
-        }
-
-        .custom-reason textarea {
-          width: 100%;
-          padding: 12px;
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          resize: vertical;
-          font-size: 14px;
-        }
-
-        .custom-reason textarea:focus {
-          outline: none;
-          border-color: #4f46e5;
-        }
-
-        .warning-note {
-          background: #fef3c7;
-          padding: 12px;
-          border-radius: 12px;
-          margin-top: 16px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          color: #856404;
-        }
-
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-          transition: all 0.3s ease;
-        }
-
-        .btn-secondary:hover {
-          background: #f3f4f6;
-        }
-
-        .btn-approve-modal {
-          padding: 10px 24px;
-          background: #10b981;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-approve-modal:hover {
-          background: #059669;
-          transform: translateY(-2px);
-        }
-
-        .btn-reject-modal {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-reject-modal:hover {
-          background: #dc2626;
-          transform: translateY(-2px);
-        }
-
-        .btn-danger {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .btn-close {
-          padding: 10px 24px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-        }
-
+        /* Lightbox */
         .lightbox-overlay {
           position: fixed;
           top: 0;
@@ -1902,6 +1821,153 @@ export default function ContentModeration() {
           background: rgba(0,0,0,0.9);
         }
 
+        /* Quick Reasons */
+        .quick-reasons {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+
+        .quick-reason {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 16px;
+          background: #f9fafb;
+          border: 2px solid #e5e7eb;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
+        }
+
+        .quick-reason:hover {
+          background: #f3f4f6;
+          transform: translateY(-2px);
+        }
+
+        .quick-reason.selected {
+          background: #fef3c7;
+          border-color: #f59e0b;
+        }
+
+        .quick-reason i {
+          font-size: 18px;
+          color: var(--reason-color);
+        }
+
+        .quick-reason .check {
+          position: absolute;
+          right: 12px;
+          top: 12px;
+          color: #10b981;
+          font-size: 16px;
+        }
+
+        .custom-reason {
+          margin-top: 20px;
+        }
+
+        .custom-reason label {
+          display: block;
+          font-size: 13px;
+          font-weight: 600;
+          margin-bottom: 8px;
+        }
+
+        .custom-reason textarea {
+          width: 100%;
+          padding: 12px;
+          border: 2px solid #e5e7eb;
+          border-radius: 12px;
+          resize: vertical;
+          font-size: 14px;
+        }
+
+        .custom-reason textarea:focus {
+          outline: none;
+          border-color: #4f46e5;
+        }
+
+        .warning-note {
+          background: #fef3c7;
+          padding: 12px;
+          border-radius: 12px;
+          margin-top: 16px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: #856404;
+        }
+
+        /* Buttons */
+        .btn-secondary {
+          padding: 10px 20px;
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 500;
+          transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+          background: #f3f4f6;
+        }
+
+        .btn-approve-modal {
+          padding: 10px 24px;
+          background: #10b981;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-approve-modal:hover {
+          background: #059669;
+          transform: translateY(-2px);
+        }
+
+        .btn-reject-modal {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-reject-modal:hover {
+          background: #dc2626;
+          transform: translateY(-2px);
+        }
+
+        .btn-danger {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .btn-close {
+          padding: 10px 24px;
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 500;
+        }
+
         .loading-details {
           text-align: center;
           padding: 60px;
@@ -1923,9 +1989,10 @@ export default function ContentModeration() {
           }
         }
 
+        /* Responsive */
         @media (max-width: 1024px) {
           .moderation-container { padding: 20px; }
-          .posts-grid { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
+          .posts-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
         }
 
         @media (max-width: 768px) {
@@ -1936,8 +2003,6 @@ export default function ContentModeration() {
           .filter-buttons { flex-wrap: wrap; }
           .filter-btn { flex: auto; }
           .posts-grid { grid-template-columns: 1fr; }
-          .post-user { flex-wrap: wrap; }
-          .action-group { flex-direction: column; }
           .info-grid { grid-template-columns: 1fr; }
           .author-card { flex-direction: column; text-align: center; }
           .author-details p { justify-content: center; }
@@ -1948,6 +2013,7 @@ export default function ContentModeration() {
           .lightbox-prev { left: -50px; }
           .lightbox-next { right: -50px; }
           .modal-images-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+          .user-info { min-width: auto; }
         }
 
         @media (max-width: 480px) {
@@ -1957,6 +2023,8 @@ export default function ContentModeration() {
           .post-user { padding: 16px; }
           .post-content { padding: 16px; }
           .post-actions { padding: 16px; }
+          .action-group { flex-direction: column; }
+          .btn-view, .btn-approve, .btn-reject { width: 100%; }
         }
       `}</style>
     </AdminLayout>
