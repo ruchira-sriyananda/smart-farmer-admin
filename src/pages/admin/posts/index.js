@@ -26,6 +26,7 @@ export default function ContentModeration() {
     approved: 0,
     rejected: 0
   })
+  const [hoveredCard, setHoveredCard] = useState(null)
 
   const quickReasons = [
     { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
@@ -111,22 +112,16 @@ export default function ContentModeration() {
             const userId = postDataResult.user_id || post.user_id
             
             if (userId) {
-              // First try to get from users table
-              const { data: userResult, error: userError } = await supabase
+              const { data: userResult } = await supabase
                 .from('users')
                 .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
                 .eq('user_id', userId)
                 .maybeSingle()
               
-              if (userError) {
-                console.error(`Error fetching user ${userId}:`, userError)
-              }
-              
               if (userResult) {
                 userData = userResult
               } else {
-                // If not found in users, try to get from admin_users
-                const { data: adminResult, error: adminError } = await supabase
+                const { data: adminResult } = await supabase
                   .from('admin_users')
                   .select('admin_id, full_name, email')
                   .eq('admin_id', userId)
@@ -142,30 +137,10 @@ export default function ContentModeration() {
                     location: null,
                     district: null
                   }
-                } else {
-                  // If still not found, try to get from auth.users via the posts table's user reference
-                  const { data: authUser } = await supabase
-                    .from('posts')
-                    .select('users!posts_user_id_fkey (user_id, full_name, email)')
-                    .eq('post_id', post.content_id)
-                    .maybeSingle()
-                  
-                  if (authUser?.users) {
-                    userData = {
-                      user_id: authUser.users.user_id,
-                      full_name: authUser.users.full_name,
-                      email: authUser.users.email,
-                      profile_image: null,
-                      phone: null,
-                      location: null,
-                      district: null
-                    }
-                  }
                 }
               }
             }
             
-            // If we still don't have user data, create a placeholder with the ID
             if (!userData && userId) {
               userData = {
                 user_id: userId,
@@ -260,21 +235,15 @@ export default function ContentModeration() {
           const userId = postData.user_id
           
           if (userId) {
-            // First try to get from users table
-            const { data: userResult, error: userError } = await supabase
+            const { data: userResult } = await supabase
               .from('users')
               .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
               .eq('user_id', userId)
               .maybeSingle()
             
-            if (userError) {
-              console.error('Error fetching user:', userError)
-            }
-            
             if (userResult) {
               userData = userResult
             } else {
-              // Try admin_users
               const { data: adminResult } = await supabase
                 .from('admin_users')
                 .select('admin_id, full_name, email')
@@ -415,9 +384,16 @@ export default function ContentModeration() {
   if (loading) {
     return (
       <AdminLayout title="Content Moderation">
-        <div className="loading-container">
-          <div className="loading-spinner"></div>
-          <p>Loading content...</p>
+        <div className="loading-screen">
+          <div className="loading-content">
+            <div className="loading-animation">
+              <div className="loading-circle"></div>
+              <div className="loading-circle delay-1"></div>
+              <div className="loading-circle delay-2"></div>
+            </div>
+            <h3>Loading content...</h3>
+            <p>Please wait while we fetch your data</p>
+          </div>
         </div>
       </AdminLayout>
     )
@@ -426,47 +402,81 @@ export default function ContentModeration() {
   return (
     <AdminLayout title="Content Moderation">
       <div className="moderation-container">
-        {/* Hero Section */}
+        {/* Modern Hero Section */}
         <div className="hero-section">
           <div className="hero-content">
-            <div className="hero-icon">
-              <i className="bi bi-shield-check"></i>
+            <div className="hero-text">
+              <div className="hero-icon-wrapper">
+                <i className="bi bi-shield-check"></i>
+              </div>
+              <div>
+                <h1 className="hero-title">Content Moderation</h1>
+                <p className="hero-subtitle">Review and manage user-generated content before publication</p>
+              </div>
             </div>
-            <div>
-              <h1 className="hero-title">Content Moderation</h1>
-              <p className="hero-subtitle">Review and manage user-generated content before publication</p>
+            <div className="hero-stats">
+              <div className="hero-stat">
+                <span className="hero-stat-value">{stats.pending}</span>
+                <span className="hero-stat-label">Pending Review</span>
+              </div>
+              <div className="hero-stat">
+                <span className="hero-stat-value">{stats.approved}</span>
+                <span className="hero-stat-label">Approved</span>
+              </div>
+              <div className="hero-stat">
+                <span className="hero-stat-value">{stats.rejected}</span>
+                <span className="hero-stat-label">Rejected</span>
+              </div>
             </div>
+          </div>
+          <div className="hero-decoration">
+            <div className="decoration-circle"></div>
+            <div className="decoration-circle-2"></div>
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="stats-grid">
-          <div className="stat-card total">
-            <div className="stat-icon"><i className="bi bi-files"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Total Content</span>
-              <h2 className="stat-value">{stats.total}</h2>
+        {/* Modern Stats Cards */}
+        <div className="stats-wrapper">
+          <div className="stats-grid">
+            <div className="stat-card">
+              <div className="stat-icon total">
+                <i className="bi bi-files"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Total Content</span>
+                <h3>{stats.total}</h3>
+                <span className="stat-trend">All time</span>
+              </div>
             </div>
-          </div>
-          <div className="stat-card pending">
-            <div className="stat-icon"><i className="bi bi-hourglass-split"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Pending Review</span>
-              <h2 className="stat-value text-warning">{stats.pending}</h2>
+            <div className="stat-card">
+              <div className="stat-icon pending">
+                <i className="bi bi-hourglass-split"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Pending</span>
+                <h3 className="text-warning">{stats.pending}</h3>
+                <span className="stat-trend">Needs review</span>
+              </div>
             </div>
-          </div>
-          <div className="stat-card approved">
-            <div className="stat-icon"><i className="bi bi-check-circle"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Approved</span>
-              <h2 className="stat-value text-success">{stats.approved}</h2>
+            <div className="stat-card">
+              <div className="stat-icon approved">
+                <i className="bi bi-check-circle"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Approved</span>
+                <h3 className="text-success">{stats.approved}</h3>
+                <span className="stat-trend">Published</span>
+              </div>
             </div>
-          </div>
-          <div className="stat-card rejected">
-            <div className="stat-icon"><i className="bi bi-x-circle"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Rejected</span>
-              <h2 className="stat-value text-danger">{stats.rejected}</h2>
+            <div className="stat-card">
+              <div className="stat-icon rejected">
+                <i className="bi bi-x-circle"></i>
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Rejected</span>
+                <h3 className="text-danger">{stats.rejected}</h3>
+                <span className="stat-trend">Removed</span>
+              </div>
             </div>
           </div>
         </div>
@@ -474,54 +484,83 @@ export default function ContentModeration() {
         {/* Filter Tabs */}
         <div className="filter-tabs">
           <button className={`filter-tab ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>
-            <i className="bi bi-grid"></i> All
-            <span className="count">{stats.total}</span>
+            <i className="bi bi-grid"></i>
+            <span>All Content</span>
+            <span className="tab-count">{stats.total}</span>
           </button>
           <button className={`filter-tab ${filter === 'PENDING' ? 'active' : ''}`} onClick={() => setFilter('PENDING')}>
-            <i className="bi bi-hourglass-split"></i> Pending
-            <span className="count pending">{stats.pending}</span>
+            <i className="bi bi-hourglass-split"></i>
+            <span>Pending</span>
+            <span className="tab-count pending">{stats.pending}</span>
           </button>
           <button className={`filter-tab ${filter === 'APPROVED' ? 'active' : ''}`} onClick={() => setFilter('APPROVED')}>
-            <i className="bi bi-check-circle"></i> Approved
-            <span className="count approved">{stats.approved}</span>
+            <i className="bi bi-check-circle"></i>
+            <span>Approved</span>
+            <span className="tab-count approved">{stats.approved}</span>
           </button>
           <button className={`filter-tab ${filter === 'REJECTED' ? 'active' : ''}`} onClick={() => setFilter('REJECTED')}>
-            <i className="bi bi-x-circle"></i> Rejected
-            <span className="count rejected">{stats.rejected}</span>
+            <i className="bi bi-x-circle"></i>
+            <span>Rejected</span>
+            <span className="tab-count rejected">{stats.rejected}</span>
           </button>
+        </div>
+
+        {/* Search Bar */}
+        <div className="search-container">
+          <div className="search-box">
+            <i className="bi bi-search"></i>
+            <input 
+              type="text" 
+              placeholder="Search posts by title, content or author..." 
+              id="searchInput"
+              onChange={(e) => {
+                const searchTerm = e.target.value.toLowerCase()
+                const cards = document.querySelectorAll('.post-card')
+                cards.forEach(card => {
+                  const title = card.querySelector('.post-card-title')?.innerText.toLowerCase() || ''
+                  const content = card.querySelector('.post-card-text')?.innerText.toLowerCase() || ''
+                  const author = card.querySelector('.post-user-name')?.innerText.toLowerCase() || ''
+                  if (title.includes(searchTerm) || content.includes(searchTerm) || author.includes(searchTerm)) {
+                    card.style.display = 'block'
+                  } else {
+                    card.style.display = 'none'
+                  }
+                })
+              }}
+            />
+          </div>
         </div>
 
         {/* Posts Grid */}
         <div className="posts-grid">
           {posts.length > 0 ? (
-            posts.map((post, index) => (
-              <div key={post.moderation_id} className="post-card" style={{ animationDelay: `${index * 0.05}s` }}>
+            posts.filter(post => post.moderation_status === filter || filter === 'ALL').map((post, index) => (
+              <div 
+                key={post.moderation_id} 
+                className="post-card" 
+                style={{ animationDelay: `${index * 0.05}s` }}
+                onMouseEnter={() => setHoveredCard(post.moderation_id)}
+                onMouseLeave={() => setHoveredCard(null)}
+              >
+                {/* User Info Section */}
                 <div className="post-card-header">
                   <div className="post-user-info">
                     <div className="post-user-avatar">
                       {post.user?.profile_image ? (
                         <img src={getImageUrl(post.user.profile_image)} alt={post.user.full_name} />
                       ) : (
-                        <i className="bi bi-person-circle"></i>
+                        <div className="avatar-placeholder">
+                          {post.author_name?.charAt(0) || 'U'}
+                        </div>
                       )}
+                      <span className="user-status online"></span>
                     </div>
                     <div className="post-user-details">
-                      <div className="post-user-name">
-                        {post.author_name}
+                      <div className="post-user-name">{post.author_name}</div>
+                      <div className="post-user-meta">
+                        <span><i className="bi bi-envelope"></i> {post.author_email}</span>
+                        {post.author_location && <span><i className="bi bi-geo-alt"></i> {post.author_location}</span>}
                       </div>
-                      <div className="post-user-email">
-                        <i className="bi bi-envelope"></i> {post.author_email}
-                      </div>
-                      {post.author_phone && (
-                        <div className="post-user-phone">
-                          <i className="bi bi-telephone"></i> {post.author_phone}
-                        </div>
-                      )}
-                      {post.author_location && (
-                        <div className="post-user-location">
-                          <i className="bi bi-geo-alt"></i> {post.author_location}
-                        </div>
-                      )}
                     </div>
                   </div>
                   {getStatusBadge(post.moderation_status)}
@@ -535,7 +574,7 @@ export default function ContentModeration() {
                         <div key={idx} className="gallery-image" onClick={() => openFullImage(img, idx)}>
                           <img src={img} alt={`Image ${idx + 1}`} />
                           <div className="gallery-overlay">
-                            <i className="bi bi-zoom-in"></i>
+                            <i className="bi bi-eye"></i>
                           </div>
                         </div>
                       ))}
@@ -546,11 +585,6 @@ export default function ContentModeration() {
                         </div>
                       )}
                     </div>
-                    {post.images.length > 1 && (
-                      <div className="image-count-badge">
-                        <i className="bi bi-images"></i> {post.images.length} images
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -585,11 +619,18 @@ export default function ContentModeration() {
                     </div>
                   )}
                 </div>
+
+                {/* Hover Glow Effect */}
+                {hoveredCard === post.moderation_id && (
+                  <div className="card-glow"></div>
+                )}
               </div>
             ))
           ) : (
             <div className="empty-state">
-              <i className="bi bi-inbox"></i>
+              <div className="empty-state-icon">
+                <i className="bi bi-inbox"></i>
+              </div>
               <h4>No content found</h4>
               <p>There are no {filter.toLowerCase()} content items to display.</p>
             </div>
@@ -627,7 +668,10 @@ export default function ContentModeration() {
                   {/* Full Images Gallery */}
                   {postDetails.images && postDetails.images.length > 0 && (
                     <div className="detail-images-section">
-                      <h4><i className="bi bi-images"></i> All Images ({postDetails.images.length})</h4>
+                      <div className="section-header">
+                        <i className="bi bi-images"></i>
+                        <h4>Attached Images ({postDetails.images.length})</h4>
+                      </div>
                       <div className="detail-images-grid">
                         {postDetails.images.map((img, idx) => (
                           <div key={idx} className="detail-image-card" onClick={() => openFullImage(img, idx)}>
@@ -644,19 +688,22 @@ export default function ContentModeration() {
 
                   {/* Author Information */}
                   <div className="detail-section">
-                    <h4><i className="bi bi-person-badge"></i> Author Information</h4>
+                    <div className="section-header">
+                      <i className="bi bi-person-badge"></i>
+                      <h4>Author Information</h4>
+                    </div>
                     <div className="detail-author">
                       <div className="detail-author-avatar">
                         {postDetails.user?.profile_image ? (
                           <img src={getImageUrl(postDetails.user.profile_image)} alt={postDetails.user.full_name} />
                         ) : (
-                          <i className="bi bi-person-circle"></i>
+                          <div className="avatar-large-placeholder">
+                            {postDetails.user?.full_name?.charAt(0) || 'U'}
+                          </div>
                         )}
                       </div>
                       <div className="detail-author-info">
-                        <div className="detail-author-name">
-                          {postDetails.user?.full_name || 'Mobile User'}
-                        </div>
+                        <div className="detail-author-name">{postDetails.user?.full_name || 'Mobile User'}</div>
                         <div className="detail-author-email">
                           <i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}
                         </div>
@@ -665,14 +712,9 @@ export default function ContentModeration() {
                             <i className="bi bi-telephone"></i> {postDetails.user.phone}
                           </div>
                         )}
-                        {postDetails.user?.location && (
+                        {(postDetails.user?.location || postDetails.user?.district) && (
                           <div className="detail-author-location">
-                            <i className="bi bi-geo-alt"></i> {postDetails.user.location}
-                          </div>
-                        )}
-                        {postDetails.user?.district && (
-                          <div className="detail-author-district">
-                            <i className="bi bi-building"></i> {postDetails.user.district}
+                            <i className="bi bi-geo-alt"></i> {postDetails.user?.location || postDetails.user?.district}
                           </div>
                         )}
                         {postDetails.user?.created_at && (
@@ -686,7 +728,10 @@ export default function ContentModeration() {
 
                   {/* Content Information */}
                   <div className="detail-section">
-                    <h4><i className="bi bi-info-circle"></i> Content Information</h4>
+                    <div className="section-header">
+                      <i className="bi bi-info-circle"></i>
+                      <h4>Content Information</h4>
+                    </div>
                     <div className="detail-info-grid">
                       <div className="detail-info-item">
                         <label>Content ID</label>
@@ -711,20 +756,29 @@ export default function ContentModeration() {
 
                   {/* Post Title */}
                   <div className="detail-section">
-                    <h4><i className="bi bi-heading"></i> Post Title</h4>
+                    <div className="section-header">
+                      <i className="bi bi-heading"></i>
+                      <h4>Post Title</h4>
+                    </div>
                     <div className="detail-title">{postDetails.title}</div>
                   </div>
 
                   {/* Complete Post Content */}
                   <div className="detail-section">
-                    <h4><i className="bi bi-file-text"></i> Full Content</h4>
+                    <div className="section-header">
+                      <i className="bi bi-file-text"></i>
+                      <h4>Full Content</h4>
+                    </div>
                     <div className="detail-content">{postDetails.content}</div>
                   </div>
 
                   {/* Category */}
                   {postDetails.category?.category_name && (
                     <div className="detail-section">
-                      <h4><i className="bi bi-tag"></i> Category</h4>
+                      <div className="section-header">
+                        <i className="bi bi-tag"></i>
+                        <h4>Category</h4>
+                      </div>
                       <div className="detail-category">
                         <span className="category-badge">{postDetails.category.category_name}</span>
                       </div>
@@ -734,7 +788,10 @@ export default function ContentModeration() {
                   {/* Rejection Reason */}
                   {selectedPost.moderation_reason && (
                     <div className="detail-section rejection">
-                      <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
+                      <div className="section-header">
+                        <i className="bi bi-exclamation-triangle"></i>
+                        <h4>Rejection Reason</h4>
+                      </div>
                       <div className="detail-rejection">{selectedPost.moderation_reason}</div>
                     </div>
                   )}
@@ -742,7 +799,10 @@ export default function ContentModeration() {
                   {/* Moderation Info */}
                   {selectedPost.reviewed_by_admin && (
                     <div className="detail-section">
-                      <h4><i className="bi bi-person-check"></i> Moderation Information</h4>
+                      <div className="section-header">
+                        <i className="bi bi-person-check"></i>
+                        <h4>Moderation Information</h4>
+                      </div>
                       <div className="detail-moderation">
                         <div>Reviewed by: <strong>{selectedPost.reviewed_by_admin?.full_name}</strong></div>
                         <div>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
@@ -826,7 +886,7 @@ export default function ContentModeration() {
             </div>
             
             <div className="modal-body">
-              <p>Please select a reason for rejecting this content:</p>
+              <p className="reject-instruction">Please select a reason for rejecting this content:</p>
               
               <div className="quick-reasons">
                 {quickReasons.map((reason) => (
@@ -888,60 +948,170 @@ export default function ContentModeration() {
           padding: 0 24px;
         }
 
-        .loading-container {
+        /* Loading Screen */
+        .loading-screen {
           display: flex;
-          flex-direction: column;
           align-items: center;
           justify-content: center;
-          min-height: 400px;
+          min-height: 500px;
         }
 
-        .loading-spinner {
-          width: 48px;
-          height: 48px;
-          border: 3px solid #e9ecef;
-          border-top-color: #4f46e5;
+        .loading-content {
+          text-align: center;
+        }
+
+        .loading-animation {
+          display: flex;
+          gap: 12px;
+          justify-content: center;
+          margin-bottom: 24px;
+        }
+
+        .loading-circle {
+          width: 12px;
+          height: 12px;
+          background: #667eea;
           border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
+          animation: bounce 1.4s ease-in-out infinite;
         }
 
-        @keyframes spin {
-          to { transform: rotate(360deg); }
+        .delay-1 { animation-delay: 0.2s; }
+        .delay-2 { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+          0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+          40% { transform: scale(1); opacity: 1; }
         }
 
+        /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 24px;
-          padding: 32px;
+          border-radius: 28px;
+          padding: 40px 32px;
           margin-bottom: 32px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .hero-section::before {
+          content: '';
+          position: absolute;
+          top: -50%;
+          right: -50%;
+          width: 200%;
+          height: 200%;
+          background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+          animation: pulse 10s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 0.5; }
+          50% { transform: scale(1.1); opacity: 0.8; }
         }
 
         .hero-content {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          position: relative;
+          z-index: 1;
+        }
+
+        .hero-text {
           display: flex;
           align-items: center;
           gap: 20px;
         }
 
-        .hero-icon {
-          width: 56px;
-          height: 56px;
+        .hero-icon-wrapper {
+          width: 60px;
+          height: 60px;
           background: rgba(255,255,255,0.2);
-          border-radius: 16px;
+          border-radius: 20px;
           display: flex;
           align-items: center;
           justify-content: center;
+          backdrop-filter: blur(10px);
         }
 
-        .hero-icon i { font-size: 28px; color: white; }
-        .hero-title { font-size: 24px; font-weight: 700; color: white; margin: 0 0 4px 0; }
-        .hero-subtitle { font-size: 14px; color: rgba(255,255,255,0.9); margin: 0; }
+        .hero-icon-wrapper i {
+          font-size: 32px;
+          color: white;
+        }
+
+        .hero-title {
+          font-size: 28px;
+          font-weight: 700;
+          color: white;
+          margin: 0 0 8px 0;
+        }
+
+        .hero-subtitle {
+          font-size: 14px;
+          color: rgba(255,255,255,0.9);
+          margin: 0;
+        }
+
+        .hero-stats {
+          display: flex;
+          gap: 32px;
+        }
+
+        .hero-stat {
+          text-align: center;
+        }
+
+        .hero-stat-value {
+          display: block;
+          font-size: 28px;
+          font-weight: 700;
+          color: white;
+          margin-bottom: 4px;
+        }
+
+        .hero-stat-label {
+          font-size: 12px;
+          color: rgba(255,255,255,0.8);
+        }
+
+        .hero-decoration {
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          overflow: hidden;
+        }
+
+        .decoration-circle {
+          position: absolute;
+          width: 300px;
+          height: 300px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.05);
+          bottom: -150px;
+          right: -100px;
+        }
+
+        .decoration-circle-2 {
+          position: absolute;
+          width: 200px;
+          height: 200px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.05);
+          top: -100px;
+          left: -100px;
+        }
+
+        /* Stats Cards */
+        .stats-wrapper {
+          margin-bottom: 32px;
+        }
 
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
           gap: 20px;
-          margin-bottom: 28px;
         }
 
         .stat-card {
@@ -952,9 +1122,15 @@ export default function ContentModeration() {
           align-items: center;
           gap: 16px;
           transition: all 0.3s ease;
+          cursor: pointer;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
 
-        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
+        .stat-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+        }
+
         .stat-icon {
           width: 52px;
           height: 52px;
@@ -965,18 +1141,38 @@ export default function ContentModeration() {
           font-size: 24px;
         }
 
-        .stat-card.total .stat-icon { background: linear-gradient(135deg, #667eea20, #764ba220); color: #667eea; }
-        .stat-card.pending .stat-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
-        .stat-card.approved .stat-icon { background: rgba(16,185,129,0.1); color: #10b981; }
-        .stat-card.rejected .stat-icon { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .stat-icon.total { background: linear-gradient(135deg, #667eea20, #764ba220); color: #667eea; }
+        .stat-icon.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .stat-icon.approved { background: rgba(16,185,129,0.1); color: #10b981; }
+        .stat-icon.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
 
-        .stat-info { flex: 1; }
-        .stat-label { font-size: 13px; color: #6c757d; display: block; margin-bottom: 4px; }
-        .stat-value { font-size: 28px; font-weight: 700; margin: 0; }
+        .stat-info {
+          flex: 1;
+        }
+
+        .stat-label {
+          font-size: 12px;
+          color: #6c757d;
+          margin-bottom: 4px;
+          display: block;
+        }
+
+        .stat-info h3 {
+          font-size: 28px;
+          font-weight: 700;
+          margin: 0 0 4px 0;
+        }
+
+        .stat-trend {
+          font-size: 11px;
+          color: #6c757d;
+        }
+
         .text-warning { color: #f59e0b; }
         .text-success { color: #10b981; }
         .text-danger { color: #ef4444; }
 
+        /* Filter Tabs */
         .filter-tabs {
           display: flex;
           gap: 8px;
@@ -993,7 +1189,7 @@ export default function ContentModeration() {
           align-items: center;
           justify-content: center;
           gap: 8px;
-          padding: 10px 16px;
+          padding: 12px 20px;
           background: transparent;
           border: none;
           border-radius: 12px;
@@ -1004,35 +1200,106 @@ export default function ContentModeration() {
           transition: all 0.3s ease;
         }
 
-        .filter-tab:hover { background: #f8f9fa; }
-        .filter-tab.active { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
-        .count { background: rgba(0,0,0,0.1); padding: 2px 8px; border-radius: 20px; font-size: 11px; }
-        .filter-tab.active .count { background: rgba(255,255,255,0.2); }
+        .filter-tab:hover {
+          background: #f8f9fa;
+        }
 
+        .filter-tab.active {
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          color: white;
+        }
+
+        .tab-count {
+          background: rgba(0,0,0,0.1);
+          padding: 2px 8px;
+          border-radius: 20px;
+          font-size: 11px;
+        }
+
+        .filter-tab.active .tab-count {
+          background: rgba(255,255,255,0.2);
+        }
+
+        /* Search Container */
+        .search-container {
+          margin-bottom: 24px;
+        }
+
+        .search-box {
+          position: relative;
+          max-width: 400px;
+        }
+
+        .search-box i {
+          position: absolute;
+          left: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #9ca3af;
+        }
+
+        .search-box input {
+          width: 100%;
+          padding: 12px 40px 12px 40px;
+          border: 2px solid #e9ecef;
+          border-radius: 14px;
+          font-size: 14px;
+          transition: all 0.3s ease;
+        }
+
+        .search-box input:focus {
+          outline: none;
+          border-color: #667eea;
+          box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
+
+        /* Posts Grid */
         .posts-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
           gap: 24px;
         }
 
         .post-card {
           background: white;
-          border-radius: 20px;
+          border-radius: 24px;
           overflow: hidden;
           transition: all 0.3s ease;
           box-shadow: 0 2px 8px rgba(0,0,0,0.04);
           animation: fadeInUp 0.4s ease backwards;
+          position: relative;
         }
 
         @keyframes fadeInUp {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
         }
 
-        .post-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
+        .post-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+        }
 
+        .card-glow {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: linear-gradient(135deg, rgba(102,126,234,0.05), rgba(118,75,162,0.05));
+          pointer-events: none;
+          border-radius: 24px;
+        }
+
+        /* Post Card Header */
         .post-card-header {
-          padding: 16px;
+          padding: 20px;
           background: #f8f9fa;
           border-bottom: 1px solid #e9ecef;
           display: flex;
@@ -1043,31 +1310,98 @@ export default function ContentModeration() {
         .post-user-info {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 14px;
           flex: 1;
         }
 
         .post-user-avatar {
-          width: 40px;
-          height: 40px;
+          position: relative;
+          width: 48px;
+          height: 48px;
+        }
+
+        .post-user-avatar img {
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+
+        .avatar-placeholder {
+          width: 48px;
+          height: 48px;
           background: linear-gradient(135deg, #667eea, #764ba2);
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          overflow: hidden;
+          color: white;
+          font-weight: 600;
+          font-size: 18px;
         }
 
-        .post-user-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .post-user-avatar i { font-size: 20px; color: white; }
+        .user-status {
+          position: absolute;
+          bottom: 2px;
+          right: 2px;
+          width: 12px;
+          height: 12px;
+          background: #10b981;
+          border: 2px solid white;
+          border-radius: 50%;
+        }
 
-        .post-user-details { flex: 1; }
-        .post-user-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
-        .post-user-email, .post-user-phone, .post-user-location { font-size: 10px; color: #9ca3af; margin-top: 2px; display: flex; align-items: center; gap: 4px; }
-        .post-user-email i, .post-user-phone i, .post-user-location i { font-size: 9px; }
+        .post-user-details {
+          flex: 1;
+        }
 
-        .post-images-gallery { padding: 12px; background: #fafbfc; }
-        .images-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .post-user-name {
+          font-weight: 600;
+          font-size: 15px;
+          color: #1f2937;
+          margin-bottom: 4px;
+        }
+
+        .post-user-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
+        .post-user-meta i {
+          font-size: 10px;
+          margin-right: 3px;
+        }
+
+        /* Status Badge */
+        .status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 500;
+        }
+
+        .status-badge.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .status-badge.approved { background: rgba(16,185,129,0.1); color: #10b981; }
+        .status-badge.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
+
+        /* Images Gallery */
+        .post-images-gallery {
+          padding: 16px;
+          background: #fafbfc;
+        }
+
+        .images-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 8px;
+        }
+
         .gallery-image {
           position: relative;
           aspect-ratio: 1;
@@ -1075,8 +1409,18 @@ export default function ContentModeration() {
           overflow: hidden;
           cursor: pointer;
         }
-        .gallery-image img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
-        .gallery-image:hover img { transform: scale(1.05); }
+
+        .gallery-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease;
+        }
+
+        .gallery-image:hover img {
+          transform: scale(1.05);
+        }
+
         .gallery-overlay {
           position: absolute;
           top: 0;
@@ -1090,8 +1434,16 @@ export default function ContentModeration() {
           opacity: 0;
           transition: opacity 0.3s ease;
         }
-        .gallery-image:hover .gallery-overlay { opacity: 1; }
-        .gallery-overlay i { font-size: 24px; color: white; }
+
+        .gallery-image:hover .gallery-overlay {
+          opacity: 1;
+        }
+
+        .gallery-overlay i {
+          font-size: 24px;
+          color: white;
+        }
+
         .more-images {
           background: linear-gradient(135deg, #667eea, #764ba2);
           color: white;
@@ -1099,23 +1451,59 @@ export default function ContentModeration() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 4px;
+          gap: 6px;
           border-radius: 12px;
           cursor: pointer;
+          transition: all 0.3s ease;
         }
-        .more-images:hover { transform: scale(1.02); }
-        .more-images i { font-size: 24px; }
-        .more-images span { font-size: 11px; }
-        .image-count-badge { margin-top: 8px; font-size: 11px; color: #667eea; display: flex; align-items: center; gap: 4px; }
 
-        .post-card-content { padding: 16px; }
-        .post-card-title { font-size: 16px; font-weight: 600; margin: 0 0 8px 0; }
-        .post-card-text { font-size: 13px; color: #6c757d; margin: 0 0 12px 0; line-height: 1.5; }
-        .post-card-meta { display: flex; gap: 16px; font-size: 11px; color: #9ca3af; }
-        .post-card-meta i { margin-right: 4px; }
+        .more-images:hover {
+          transform: scale(1.02);
+        }
 
+        .more-images i {
+          font-size: 28px;
+        }
+
+        .more-images span {
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        /* Post Content */
+        .post-card-content {
+          padding: 20px;
+        }
+
+        .post-card-title {
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 10px 0;
+          color: #1f2937;
+          line-height: 1.4;
+        }
+
+        .post-card-text {
+          font-size: 13px;
+          color: #6c757d;
+          margin: 0 0 14px 0;
+          line-height: 1.5;
+        }
+
+        .post-card-meta {
+          display: flex;
+          gap: 16px;
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
+        .post-card-meta i {
+          margin-right: 4px;
+        }
+
+        /* Post Card Footer */
         .post-card-footer {
-          padding: 16px;
+          padding: 16px 20px;
           border-top: 1px solid #e9ecef;
           display: flex;
           gap: 12px;
@@ -1126,56 +1514,88 @@ export default function ContentModeration() {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          padding: 8px;
+          gap: 8px;
+          padding: 10px;
           background: rgba(79,70,229,0.1);
           border: none;
-          border-radius: 8px;
+          border-radius: 10px;
           color: #4f46e5;
           font-size: 13px;
           font-weight: 500;
           cursor: pointer;
+          transition: all 0.3s ease;
         }
-        .btn-view:hover { background: #4f46e5; color: white; }
-        .action-buttons { display: flex; gap: 8px; flex: 2; }
+
+        .btn-view:hover {
+          background: #4f46e5;
+          color: white;
+        }
+
+        .action-buttons {
+          display: flex;
+          gap: 8px;
+          flex: 2;
+        }
+
         .btn-approve, .btn-reject {
           flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 6px;
-          padding: 8px;
+          padding: 10px;
           border: none;
-          border-radius: 8px;
+          border-radius: 10px;
           font-size: 13px;
           font-weight: 500;
           cursor: pointer;
+          transition: all 0.3s ease;
         }
-        .btn-approve { background: rgba(16,185,129,0.1); color: #10b981; }
-        .btn-approve:hover { background: #10b981; color: white; }
-        .btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .btn-reject:hover { background: #ef4444; color: white; }
 
-        .status-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 10px;
-          border-radius: 20px;
-          font-size: 11px;
-          font-weight: 500;
+        .btn-approve {
+          background: rgba(16,185,129,0.1);
+          color: #10b981;
         }
-        .status-badge.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
-        .status-badge.approved { background: rgba(16,185,129,0.1); color: #10b981; }
-        .status-badge.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
 
+        .btn-approve:hover {
+          background: #10b981;
+          color: white;
+        }
+
+        .btn-reject {
+          background: rgba(239,68,68,0.1);
+          color: #ef4444;
+        }
+
+        .btn-reject:hover {
+          background: #ef4444;
+          color: white;
+        }
+
+        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 80px 20px;
           background: white;
           border-radius: 24px;
+          grid-column: span 3;
         }
-        .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
+
+        .empty-state-icon {
+          font-size: 80px;
+          color: #cbd5e1;
+          margin-bottom: 20px;
+        }
+
+        .empty-state h4 {
+          font-size: 20px;
+          margin-bottom: 8px;
+          color: #1f2937;
+        }
+
+        .empty-state p {
+          color: #6c757d;
+        }
 
         /* Modal Styles */
         .modal-overlay {
@@ -1202,10 +1622,13 @@ export default function ContentModeration() {
           overflow-y: auto;
           animation: slideUp 0.3s ease;
         }
-        .modal-container.modal-reject { max-width: 550px; }
+
+        .modal-container.modal-reject {
+          max-width: 550px;
+        }
 
         .modal-header {
-          padding: 24px;
+          padding: 28px;
           border-bottom: 1px solid #e9ecef;
           display: flex;
           justify-content: space-between;
@@ -1215,7 +1638,13 @@ export default function ContentModeration() {
           background: white;
           z-index: 10;
         }
-        .modal-header-content { display: flex; align-items: center; gap: 16px; }
+
+        .modal-header-content {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
         .modal-icon {
           width: 48px;
           height: 48px;
@@ -1225,9 +1654,23 @@ export default function ContentModeration() {
           align-items: center;
           justify-content: center;
         }
-        .modal-icon i { font-size: 24px; color: #667eea; }
-        .modal-header h2 { font-size: 20px; margin: 0 0 4px 0; }
-        .modal-header p { margin: 0; color: #6c757d; font-size: 13px; }
+
+        .modal-icon i {
+          font-size: 24px;
+          color: #667eea;
+        }
+
+        .modal-header h2 {
+          font-size: 20px;
+          margin: 0 0 4px 0;
+        }
+
+        .modal-header p {
+          margin: 0;
+          color: #6c757d;
+          font-size: 13px;
+        }
+
         .modal-close {
           width: 36px;
           height: 36px;
@@ -1235,14 +1678,67 @@ export default function ContentModeration() {
           border: none;
           border-radius: 50%;
           cursor: pointer;
+          transition: all 0.3s ease;
         }
-        .modal-close:hover { background: #e9ecef; transform: rotate(90deg); }
-        .modal-body { padding: 24px; }
 
-        /* Detail Modal Styles */
-        .detail-images-section { margin-bottom: 28px; }
-        .detail-images-section h4 { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-        .detail-images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+        .modal-close:hover {
+          background: #e9ecef;
+          transform: rotate(90deg);
+        }
+
+        .modal-body {
+          padding: 28px;
+        }
+
+        .modal-footer {
+          padding: 20px 28px;
+          border-top: 1px solid #e9ecef;
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          background: white;
+          position: sticky;
+          bottom: 0;
+        }
+
+        .footer-actions {
+          display: flex;
+          gap: 12px;
+          flex: 1;
+        }
+
+        /* Detail Section */
+        .detail-images-section {
+          margin-bottom: 32px;
+        }
+
+        .section-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 16px;
+          padding-bottom: 8px;
+          border-bottom: 2px solid #f0f0f0;
+        }
+
+        .section-header i {
+          font-size: 18px;
+          color: #667eea;
+        }
+
+        .section-header h4 {
+          margin: 0;
+          font-size: 16px;
+          font-weight: 600;
+          color: #1f2937;
+        }
+
+        .detail-images-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+          gap: 16px;
+        }
+
         .detail-image-card {
           position: relative;
           aspect-ratio: 1;
@@ -1252,8 +1748,18 @@ export default function ContentModeration() {
           border: 2px solid #e9ecef;
           transition: all 0.3s ease;
         }
-        .detail-image-card img { width: 100%; height: 100%; object-fit: cover; }
-        .detail-image-card:hover { transform: scale(1.02); border-color: #667eea; }
+
+        .detail-image-card:hover {
+          transform: scale(1.02);
+          border-color: #667eea;
+        }
+
+        .detail-image-card img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
         .detail-image-overlay {
           position: absolute;
           top: 0;
@@ -1265,67 +1771,103 @@ export default function ContentModeration() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 4px;
+          gap: 6px;
           opacity: 0;
           transition: opacity 0.3s ease;
           color: white;
         }
-        .detail-image-card:hover .detail-image-overlay { opacity: 1; }
-        .detail-image-overlay i { font-size: 20px; }
-        .detail-image-overlay span { font-size: 11px; }
 
-        .detail-section { margin-bottom: 28px; }
-        .detail-section h4 {
-          font-size: 15px;
-          font-weight: 600;
-          margin-bottom: 12px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          color: #1f2937;
+        .detail-image-card:hover .detail-image-overlay {
+          opacity: 1;
         }
-        .detail-section h4 i { color: #667eea; }
+
+        .detail-image-overlay i {
+          font-size: 24px;
+        }
+
+        .detail-image-overlay span {
+          font-size: 12px;
+        }
+
+        .detail-section {
+          margin-bottom: 32px;
+        }
 
         .detail-author {
           display: flex;
           align-items: center;
-          gap: 20px;
-          padding: 20px;
+          gap: 24px;
+          padding: 24px;
           background: #f8f9fa;
-          border-radius: 16px;
+          border-radius: 20px;
         }
+
         .detail-author-avatar {
-          width: 70px;
-          height: 70px;
+          width: 80px;
+          height: 80px;
+        }
+
+        .detail-author-avatar img {
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+
+        .avatar-large-placeholder {
+          width: 80px;
+          height: 80px;
           background: linear-gradient(135deg, #667eea, #764ba2);
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          overflow: hidden;
-        }
-        .detail-author-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .detail-author-avatar i { font-size: 32px; color: white; }
-        .detail-author-name { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
-        .detail-author-email, .detail-author-phone, .detail-author-location, .detail-author-district, .detail-author-joined {
-          font-size: 13px;
-          color: #6c757d;
-          margin: 4px 0;
-          display: flex;
-          align-items: center;
-          gap: 6px;
+          color: white;
+          font-size: 32px;
+          font-weight: 600;
         }
 
-        .detail-info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .detail-author-name {
+          font-size: 18px;
+          font-weight: 700;
+          margin-bottom: 8px;
+          color: #1f2937;
+        }
+
+        .detail-author-email,
+        .detail-author-phone,
+        .detail-author-location,
+        .detail-author-joined {
+          font-size: 13px;
+          color: #6c757d;
+          margin: 6px 0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .detail-info-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 20px;
+        }
+
         .detail-info-item label {
           display: block;
           font-size: 11px;
           font-weight: 600;
           color: #6c757d;
-          margin-bottom: 4px;
+          margin-bottom: 6px;
           text-transform: uppercase;
         }
-        .detail-info-item code { background: #f8f9fa; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+
+        .detail-info-item code {
+          background: #f8f9fa;
+          padding: 4px 8px;
+          border-radius: 6px;
+          font-size: 12px;
+        }
+
         .detail-title {
           font-size: 18px;
           font-weight: 600;
@@ -1333,14 +1875,15 @@ export default function ContentModeration() {
           background: #f8f9fa;
           border-radius: 12px;
         }
+
         .detail-content {
           background: #f8f9fa;
           padding: 20px;
           border-radius: 12px;
           line-height: 1.8;
           white-space: pre-wrap;
-          font-size: 14px;
         }
+
         .category-badge {
           display: inline-block;
           padding: 6px 14px;
@@ -1349,12 +1892,117 @@ export default function ContentModeration() {
           border-radius: 20px;
           font-size: 13px;
         }
-        .detail-rejection { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
-        .detail-moderation { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
-        .no-details { text-align: center; padding: 60px; color: #9ca3af; }
-        .loading-details { text-align: center; padding: 60px; }
 
-        /* Lightbox Styles */
+        .detail-rejection {
+          background: #fef3c7;
+          padding: 16px;
+          border-radius: 12px;
+          color: #92400e;
+        }
+
+        .detail-moderation {
+          background: #f8f9fa;
+          padding: 16px;
+          border-radius: 12px;
+        }
+
+        .no-details {
+          text-align: center;
+          padding: 60px;
+          color: #9ca3af;
+        }
+
+        .loading-details {
+          text-align: center;
+          padding: 60px;
+        }
+
+        /* Quick Reasons */
+        .reject-instruction {
+          margin-bottom: 20px;
+          color: #6c757d;
+        }
+
+        .quick-reasons {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .quick-reason {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 16px;
+          background: #f8f9fa;
+          border: 2px solid #e9ecef;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
+        }
+
+        .quick-reason:hover {
+          background: #e9ecef;
+          transform: translateY(-2px);
+        }
+
+        .quick-reason.selected {
+          background: #fef3c7;
+          border-color: #f59e0b;
+        }
+
+        .quick-reason i {
+          font-size: 18px;
+          color: var(--reason-color);
+        }
+
+        .quick-reason .check {
+          position: absolute;
+          right: 12px;
+          top: 12px;
+          color: #10b981;
+          font-size: 16px;
+        }
+
+        .custom-reason {
+          margin-bottom: 20px;
+        }
+
+        .custom-reason label {
+          display: block;
+          font-size: 13px;
+          font-weight: 600;
+          margin-bottom: 8px;
+        }
+
+        .custom-reason textarea {
+          width: 100%;
+          padding: 12px;
+          border: 2px solid #e9ecef;
+          border-radius: 12px;
+          resize: vertical;
+          font-size: 14px;
+        }
+
+        .custom-reason textarea:focus {
+          outline: none;
+          border-color: #667eea;
+        }
+
+        .warning-note {
+          background: #fff3cd;
+          padding: 12px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: #856404;
+        }
+
+        /* Lightbox */
         .lightbox-overlay {
           position: fixed;
           top: 0;
@@ -1368,8 +2016,19 @@ export default function ContentModeration() {
           z-index: 1200;
           animation: fadeIn 0.2s ease;
         }
-        .lightbox-content { position: relative; max-width: 90vw; max-height: 90vh; }
-        .lightbox-content img { max-width: 90vw; max-height: 85vh; object-fit: contain; }
+
+        .lightbox-content {
+          position: relative;
+          max-width: 90vw;
+          max-height: 90vh;
+        }
+
+        .lightbox-content img {
+          max-width: 90vw;
+          max-height: 85vh;
+          object-fit: contain;
+        }
+
         .lightbox-close {
           position: absolute;
           top: -50px;
@@ -1387,7 +2046,12 @@ export default function ContentModeration() {
           font-size: 20px;
           transition: all 0.3s ease;
         }
-        .lightbox-close:hover { background: rgba(255,255,255,0.3); transform: rotate(90deg); }
+
+        .lightbox-close:hover {
+          background: rgba(255,255,255,0.3);
+          transform: rotate(90deg);
+        }
+
         .lightbox-prev, .lightbox-next {
           position: absolute;
           top: 50%;
@@ -1405,9 +2069,20 @@ export default function ContentModeration() {
           font-size: 24px;
           transition: all 0.3s ease;
         }
-        .lightbox-prev { left: -60px; }
-        .lightbox-next { right: -60px; }
-        .lightbox-prev:hover, .lightbox-next:hover { background: rgba(255,255,255,0.3); transform: translateY(-50%) scale(1.1); }
+
+        .lightbox-prev {
+          left: -60px;
+        }
+
+        .lightbox-next {
+          right: -60px;
+        }
+
+        .lightbox-prev:hover, .lightbox-next:hover {
+          background: rgba(255,255,255,0.3);
+          transform: translateY(-50%) scale(1.1);
+        }
+
         .lightbox-counter {
           position: absolute;
           bottom: -40px;
@@ -1419,13 +2094,15 @@ export default function ContentModeration() {
           border-radius: 20px;
           font-size: 13px;
         }
+
         .lightbox-actions {
           position: absolute;
           bottom: -40px;
           right: 0;
         }
+
         .lightbox-actions button {
-          padding: 6px 12px;
+          padding: 8px 14px;
           background: rgba(0,0,0,0.7);
           border: none;
           border-radius: 8px;
@@ -1433,78 +2110,184 @@ export default function ContentModeration() {
           cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
           font-size: 12px;
           transition: all 0.3s ease;
         }
-        .lightbox-actions button:hover { background: rgba(0,0,0,0.9); }
 
-        .quick-reasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
-        .quick-reason {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px;
+        .lightbox-actions button:hover {
+          background: rgba(0,0,0,0.9);
+        }
+
+        /* Buttons */
+        .btn-secondary {
+          padding: 10px 20px;
           background: #f8f9fa;
-          border: 2px solid #e9ecef;
-          border-radius: 12px;
+          border: 1px solid #e9ecef;
+          border-radius: 10px;
           cursor: pointer;
-          position: relative;
+          font-weight: 500;
+          transition: all 0.3s ease;
         }
-        .quick-reason.selected { background: #fef3c7; border-color: #f59e0b; }
-        .quick-reason i { font-size: 18px; color: var(--reason-color); }
-        .quick-reason .check { position: absolute; right: 12px; top: 12px; color: #10b981; }
 
-        .custom-reason { margin-top: 20px; }
-        .custom-reason label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-        .custom-reason textarea {
-          width: 100%;
-          padding: 12px;
-          border: 2px solid #e9ecef;
-          border-radius: 12px;
-          resize: vertical;
+        .btn-secondary:hover {
+          background: #e9ecef;
         }
-        .warning-note { background: #fff3cd; padding: 12px; border-radius: 12px; margin-top: 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #856404; }
 
-        .modal-footer {
-          padding: 16px 24px;
-          border-top: 1px solid #e9ecef;
-          display: flex;
-          justify-content: flex-end;
-          gap: 12px;
-          background: white;
-          position: sticky;
-          bottom: 0;
+        .btn-approve-modal {
+          padding: 10px 24px;
+          background: #10b981;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
         }
-        .footer-actions { display: flex; gap: 12px; flex: 1; }
-        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; }
-        .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-danger { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
 
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .btn-approve-modal:hover {
+          background: #059669;
+          transform: translateY(-2px);
+        }
+
+        .btn-reject-modal {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-reject-modal:hover {
+          background: #dc2626;
+          transform: translateY(-2px);
+        }
+
+        .btn-danger {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .posts-grid {
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+          }
+        }
 
         @media (max-width: 768px) {
-          .moderation-container { padding: 0 16px; }
-          .hero-section { padding: 24px; }
-          .hero-content { flex-direction: column; text-align: center; }
-          .stats-grid { grid-template-columns: 1fr; }
-          .filter-tabs { flex-wrap: wrap; }
-          .filter-tab { flex: auto; }
-          .posts-grid { grid-template-columns: 1fr; }
-          .detail-author { flex-direction: column; text-align: center; }
-          .detail-info-grid { grid-template-columns: 1fr; }
-          .quick-reasons { grid-template-columns: 1fr; }
-          .footer-actions { flex-direction: column; }
-          .btn-approve-modal, .btn-reject-modal { width: 100%; }
-          .lightbox-prev, .lightbox-next { width: 40px; height: 40px; font-size: 18px; }
-          .lightbox-prev { left: -50px; }
-          .lightbox-next { right: -50px; }
-          .detail-images-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
-          .post-user-details { min-width: 0; }
-          .post-user-name { font-size: 12px; }
-          .post-user-email, .post-user-phone, .post-user-location { font-size: 9px; }
+          .moderation-container {
+            padding: 0 16px;
+          }
+
+          .hero-section {
+            padding: 32px 24px;
+          }
+
+          .hero-content {
+            flex-direction: column;
+            gap: 24px;
+            text-align: center;
+          }
+
+          .hero-text {
+            flex-direction: column;
+          }
+
+          .hero-stats {
+            justify-content: center;
+          }
+
+          .stats-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .filter-tabs {
+            flex-wrap: wrap;
+          }
+
+          .filter-tab {
+            flex: auto;
+          }
+
+          .posts-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .detail-author {
+            flex-direction: column;
+            text-align: center;
+          }
+
+          .detail-info-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .quick-reasons {
+            grid-template-columns: 1fr;
+          }
+
+          .footer-actions {
+            flex-direction: column;
+          }
+
+          .btn-approve-modal, .btn-reject-modal {
+            width: 100%;
+          }
+
+          .lightbox-prev, .lightbox-next {
+            width: 40px;
+            height: 40px;
+            font-size: 18px;
+          }
+
+          .lightbox-prev {
+            left: -50px;
+          }
+
+          .lightbox-next {
+            right: -50px;
+          }
+
+          .detail-images-grid {
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+          }
+
+          .post-user-meta {
+            flex-direction: column;
+            gap: 4px;
+          }
+
+          .action-buttons {
+            flex-direction: column;
+          }
         }
       `}</style>
     </AdminLayout>
