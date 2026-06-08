@@ -103,11 +103,12 @@ export default function ContentModeration() {
             imageUrls = [getImageUrl(post.image_url)]
           }
           
-          // Fetch user details
+          // Fetch user details - Try multiple methods to get user info
           let userData = null
           const userId = post.user_id || postData?.user_id
           
           if (userId) {
+            // Try to get from users table
             const { data: userFromUsers } = await supabase
               .from('users')
               .select('user_id, full_name, email, profile_image, phone, location')
@@ -116,6 +117,23 @@ export default function ContentModeration() {
             
             if (userFromUsers) {
               userData = userFromUsers
+            } else {
+              // If not found, use default but with meaningful info
+              userData = { 
+                full_name: 'Mobile User', 
+                email: 'Email not available',
+                profile_image: null,
+                phone: null,
+                location: null
+              }
+            }
+          } else {
+            userData = { 
+              full_name: 'Mobile User', 
+              email: 'Email not available',
+              profile_image: null,
+              phone: null,
+              location: null
             }
           }
           
@@ -127,11 +145,8 @@ export default function ContentModeration() {
             post_created_at: postData?.created_at || post.created_at,
             images: imageUrls, 
             image_count: imageUrls.length,
-            user: userData || { 
-              full_name: 'Mobile User', 
-              email: 'No email provided',
-              profile_image: null
-            }
+            user: userData,
+            post_user_id: userId
           }
         }
         return { ...post, images: [], image_count: 0, user: null, title: '', content: '', description: '' }
@@ -171,6 +186,7 @@ export default function ContentModeration() {
       let details = null
       
       if (contentType === 'POST') {
+        // Fetch post with user details
         const { data, error } = await supabase
           .from('posts')
           .select(`
@@ -192,6 +208,7 @@ export default function ContentModeration() {
           .single()
         
         if (!error && data) {
+          // Fetch images
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
             .select('image_url, image_order')
@@ -209,7 +226,12 @@ export default function ContentModeration() {
             if (url) imageUrls.push(url)
           }
           
-          details = { ...data, images: imageUrls, image_count: imageUrls.length }
+          details = { 
+            ...data, 
+            images: imageUrls, 
+            image_count: imageUrls.length,
+            user: data.users
+          }
         }
       }
       
@@ -298,6 +320,27 @@ export default function ContentModeration() {
           <div className="loading-spinner"></div>
           <p>Loading content...</p>
         </div>
+        <style jsx>{`
+          .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+          }
+          .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e9ecef;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
@@ -370,7 +413,7 @@ export default function ContentModeration() {
           </button>
         </div>
 
-        {/* Posts Grid - Modern Card Design */}
+        {/* Posts Grid */}
         <div className="posts-grid">
           {posts.length > 0 ? (
             posts.map((post, index) => (
@@ -387,7 +430,7 @@ export default function ContentModeration() {
                     </div>
                     <div className="post-user-details">
                       <div className="post-user-name">{post.user?.full_name || 'Mobile User'}</div>
-                      <div className="post-user-email">{post.user?.email || 'No email provided'}</div>
+                      <div className="post-user-email">{post.user?.email || 'Email not available'}</div>
                     </div>
                   </div>
                   {getStatusBadge(post.moderation_status)}
@@ -448,7 +491,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal with Full Content */}
+      {/* Details Modal */}
       {showDetailsModal && selectedPost && postDetails && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -468,129 +511,127 @@ export default function ContentModeration() {
             </div>
             
             <div className="modal-body">
-              {/* Post Image */}
-              {postDetails.image_url && (
-                <div className="detail-image" onClick={() => openFullImage(getImageUrl(postDetails.image_url))}>
-                  <img src={getImageUrl(postDetails.image_url)} alt={postDetails.title} />
-                  <div className="detail-image-overlay">
-                    <i className="bi bi-zoom-in"></i>
-                    <span>Click to enlarge</span>
-                  </div>
+              {loadingDetails ? (
+                <div className="loading-details">
+                  <div className="spinner-border text-primary"></div>
+                  <p>Loading content details...</p>
                 </div>
-              )}
-
-              {/* Multiple Images */}
-              {postDetails.images && postDetails.images.length > 0 && (
-                <div className="detail-images">
-                  <h4><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h4>
-                  <div className="detail-images-grid">
-                    {postDetails.images.map((img, idx) => (
-                      <div key={idx} className="detail-image-item" onClick={() => openFullImage(img)}>
-                        <img src={img} alt={`Image ${idx + 1}`} />
-                        <div className="detail-image-overlay">
-                          <i className="bi bi-zoom-in"></i>
-                        </div>
+              ) : (
+                <>
+                  {/* Post Images */}
+                  {postDetails.images && postDetails.images.length > 0 && (
+                    <div className="detail-images">
+                      <h4><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h4>
+                      <div className="detail-images-grid">
+                        {postDetails.images.map((img, idx) => (
+                          <div key={idx} className="detail-image-item" onClick={() => openFullImage(img)}>
+                            <img src={img} alt={`Image ${idx + 1}`} />
+                            <div className="detail-image-overlay">
+                              <i className="bi bi-zoom-in"></i>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Author Information */}
-              <div className="detail-section">
-                <h4><i className="bi bi-person-badge"></i> Author Information</h4>
-                <div className="detail-author">
-                  <div className="detail-author-avatar">
-                    {postDetails.users?.profile_image ? (
-                      <img src={getImageUrl(postDetails.users.profile_image)} alt={postDetails.users.full_name} />
-                    ) : (
-                      <i className="bi bi-person-circle"></i>
-                    )}
-                  </div>
-                  <div className="detail-author-info">
-                    <div className="detail-author-name">{postDetails.users?.full_name || 'Unknown User'}</div>
-                    <div className="detail-author-email">{postDetails.users?.email || 'No email'}</div>
-                    {postDetails.users?.phone && (
-                      <div className="detail-author-phone"><i className="bi bi-telephone"></i> {postDetails.users.phone}</div>
-                    )}
-                    {postDetails.users?.location && (
-                      <div className="detail-author-location"><i className="bi bi-geo-alt"></i> {postDetails.users.location}</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Content Information */}
-              <div className="detail-section">
-                <h4><i className="bi bi-info-circle"></i> Content Information</h4>
-                <div className="detail-info-grid">
-                  <div className="detail-info-item">
-                    <label>Content ID</label>
-                    <code>{selectedPost.content_id}</code>
-                  </div>
-                  <div className="detail-info-item">
-                    <label>Status</label>
-                    {getStatusBadge(selectedPost.moderation_status)}
-                  </div>
-                  <div className="detail-info-item">
-                    <label>Created At</label>
-                    <span>{new Date(selectedPost.created_at).toLocaleString()}</span>
-                  </div>
-                  {selectedPost.reviewed_at && (
-                    <div className="detail-info-item">
-                      <label>Reviewed At</label>
-                      <span>{new Date(selectedPost.reviewed_at).toLocaleString()}</span>
                     </div>
                   )}
-                </div>
-              </div>
 
-              {/* Post Title */}
-              {postDetails.title && (
-                <div className="detail-section">
-                  <h4><i className="bi bi-heading"></i> Title</h4>
-                  <div className="detail-title">{postDetails.title}</div>
-                </div>
-              )}
-
-              {/* Post Content */}
-              {(postDetails.content || postDetails.description) && (
-                <div className="detail-section">
-                  <h4><i className="bi bi-file-text"></i> Content</h4>
-                  <div className="detail-content">{postDetails.content || postDetails.description}</div>
-                </div>
-              )}
-
-              {/* Category */}
-              {postDetails.post_categories?.category_name && (
-                <div className="detail-section">
-                  <h4><i className="bi bi-tag"></i> Category</h4>
-                  <div className="detail-category">
-                    <span className="category-badge">{postDetails.post_categories.category_name}</span>
-                    {postDetails.post_categories.description && (
-                      <p className="category-desc">{postDetails.post_categories.description}</p>
-                    )}
+                  {/* Author Information */}
+                  <div className="detail-section">
+                    <h4><i className="bi bi-person-badge"></i> Author Information</h4>
+                    <div className="detail-author">
+                      <div className="detail-author-avatar">
+                        {postDetails.user?.profile_image ? (
+                          <img src={getImageUrl(postDetails.user.profile_image)} alt={postDetails.user.full_name} />
+                        ) : (
+                          <i className="bi bi-person-circle"></i>
+                        )}
+                      </div>
+                      <div className="detail-author-info">
+                        <div className="detail-author-name">{postDetails.user?.full_name || 'Mobile User'}</div>
+                        <div className="detail-author-email">{postDetails.user?.email || 'Email not available'}</div>
+                        {postDetails.user?.phone && (
+                          <div className="detail-author-phone"><i className="bi bi-telephone"></i> {postDetails.user.phone}</div>
+                        )}
+                        {postDetails.user?.location && (
+                          <div className="detail-author-location"><i className="bi bi-geo-alt"></i> {postDetails.user.location}</div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
 
-              {/* Rejection Reason */}
-              {selectedPost.moderation_reason && (
-                <div className="detail-section rejection">
-                  <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
-                  <div className="detail-rejection">{selectedPost.moderation_reason}</div>
-                </div>
-              )}
-
-              {/* Moderation Info */}
-              {selectedPost.reviewed_by_admin && (
-                <div className="detail-section">
-                  <h4><i className="bi bi-person-check"></i> Moderation Information</h4>
-                  <div className="detail-moderation">
-                    <div>Reviewed by: <strong>{selectedPost.reviewed_by_admin?.full_name}</strong></div>
-                    <div>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
+                  {/* Content Information */}
+                  <div className="detail-section">
+                    <h4><i className="bi bi-info-circle"></i> Content Information</h4>
+                    <div className="detail-info-grid">
+                      <div className="detail-info-item">
+                        <label>Content ID</label>
+                        <code>{selectedPost.content_id}</code>
+                      </div>
+                      <div className="detail-info-item">
+                        <label>Status</label>
+                        {getStatusBadge(selectedPost.moderation_status)}
+                      </div>
+                      <div className="detail-info-item">
+                        <label>Created At</label>
+                        <span>{new Date(selectedPost.created_at).toLocaleString()}</span>
+                      </div>
+                      {selectedPost.reviewed_at && (
+                        <div className="detail-info-item">
+                          <label>Reviewed At</label>
+                          <span>{new Date(selectedPost.reviewed_at).toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+
+                  {/* Post Title */}
+                  {postDetails.title && (
+                    <div className="detail-section">
+                      <h4><i className="bi bi-heading"></i> Title</h4>
+                      <div className="detail-title">{postDetails.title}</div>
+                    </div>
+                  )}
+
+                  {/* Post Content */}
+                  {(postDetails.content || postDetails.description) && (
+                    <div className="detail-section">
+                      <h4><i className="bi bi-file-text"></i> Content</h4>
+                      <div className="detail-content">{postDetails.content || postDetails.description}</div>
+                    </div>
+                  )}
+
+                  {/* Category */}
+                  {postDetails.post_categories?.category_name && (
+                    <div className="detail-section">
+                      <h4><i className="bi bi-tag"></i> Category</h4>
+                      <div className="detail-category">
+                        <span className="category-badge">{postDetails.post_categories.category_name}</span>
+                        {postDetails.post_categories.description && (
+                          <p className="category-desc">{postDetails.post_categories.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rejection Reason */}
+                  {selectedPost.moderation_reason && (
+                    <div className="detail-section rejection">
+                      <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
+                      <div className="detail-rejection">{selectedPost.moderation_reason}</div>
+                    </div>
+                  )}
+
+                  {/* Moderation Info */}
+                  {selectedPost.reviewed_by_admin && (
+                    <div className="detail-section">
+                      <h4><i className="bi bi-person-check"></i> Moderation Information</h4>
+                      <div className="detail-moderation">
+                        <div>Reviewed by: <strong>{selectedPost.reviewed_by_admin?.full_name}</strong></div>
+                        <div>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             
@@ -851,7 +892,6 @@ export default function ContentModeration() {
 
         .post-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
 
-        /* Post Card Header */
         .post-card-header {
           padding: 16px 20px;
           background: #f8f9fa;
@@ -905,7 +945,6 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
-        /* Post Card Image */
         .post-card-image {
           position: relative;
           height: 200px;
@@ -938,7 +977,6 @@ export default function ContentModeration() {
           gap: 4px;
         }
 
-        /* Post Card Content */
         .post-card-content {
           padding: 16px 20px;
         }
@@ -948,7 +986,6 @@ export default function ContentModeration() {
           font-weight: 600;
           margin: 0 0 8px 0;
           color: #1f2937;
-          line-height: 1.4;
         }
 
         .post-card-text {
@@ -969,7 +1006,6 @@ export default function ContentModeration() {
           margin-right: 4px;
         }
 
-        /* Post Card Footer */
         .post-card-footer {
           padding: 16px 20px;
           border-top: 1px solid #e9ecef;
@@ -1144,41 +1180,6 @@ export default function ContentModeration() {
         .footer-actions { display: flex; gap: 12px; flex: 1; }
 
         /* Detail Modal Styles */
-        .detail-image {
-          position: relative;
-          border-radius: 16px;
-          overflow: hidden;
-          margin-bottom: 24px;
-          cursor: pointer;
-        }
-
-        .detail-image img {
-          width: 100%;
-          max-height: 300px;
-          object-fit: cover;
-        }
-
-        .detail-image-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.5);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          opacity: 0;
-          transition: opacity 0.3s ease;
-          color: white;
-        }
-
-        .detail-image:hover .detail-image-overlay {
-          opacity: 1;
-        }
-
         .detail-images {
           margin-bottom: 24px;
         }
@@ -1213,6 +1214,21 @@ export default function ContentModeration() {
           object-fit: cover;
         }
 
+        .detail-image-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+          color: white;
+        }
+
         .detail-image-item:hover .detail-image-overlay {
           opacity: 1;
         }
@@ -1234,7 +1250,6 @@ export default function ContentModeration() {
           display: flex;
           align-items: center;
           gap: 8px;
-          color: #374151;
         }
 
         .detail-section h4 i {
@@ -1322,7 +1337,6 @@ export default function ContentModeration() {
           border-radius: 12px;
           line-height: 1.6;
           white-space: pre-wrap;
-          word-wrap: break-word;
         }
 
         .category-badge {
@@ -1333,12 +1347,6 @@ export default function ContentModeration() {
           border-radius: 20px;
           font-size: 12px;
           margin-bottom: 8px;
-        }
-
-        .category-desc {
-          font-size: 13px;
-          color: #6c757d;
-          margin: 8px 0 0 0;
         }
 
         .detail-rejection {
@@ -1461,9 +1469,6 @@ export default function ContentModeration() {
           transition: all 0.3s ease;
         }
 
-        .image-actions button:hover { background: rgba(0,0,0,0.9); }
-
-        /* Buttons */
         .btn-secondary {
           padding: 10px 20px;
           background: #f8f9fa;
@@ -1473,10 +1478,35 @@ export default function ContentModeration() {
           font-weight: 500;
         }
 
-        .btn-primary { padding: 10px 24px; background: #4f46e5; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-danger { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-approve-modal {
+          padding: 10px 24px;
+          background: #10b981;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .btn-reject-modal {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .btn-danger {
+          padding: 10px 24px;
+          background: #ef4444;
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
