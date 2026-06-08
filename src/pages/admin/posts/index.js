@@ -19,6 +19,9 @@ export default function ContentModeration() {
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [showFullImage, setShowFullImage] = useState(false)
   const [selectedImage, setSelectedImage] = useState(null)
+  const [comments, setComments] = useState([])
+  const [newComment, setNewComment] = useState('')
+  const [addingComment, setAddingComment] = useState(false)
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -191,10 +194,82 @@ export default function ContentModeration() {
       }
       
       setPostDetails(details)
+      
+      // Fetch comments for this post
+      if (contentType === 'POST') {
+        await fetchComments(contentId)
+      }
     } catch (err) {
       console.error('Error fetching post details:', err)
     } finally {
       setLoadingDetails(false)
+    }
+  }
+
+  const fetchComments = async (postId) => {
+    try {
+      const { data, error } = await supabase
+        .from('comments')
+        .select(`
+          *,
+          users!comments_user_id_fkey (
+            user_id,
+            full_name,
+            email,
+            profile_image
+          )
+        `)
+        .eq('post_id', postId)
+        .order('created_at', { ascending: false })
+
+      if (!error && data) {
+        setComments(data)
+      } else {
+        setComments([])
+      }
+    } catch (err) {
+      console.error('Error fetching comments:', err)
+      setComments([])
+    }
+  }
+
+  const addComment = async () => {
+    if (!newComment.trim()) {
+      alert('Please enter a comment')
+      return
+    }
+
+    setAddingComment(true)
+    const session = JSON.parse(localStorage.getItem('adminSession'))
+    
+    try {
+      // Get admin user ID from admin_users
+      const { data: adminUser } = await supabase
+        .from('admin_users')
+        .select('admin_id')
+        .eq('email', session?.user?.email)
+        .single()
+
+      // Add comment directly to comments table (no moderation needed)
+      const { error } = await supabase
+        .from('comments')
+        .insert({
+          post_id: selectedPost.content_id,
+          user_id: adminUser?.admin_id || session?.user?.id,
+          comment_text: newComment,
+          created_at: new Date().toISOString()
+        })
+
+      if (error) throw error
+
+      setNewComment('')
+      await fetchComments(selectedPost.content_id)
+      alert('Comment added successfully!')
+    } catch (err) {
+      console.error('Error adding comment:', err)
+      alert('Error adding comment: ' + err.message)
+    } finally {
+      setAddingComment(false)
     }
   }
 
@@ -227,6 +302,7 @@ export default function ContentModeration() {
       setCustomReason('')
       setSelectedPost(null)
       if (showDetailsModal) setShowDetailsModal(false)
+      alert(`Content ${status.toLowerCase()} successfully!`)
     } else {
       alert(`Error updating status: ${error.message}`)
     }
@@ -333,7 +409,7 @@ export default function ContentModeration() {
             </div>
             <div>
               <h1 className="hero-title">Content Moderation</h1>
-              <p className="hero-subtitle">Review and manage user-generated content</p>
+              <p className="hero-subtitle">Review and manage user-generated content before publication</p>
             </div>
           </div>
         </div>
@@ -466,7 +542,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Details Modal with Full Content and Comments */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -493,6 +569,7 @@ export default function ContentModeration() {
                 </div>
               ) : (
                 <>
+                  {/* Content Info Section */}
                   <div className="info-section">
                     <h4><i className="bi bi-info-circle"></i> Content Information</h4>
                     <div className="info-grid">
@@ -515,6 +592,7 @@ export default function ContentModeration() {
                     </div>
                   </div>
 
+                  {/* Author Information */}
                   {postDetails && postDetails.users && (
                     <div className="info-section">
                       <h4><i className="bi bi-person-badge"></i> Author Information</h4>
@@ -540,12 +618,14 @@ export default function ContentModeration() {
                     </div>
                   )}
 
+                  {/* Post Content with Images */}
                   {selectedPost.content_type === 'POST' && postDetails && (
                     <div className="info-section">
                       <h4><i className="bi bi-file-text"></i> Post Content</h4>
                       <div className="post-title">{postDetails.title}</div>
                       <div className="post-content">{postDetails.content}</div>
                       
+                      {/* All Images Gallery */}
                       {postDetails.images && postDetails.images.length > 0 && (
                         <div className="images-section">
                           <h5><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h5>
@@ -555,6 +635,7 @@ export default function ContentModeration() {
                                 <img src={img} alt={`Image ${idx + 1}`} />
                                 <div className="image-overlay">
                                   <i className="bi bi-zoom-in"></i>
+                                  <span>Click to enlarge</span>
                                 </div>
                               </div>
                             ))}
@@ -564,6 +645,7 @@ export default function ContentModeration() {
                     </div>
                   )}
 
+                  {/* Comment Content */}
                   {selectedPost.content_type === 'COMMENT' && postDetails && (
                     <div className="info-section">
                       <h4><i className="bi bi-chat"></i> Comment Content</h4>
@@ -574,6 +656,61 @@ export default function ContentModeration() {
                     </div>
                   )}
 
+                  {/* Comments Section for Posts */}
+                  {selectedPost.content_type === 'POST' && (
+                    <div className="comments-section">
+                      <h4><i className="bi bi-chat-dots"></i> Comments ({comments.length})</h4>
+                      
+                      {/* Add Comment Form */}
+                      <div className="add-comment">
+                        <textarea
+                          className="comment-input"
+                          rows="3"
+                          placeholder="Add a comment..."
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                        />
+                        <button 
+                          className="btn-submit-comment"
+                          onClick={addComment}
+                          disabled={addingComment}
+                        >
+                          {addingComment ? 'Posting...' : 'Post Comment'}
+                        </button>
+                      </div>
+
+                      {/* Comments List */}
+                      <div className="comments-list">
+                        {comments.length > 0 ? (
+                          comments.map((comment) => (
+                            <div key={comment.comment_id} className="comment-item">
+                              <div className="comment-avatar">
+                                {comment.users?.profile_image ? (
+                                  <img src={getImageUrl(comment.users.profile_image)} alt={comment.users.full_name} />
+                                ) : (
+                                  <i className="bi bi-person-circle"></i>
+                                )}
+                              </div>
+                              <div className="comment-content">
+                                <div className="comment-header">
+                                  <span className="comment-author">{comment.users?.full_name || 'Anonymous'}</span>
+                                  <span className="comment-time">{new Date(comment.created_at).toLocaleString()}</span>
+                                </div>
+                                <div className="comment-text">{comment.comment_text}</div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="no-comments">
+                            <i className="bi bi-chat"></i>
+                            <p>No comments yet. Be the first to comment!</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rejection Reason */}
                   {selectedPost.moderation_reason && (
                     <div className="info-section rejection">
                       <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
@@ -581,6 +718,7 @@ export default function ContentModeration() {
                     </div>
                   )}
 
+                  {/* Moderation Info */}
                   {selectedPost.reviewed_by_admin && (
                     <div className="info-section">
                       <h4><i className="bi bi-person-check"></i> Moderation Information</h4>
@@ -622,6 +760,11 @@ export default function ContentModeration() {
               <i className="bi bi-x-lg"></i>
             </button>
             <img src={selectedImage} alt="Full size" />
+            <div className="image-actions">
+              <button onClick={() => window.open(selectedImage, '_blank')}>
+                <i className="bi bi-box-arrow-up-right"></i> Open in new tab
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -641,7 +784,7 @@ export default function ContentModeration() {
             </div>
             
             <div className="modal-body">
-              <p>Please select a reason for rejection:</p>
+              <p>Please select a reason for rejecting this content:</p>
               
               <div className="quick-reasons">
                 {quickReasons.map((reason) => (
@@ -708,12 +851,32 @@ export default function ContentModeration() {
           border-radius: 24px;
           padding: 40px 32px;
           margin-bottom: 32px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .hero-section::before {
+          content: '';
+          position: absolute;
+          top: -50%;
+          right: -50%;
+          width: 200%;
+          height: 200%;
+          background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+          animation: pulse 10s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 0.5; }
+          50% { transform: scale(1.1); opacity: 0.8; }
         }
 
         .hero-content {
           display: flex;
           align-items: center;
           gap: 20px;
+          position: relative;
+          z-index: 1;
         }
 
         .hero-icon {
@@ -795,6 +958,7 @@ export default function ContentModeration() {
           background: white;
           padding: 6px;
           border-radius: 16px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
 
         .filter-tab {
@@ -850,36 +1014,13 @@ export default function ContentModeration() {
           align-items: center;
         }
 
-        .post-type { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #6c757d; }
-
-        .post-image-preview {
-          position: relative;
-          height: 180px;
-          overflow: hidden;
-          cursor: pointer;
-        }
-
-        .post-image-preview img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          transition: transform 0.3s ease;
-        }
-
-        .post-card:hover .post-image-preview img { transform: scale(1.05); }
-
-        .image-count-badge {
-          position: absolute;
-          bottom: 12px;
-          right: 12px;
-          background: rgba(0,0,0,0.7);
-          color: white;
-          padding: 4px 10px;
-          border-radius: 20px;
-          font-size: 11px;
+        .post-type {
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6c757d;
         }
 
         .status-badge {
@@ -896,6 +1037,38 @@ export default function ContentModeration() {
         .status-badge.approved { background: rgba(16,185,129,0.1); color: #10b981; }
         .status-badge.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
 
+        .post-image-preview {
+          position: relative;
+          height: 180px;
+          overflow: hidden;
+          cursor: pointer;
+        }
+
+        .post-image-preview img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease;
+        }
+
+        .post-card:hover .post-image-preview img {
+          transform: scale(1.05);
+        }
+
+        .image-count-badge {
+          position: absolute;
+          bottom: 12px;
+          right: 12px;
+          background: rgba(0,0,0,0.7);
+          color: white;
+          padding: 4px 10px;
+          border-radius: 20px;
+          font-size: 11px;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
         .post-card-body {
           padding: 16px 20px;
           border-bottom: 1px solid #e9ecef;
@@ -909,6 +1082,8 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
+        .post-meta i { margin-right: 4px; }
+
         .rejection-badge {
           background: #fef3c7;
           padding: 8px 12px;
@@ -920,9 +1095,14 @@ export default function ContentModeration() {
           gap: 6px;
         }
 
-        .post-card-footer { padding: 16px 20px; }
+        .post-card-footer {
+          padding: 16px 20px;
+        }
 
-        .action-group { display: flex; gap: 12px; }
+        .action-group {
+          display: flex;
+          gap: 12px;
+        }
 
         .btn-approve, .btn-reject, .btn-view {
           flex: 1;
@@ -946,7 +1126,11 @@ export default function ContentModeration() {
         .btn-view { background: rgba(79,70,229,0.1); color: #4f46e5; }
         .btn-view:hover { background: #4f46e5; color: white; }
 
-        .reviewed-info { text-align: center; font-size: 11px; color: #6c757d; }
+        .reviewed-info {
+          text-align: center;
+          font-size: 11px;
+          color: #6c757d;
+        }
 
         .empty-state {
           text-align: center;
@@ -955,7 +1139,12 @@ export default function ContentModeration() {
           border-radius: 24px;
         }
 
-        .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
+        .empty-state i {
+          font-size: 64px;
+          color: #cbd5e1;
+          margin-bottom: 16px;
+          display: block;
+        }
 
         /* Modal Styles */
         .modal-overlay {
@@ -975,7 +1164,7 @@ export default function ContentModeration() {
 
         .modal-container {
           background: white;
-          border-radius: 24px;
+          border-radius: 28px;
           width: 90%;
           max-width: 700px;
           max-height: 85vh;
@@ -992,12 +1181,15 @@ export default function ContentModeration() {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          position: sticky;
-          top: 0;
-          background: white;
         }
 
-        .modal-header-content { display: flex; align-items: center; gap: 16px; }
+        .modal-header.warning .modal-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+
+        .modal-header-content {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
 
         .modal-icon {
           width: 48px;
@@ -1027,63 +1219,33 @@ export default function ContentModeration() {
         .modal-close:hover { background: #e9ecef; transform: rotate(90deg); }
 
         .modal-body { padding: 28px; }
+        .modal-footer { padding: 16px 28px 28px; border-top: 1px solid #e9ecef; display: flex; justify-content: flex-end; gap: 12px; }
 
-        .modal-footer {
-          padding: 16px 28px 28px;
-          border-top: 1px solid #e9ecef;
-          display: flex;
-          justify-content: flex-end;
-          gap: 12px;
-          position: sticky;
-          bottom: 0;
-          background: white;
-        }
+        .footer-actions { display: flex; gap: 12px; }
 
-        .footer-actions { display: flex; gap: 12px; flex: 1; }
+        .loading-details { text-align: center; padding: 60px; }
 
+        /* Info Section */
         .info-section { margin-bottom: 28px; }
-
-        .info-section h4 {
-          font-size: 16px;
-          font-weight: 600;
-          margin-bottom: 16px;
-          color: #1f2937;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
+        .info-section h4 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
         .info-section h4 i { color: #667eea; }
+        .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .info-item label { display: block; font-size: 11px; font-weight: 600; color: #6c757d; margin-bottom: 4px; }
+        .info-item code { background: #f8f9fa; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+        .badge-type { display: inline-block; padding: 4px 12px; background: #e9ecef; border-radius: 12px; font-size: 12px; }
 
-        .info-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 16px;
-          background: #f8f9fa;
-          padding: 16px;
-          border-radius: 16px;
-        }
-
-        .info-item label {
-          display: block;
-          font-size: 11px;
-          font-weight: 600;
-          color: #6c757d;
-          margin-bottom: 4px;
-          text-transform: uppercase;
-        }
-
+        /* Author Card */
         .author-card {
           display: flex;
-          gap: 16px;
-          padding: 16px;
+          align-items: center;
+          gap: 20px;
+          padding: 20px;
           background: #f8f9fa;
           border-radius: 16px;
         }
-
         .author-avatar {
-          width: 60px;
-          height: 60px;
+          width: 64px;
+          height: 64px;
           background: linear-gradient(135deg, #667eea, #764ba2);
           border-radius: 50%;
           display: flex;
@@ -1091,26 +1253,20 @@ export default function ContentModeration() {
           justify-content: center;
           overflow: hidden;
         }
-
         .author-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .author-avatar i { font-size: 32px; color: white; }
-
-        .author-details { flex: 1; }
         .author-name { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
-        .author-email, .author-phone, .author-location { font-size: 12px; color: #6c757d; display: flex; align-items: center; gap: 6px; }
+        .author-email, .author-phone, .author-location { font-size: 12px; color: #6c757d; margin: 2px 0; }
+        .author-email i, .author-phone i, .author-location i { margin-right: 4px; font-size: 11px; }
 
+        /* Post Content */
         .post-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
-        .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; margin-bottom: 16px; line-height: 1.6; }
+        .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; line-height: 1.6; margin-bottom: 16px; }
 
-        .images-section { margin-top: 16px; }
-        .images-section h5 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
-
-        .images-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-          gap: 12px;
-        }
-
+        /* Images Section */
+        .images-section { margin-top: 20px; }
+        .images-section h5 { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
         .image-card {
           position: relative;
           aspect-ratio: 1;
@@ -1120,61 +1276,83 @@ export default function ContentModeration() {
           border: 2px solid #e9ecef;
           transition: all 0.3s ease;
         }
-
         .image-card:hover { transform: scale(1.02); border-color: #667eea; }
         .image-card img { width: 100%; height: 100%; object-fit: cover; }
-
         .image-overlay {
           position: absolute;
           top: 0;
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0,0,0,0.7);
+          background: rgba(0,0,0,0.6);
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
+          gap: 8px;
           opacity: 0;
           transition: opacity 0.3s ease;
           color: white;
         }
-
         .image-card:hover .image-overlay { opacity: 1; }
         .image-overlay i { font-size: 24px; }
+        .image-overlay span { font-size: 11px; }
 
-        .comment-post-info {
-          background: #e7f1ff;
-          padding: 12px;
-          border-radius: 8px;
-          margin-bottom: 12px;
-          font-size: 13px;
-          color: #0d6efd;
-        }
+        /* Comments Section */
+        .comments-section { margin-top: 28px; }
+        .comments-section h4 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 
-        .comment-text {
-          background: #f8f9fa;
-          padding: 16px;
-          border-radius: 12px;
-          line-height: 1.6;
-        }
+        .add-comment { margin-bottom: 24px; }
+        .comment-input { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
+        .comment-input:focus { outline: none; border-color: #667eea; }
+        .btn-submit-comment { margin-top: 12px; padding: 10px 20px; background: linear-gradient(135deg, #667eea, #764ba2); border: none; border-radius: 10px; color: white; font-weight: 500; cursor: pointer; transition: all 0.3s ease; }
+        .btn-submit-comment:hover { transform: translateY(-2px); }
 
-        .rejection-box {
-          background: #fef3c7;
-          padding: 12px;
-          border-radius: 8px;
-          color: #92400e;
-        }
+        .comments-list { max-height: 400px; overflow-y: auto; }
+        .comment-item { display: flex; gap: 12px; padding: 16px; background: #f8f9fa; border-radius: 16px; margin-bottom: 12px; }
+        .comment-avatar { width: 40px; height: 40px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .comment-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .comment-avatar i { font-size: 20px; color: white; }
+        .comment-content { flex: 1; }
+        .comment-header { display: flex; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+        .comment-author { font-weight: 600; font-size: 13px; }
+        .comment-time { font-size: 11px; color: #9ca3af; }
+        .comment-text { font-size: 13px; color: #4b5563; line-height: 1.5; }
 
-        .moderation-info {
-          background: #f8f9fa;
-          padding: 12px;
-          border-radius: 8px;
-          font-size: 13px;
+        .no-comments { text-align: center; padding: 40px; color: #9ca3af; }
+        .no-comments i { font-size: 48px; margin-bottom: 12px; display: block; }
+
+        /* Rejection Box */
+        .rejection-box { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
+        .moderation-info { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+
+        /* Quick Reasons */
+        .quick-reasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
+        .quick-reason {
           display: flex;
-          gap: 16px;
-          flex-wrap: wrap;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 16px;
+          background: #f8f9fa;
+          border: 2px solid #e9ecef;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
         }
+        .quick-reason:hover { background: #e9ecef; transform: translateY(-2px); }
+        .quick-reason.selected { background: #fef3c7; border-color: #f59e0b; }
+        .quick-reason i { font-size: 18px; color: var(--reason-color); }
+        .quick-reason .check { position: absolute; right: 12px; top: 12px; color: #10b981; font-size: 16px; }
 
+        .custom-reason { margin-top: 20px; }
+        .custom-reason label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+        .custom-reason textarea { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
+        .custom-reason textarea:focus { outline: none; border-color: #667eea; }
+
+        .warning-note { background: #fff3cd; padding: 12px; border-radius: 12px; margin-top: 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #856404; }
+
+        /* Full Image Modal */
         .full-image-modal {
           position: relative;
           max-width: 90vw;
@@ -1182,15 +1360,9 @@ export default function ContentModeration() {
           background: #1a1f2e;
           border-radius: 12px;
           overflow: hidden;
+          animation: slideUp 0.3s ease;
         }
-
-        .full-image-modal img {
-          max-width: 100%;
-          max-height: 85vh;
-          display: block;
-          margin: 0 auto;
-        }
-
+        .full-image-modal img { max-width: 100%; max-height: 85vh; display: block; margin: 0 auto; }
         .close-image {
           position: absolute;
           top: 16px;
@@ -1207,107 +1379,41 @@ export default function ContentModeration() {
           justify-content: center;
           transition: all 0.3s ease;
         }
-
         .close-image:hover { background: rgba(0,0,0,0.9); transform: rotate(90deg); }
+        .image-actions { position: absolute; bottom: 16px; right: 16px; }
+        .image-actions button { padding: 8px 16px; background: rgba(0,0,0,0.7); border: none; border-radius: 8px; color: white; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 13px; transition: all 0.3s ease; }
+        .image-actions button:hover { background: rgba(0,0,0,0.9); }
 
-        .quick-reasons {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .quick-reason {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px 16px;
-          background: #f8f9fa;
-          border: 2px solid #e9ecef;
-          border-radius: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          position: relative;
-        }
-
-        .quick-reason:hover { background: #e9ecef; transform: translateY(-2px); }
-        .quick-reason.selected { background: #fef3c7; border-color: #f59e0b; }
-        .quick-reason i { font-size: 18px; color: var(--reason-color); }
-        .quick-reason .check { position: absolute; right: 12px; top: 12px; color: #10b981; font-size: 16px; }
-
-        .custom-reason { margin-top: 20px; }
-        .custom-reason label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-        .custom-reason textarea {
-          width: 100%;
-          padding: 12px;
-          border: 2px solid #e9ecef;
-          border-radius: 12px;
-          resize: vertical;
-        }
-
-        .warning-note {
-          background: #fff3cd;
-          padding: 12px;
-          border-radius: 12px;
-          margin-top: 16px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          color: #856404;
-        }
-
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
-          border-radius: 10px;
-          cursor: pointer;
-        }
-
-        .btn-danger {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .btn-approve-modal, .btn-reject-modal {
-          padding: 10px 24px;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          flex: 1;
-        }
-
-        .btn-approve-modal { background: #10b981; }
-        .btn-reject-modal { background: #ef4444; }
-
-        .loading-details { text-align: center; padding: 60px 20px; }
+        /* Buttons */
+        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; font-weight: 500; }
+        .btn-primary { padding: 10px 24px; background: #4f46e5; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-danger { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
+        @media (max-width: 1200px) {
+          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .posts-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+        }
+
         @media (max-width: 768px) {
           .moderation-container { padding: 0 16px; }
-          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .hero-section { padding: 32px 24px; }
+          .hero-content { flex-direction: column; text-align: center; }
+          .stats-grid { grid-template-columns: 1fr; }
           .filter-tabs { flex-wrap: wrap; }
           .filter-tab { flex: auto; }
           .posts-grid { grid-template-columns: 1fr; }
           .info-grid { grid-template-columns: 1fr; }
-          .author-card { flex-direction: column; text-align: center; }
-          .author-details { text-align: center; }
-          .author-email, .author-phone, .author-location { justify-content: center; }
           .images-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
           .quick-reasons { grid-template-columns: 1fr; }
+          .author-card { flex-direction: column; text-align: center; }
           .footer-actions { flex-direction: column; }
+          .btn-approve-modal, .btn-reject-modal { width: 100%; }
+          .action-group { flex-direction: column; }
         }
       `}</style>
     </AdminLayout>
