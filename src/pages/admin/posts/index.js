@@ -3,127 +3,142 @@ import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 
-export default function ContentModeration() {
+export default function MobileUsers() {
   const router = useRouter()
-  const [posts, setPosts] = useState([])
+  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [filter, setFilter] = useState('PENDING')
-  const [selectedPost, setSelectedPost] = useState(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [filterRole, setFilterRole] = useState('all')
+  const [selectedUser, setSelectedUser] = useState(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
-  const [showRejectModal, setShowRejectModal] = useState(false)
-  const [rejectReason, setRejectReason] = useState('')
-  const [customReason, setCustomReason] = useState('')
+  const [showBanModal, setShowBanModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
-  const [postDetails, setPostDetails] = useState(null)
-  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [banReason, setBanReason] = useState('')
+  const [userImages, setUserImages] = useState({})
   const [showFullImage, setShowFullImage] = useState(false)
   const [selectedImage, setSelectedImage] = useState(null)
-  const [comments, setComments] = useState([])
-  const [newComment, setNewComment] = useState('')
-  const [addingComment, setAddingComment] = useState(false)
-  const [currentAdminId, setCurrentAdminId] = useState(null)
   const [stats, setStats] = useState({
     total: 0,
-    pending: 0,
-    approved: 0,
-    rejected: 0
+    active: 0,
+    banned: 0,
+    farmers: 0,
+    vendors: 0,
+    newToday: 0,
+    verified: 0,
+    pending: 0
   })
 
-  // Quick rejection reasons
-  const quickReasons = [
-    { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
-    { id: 2, reason: 'Spam or promotional', icon: 'bi-megaphone', color: '#f59e0b' },
-    { id: 3, reason: 'Misleading information', icon: 'bi-info-circle', color: '#f59e0b' },
-    { id: 4, reason: 'Copyright violation', icon: 'bi-c-circle', color: '#ef4444' },
-    { id: 5, reason: 'Offensive language', icon: 'bi-chat-dots', color: '#ef4444' },
-    { id: 6, reason: 'Duplicate content', icon: 'bi-files', color: '#6c757d' },
-    { id: 7, reason: 'Irrelevant to community', icon: 'bi-x-octagon', color: '#6c757d' },
-    { id: 8, reason: 'Harassment or bullying', icon: 'bi-shield-exclamation', color: '#dc2626' }
-  ]
-
   useEffect(() => {
-    getCurrentAdminId()
-    fetchPosts()
+    fetchUsers()
     fetchStats()
-  }, [filter])
+    
+    const subscription = supabase
+      .channel('mobile_users_changes')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'users' },
+        () => {
+          fetchUsers()
+          fetchStats()
+        }
+      )
+      .subscribe()
 
-  const getCurrentAdminId = async () => {
-    const session = JSON.parse(localStorage.getItem('adminSession'))
-    if (session?.admin?.admin_id) {
-      setCurrentAdminId(session.admin.admin_id)
-    } else {
-      // Try to get from admin_users table
-      const { data } = await supabase
-        .from('admin_users')
-        .select('admin_id')
-        .limit(1)
-        .single()
-      if (data) {
-        setCurrentAdminId(data.admin_id)
-      }
-    }
-  }
+    return () => subscription.unsubscribe()
+  }, [])
 
+  // Helper function to get Supabase storage URL for images
   const getImageUrl = (imagePath) => {
     if (!imagePath) return null
     if (imagePath.startsWith('http')) return imagePath
     try {
-      const { data } = supabase.storage.from('post-images').getPublicUrl(imagePath)
+      const { data } = supabase.storage.from('user-images').getPublicUrl(imagePath)
       return data?.publicUrl || imagePath
     } catch {
       return imagePath
     }
   }
 
-  const fetchPosts = async () => {
+  const fetchUsers = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      let query = supabase
-        .from('content_moderation')
+      const { data, error } = await supabase
+        .from('users')
         .select(`
           *,
-          reviewed_by_admin:admin_users!reviewed_by (
-            admin_id,
-            full_name,
-            email
+          roles!users_role_id_fkey (
+            role_id,
+            role_name
           )
         `)
         .order('created_at', { ascending: false })
 
-      if (filter !== 'ALL') {
-        query = query.eq('moderation_status', filter)
-      }
-
-      const { data, error } = await query
-
       if (error) throw error
 
-      // Fetch images for each post
-      const postsWithImages = await Promise.all((data || []).map(async (post) => {
-        if (post.content_type === 'POST') {
-          const { data: images, error: imagesError } = await supabase
-            .from('post_images')
-            .select('image_url, image_order')
-            .eq('post_id', post.content_id)
-            .order('image_order', { ascending: true })
-
-          let imageUrls = []
-          if (!imagesError && images && images.length > 0) {
-            imageUrls = images.map(img => getImageUrl(img.image_url))
-          } else if (post.image_url) {
-            imageUrls = [getImageUrl(post.image_url)]
+      if (data && data.length > 0) {
+        const processedUsers = data.map(user => ({
+          ...user,
+          role_name: user.roles?.role_name || 'USER',
+          status: user.status || 'active',
+          is_verified: user.is_verified || false
+        }))
+        setUsers(processedUsers)
+        
+        // Fetch images for users
+        const images = {}
+        for (const user of processedUsers) {
+          // Fetch profile image
+          if (user.profile_image) {
+            images[user.user_id] = {
+              profile: getImageUrl(user.profile_image),
+              posts: []
+            }
           }
-          return { ...post, images: imageUrls, image_count: imageUrls.length }
+          
+          // Fetch user's post images
+          const { data: userPosts } = await supabase
+            .from('posts')
+            .select('post_id, image_url')
+            .eq('user_id', user.user_id)
+            .limit(5)
+          
+          if (userPosts && userPosts.length > 0) {
+            const postImages = []
+            for (const post of userPosts) {
+              // Get images from post_images table
+              const { data: postImagesData } = await supabase
+                .from('post_images')
+                .select('image_url')
+                .eq('post_id', post.post_id)
+                .limit(3)
+              
+              if (postImagesData && postImagesData.length > 0) {
+                postImagesData.forEach(img => {
+                  if (img.image_url) {
+                    postImages.push(getImageUrl(img.image_url))
+                  }
+                })
+              } else if (post.image_url) {
+                postImages.push(getImageUrl(post.image_url))
+              }
+            }
+            
+            if (!images[user.user_id]) {
+              images[user.user_id] = { profile: null, posts: [] }
+            }
+            images[user.user_id].posts = [...new Set(postImages)].slice(0, 6)
+          }
         }
-        return { ...post, images: [], image_count: 0 }
-      }))
-
-      setPosts(postsWithImages || [])
+        setUserImages(images)
+      } else {
+        setUsers([])
+      }
     } catch (err) {
-      console.error('Error fetching posts:', err)
+      console.error('Error fetching users:', err)
       setError(err.message)
     } finally {
       setLoading(false)
@@ -132,243 +147,154 @@ export default function ContentModeration() {
 
   const fetchStats = async () => {
     try {
-      const { data, error } = await supabase
-        .from('content_moderation')
-        .select('moderation_status')
+      const { data: allUsers, error: usersError } = await supabase
+        .from('users')
+        .select('*')
 
-      if (!error && data) {
+      if (usersError) throw usersError
+
+      if (!allUsers || allUsers.length === 0) {
         setStats({
-          total: data.length,
-          pending: data.filter(p => p.moderation_status === 'PENDING').length,
-          approved: data.filter(p => p.moderation_status === 'APPROVED').length,
-          rejected: data.filter(p => p.moderation_status === 'REJECTED').length
+          total: 0,
+          active: 0,
+          banned: 0,
+          farmers: 0,
+          vendors: 0,
+          newToday: 0,
+          verified: 0,
+          pending: 0
         })
+        return
       }
+
+      const { data: roles } = await supabase
+        .from('roles')
+        .select('role_id, role_name')
+
+      const roleMap = {}
+      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      const total = allUsers.length
+      const active = allUsers.filter(u => u.status === 'active').length
+      const banned = allUsers.filter(u => u.status === 'banned').length
+      const pending = allUsers.filter(u => u.status === 'pending').length
+      const verified = allUsers.filter(u => u.is_verified === true).length
+      const newToday = allUsers.filter(u => new Date(u.created_at) >= today).length
+      
+      let farmersCount = 0
+      let vendorsCount = 0
+      
+      if (roleMap['FARMER']) {
+        farmersCount = allUsers.filter(u => u.role_id === roleMap['FARMER']).length
+      }
+      if (roleMap['VENDOR']) {
+        vendorsCount = allUsers.filter(u => u.role_id === roleMap['VENDOR']).length
+      }
+
+      setStats({
+        total,
+        active,
+        banned,
+        farmers: farmersCount,
+        vendors: vendorsCount,
+        newToday,
+        verified,
+        pending
+      })
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
   }
 
-  const fetchPostDetails = async (contentId, contentType) => {
-    setLoadingDetails(true)
-    try {
-      let details = null
-      
-      if (contentType === 'POST') {
-        // First fetch the post
-        const { data, error } = await supabase
-          .from('posts')
-          .select(`
-            *,
-            users!posts_user_id_fkey (
-              user_id,
-              full_name,
-              email,
-              profile_image,
-              phone,
-              location
-            ),
-            post_categories!posts_category_id_fkey (
-              category_name,
-              description
-            )
-          `)
-          .eq('post_id', contentId)
-          .single()
-        
-        if (!error && data) {
-          // Fetch images from post_images table
-          const { data: images, error: imagesError } = await supabase
-            .from('post_images')
-            .select('image_url, image_order')
-            .eq('post_id', contentId)
-            .order('image_order', { ascending: true })
-          
-          const imageUrls = []
-          if (!imagesError && images && images.length > 0) {
-            for (const img of images) {
-              const url = getImageUrl(img.image_url)
-              if (url) imageUrls.push(url)
-            }
-          } else if (data.image_url) {
-            const url = getImageUrl(data.image_url)
-            if (url) imageUrls.push(url)
-          }
-          
-          details = { ...data, images: imageUrls, image_count: imageUrls.length }
-        }
-      } else if (contentType === 'COMMENT') {
-        const { data, error } = await supabase
-          .from('comments')
-          .select(`
-            *,
-            users!comments_user_id_fkey (
-              user_id,
-              full_name,
-              email,
-              profile_image
-            ),
-            posts!comments_post_id_fkey (
-              post_id,
-              title,
-              content
-            )
-          `)
-          .eq('comment_id', contentId)
-          .single()
-        
-        if (!error && data) details = data
-      }
-      
-      setPostDetails(details)
-      
-      // Fetch comments for this post
-      if (contentType === 'POST') {
-        await fetchComments(contentId)
-      }
-    } catch (err) {
-      console.error('Error fetching post details:', err)
-    } finally {
-      setLoadingDetails(false)
-    }
-  }
-
-  const fetchComments = async (postId) => {
-    try {
-      const { data, error } = await supabase
-        .from('comments')
-        .select(`
-          *,
-          users!comments_user_id_fkey (
-            user_id,
-            full_name,
-            email,
-            profile_image
-          )
-        `)
-        .eq('post_id', postId)
-        .order('created_at', { ascending: false })
-
-      if (!error && data) {
-        setComments(data)
-      } else {
-        setComments([])
-      }
-    } catch (err) {
-      console.error('Error fetching comments:', err)
-      setComments([])
-    }
-  }
-
-  const addComment = async () => {
-    if (!newComment.trim()) {
-      alert('Please enter a comment')
+  const handleBanUser = async () => {
+    if (!banReason.trim()) {
+      alert('Please provide a reason for banning')
       return
     }
-
-    if (!currentAdminId) {
-      alert('Unable to identify admin user. Please refresh and try again.')
-      return
-    }
-
-    setAddingComment(true)
+    
+    setActionLoading(true)
     
     try {
-      // Use a system admin ID or the current admin ID
-      // The comments table might expect a user_id from the users table, not admin_users
-      // Let's try to get a valid user_id from the users table
-      let userId = currentAdminId
-      
-      // Check if the admin exists in users table
-      const { data: userExists } = await supabase
-        .from('users')
-        .select('user_id')
-        .eq('user_id', currentAdminId)
-        .single()
-      
-      if (!userExists) {
-        // If not, we'll use a placeholder or skip the comment feature
-        alert('Comment feature requires a valid user account. Please contact support.')
-        setAddingComment(false)
-        return
+      const updateData = {
+        status: 'banned',
+        updated_at: new Date().toISOString()
       }
-
+      
       const { error } = await supabase
-        .from('comments')
-        .insert({
-          post_id: selectedPost.content_id,
-          user_id: userId,
-          comment_text: newComment,
-          created_at: new Date().toISOString()
-        })
+        .from('users')
+        .update(updateData)
+        .eq('user_id', selectedUser.user_id)
 
       if (error) throw error
 
-      setNewComment('')
-      await fetchComments(selectedPost.content_id)
-      alert('Comment added successfully!')
+      alert('User has been banned successfully!')
+      fetchUsers()
+      fetchStats()
+      setShowBanModal(false)
+      setSelectedUser(null)
+      setBanReason('')
     } catch (err) {
-      console.error('Error adding comment:', err)
-      alert('Error adding comment: ' + err.message)
+      console.error('Error banning user:', err)
+      alert('Error banning user: ' + err.message)
     } finally {
-      setAddingComment(false)
+      setActionLoading(false)
     }
   }
 
-  const updateStatus = async (postId, status, reason = null) => {
-    setActionLoading(true)
-    const session = JSON.parse(localStorage.getItem('adminSession'))
+  const handleUnbanUser = async (userId) => {
+    if (!confirm('Are you sure you want to unban this user?')) return
     
-    const updateData = {
-      moderation_status: status,
-      reviewed_by: session?.admin?.admin_id,
-      reviewed_at: new Date().toISOString()
-    }
+    setActionLoading(true)
+    
+    try {
+      const updateData = {
+        status: 'active',
+        updated_at: new Date().toISOString()
+      }
+      
+      const { error } = await supabase
+        .from('users')
+        .update(updateData)
+        .eq('user_id', userId)
 
-    if (reason) {
-      updateData.moderation_reason = reason
-    }
+      if (error) throw error
 
-    const { error } = await supabase
-      .from('content_moderation')
-      .update(updateData)
-      .eq('moderation_id', postId)
-
-    setActionLoading(false)
-
-    if (!error) {
-      await fetchPosts()
-      await fetchStats()
-      setShowRejectModal(false)
-      setRejectReason('')
-      setCustomReason('')
-      setSelectedPost(null)
-      if (showDetailsModal) setShowDetailsModal(false)
-      alert(`Content ${status.toLowerCase()} successfully!`)
-    } else {
-      alert(`Error updating status: ${error.message}`)
+      alert('User has been unbanned successfully!')
+      fetchUsers()
+      fetchStats()
+    } catch (err) {
+      console.error('Error unbanning user:', err)
+      alert('Error unbanning user: ' + err.message)
+    } finally {
+      setActionLoading(false)
     }
   }
 
-  const handleApprove = async (post) => {
-    if (confirm(`Are you sure you want to approve this content?`)) {
-      await updateStatus(post.moderation_id, 'APPROVED')
-    }
-  }
+  const handleDeleteUser = async () => {
+    setActionLoading(true)
+    
+    try {
+      const { error } = await supabase
+        .from('users')
+        .delete()
+        .eq('user_id', selectedUser.user_id)
 
-  const handleReject = async () => {
-    const finalReason = customReason || rejectReason
-    if (!finalReason.trim()) {
-      alert('Please provide a reason for rejection')
-      return
-    }
-    await updateStatus(selectedPost.moderation_id, 'REJECTED', finalReason)
-  }
+      if (error) throw error
 
-  const viewDetails = async (post) => {
-    setSelectedPost(post)
-    await fetchPostDetails(post.content_id, post.content_type)
-    setShowDetailsModal(true)
+      alert('User deleted successfully!')
+      fetchUsers()
+      fetchStats()
+      setShowDeleteModal(false)
+      setSelectedUser(null)
+    } catch (err) {
+      console.error('Error deleting user:', err)
+      alert('Error deleting user: ' + err.message)
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   const openFullImage = (imageUrl) => {
@@ -377,30 +303,51 @@ export default function ContentModeration() {
   }
 
   const getStatusBadge = (status) => {
-    const badges = {
-      'PENDING': <span className="status-badge pending"><i className="bi bi-clock-history"></i> Pending Review</span>,
-      'APPROVED': <span className="status-badge approved"><i className="bi bi-check-circle-fill"></i> Approved</span>,
-      'REJECTED': <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>
+    const statusMap = {
+      'active': { class: 'success', icon: 'bi-check-circle-fill', text: 'Active' },
+      'banned': { class: 'danger', icon: 'bi-ban-fill', text: 'Banned' },
+      'pending': { class: 'warning', icon: 'bi-clock-fill', text: 'Pending' },
+      'inactive': { class: 'secondary', icon: 'bi-x-circle-fill', text: 'Inactive' }
     }
-    return badges[status] || <span className="status-badge default">{status}</span>
+    const s = statusMap[status] || statusMap['active']
+    return (
+      <span className={`status-badge ${s.class}`}>
+        <i className={`bi ${s.icon}`}></i>
+        {s.text}
+      </span>
+    )
   }
 
-  const getContentTypeIcon = (type) => {
-    const icons = {
-      'POST': 'bi-file-post',
-      'COMMENT': 'bi-chat',
-      'IMAGE': 'bi-image',
-      'VIDEO': 'bi-camera-reels'
+  const getRoleBadge = (roleName) => {
+    const roleMap = {
+      'FARMER': { class: 'farmer', icon: 'bi-tree-fill', text: 'Farmer' },
+      'VENDOR': { class: 'vendor', icon: 'bi-shop', text: 'Vendor' },
+      'ADMIN': { class: 'admin', icon: 'bi-shield-lock-fill', text: 'Admin' }
     }
-    return icons[type] || 'bi-file-text'
+    const r = roleMap[roleName] || { class: 'default', icon: 'bi-person', text: roleName || 'User' }
+    return (
+      <span className={`role-badge ${r.class}`}>
+        <i className={`bi ${r.icon}`}></i>
+        {r.text}
+      </span>
+    )
   }
+
+  const filteredUsers = users.filter(user => {
+    const matchesSearch = user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (user.phone && user.phone.includes(searchTerm))
+    const matchesStatus = filterStatus === 'all' || user.status === filterStatus
+    const matchesRole = filterRole === 'all' || user.role_name?.toLowerCase() === filterRole
+    return matchesSearch && matchesStatus && matchesRole
+  })
 
   if (loading) {
     return (
-      <AdminLayout title="Content Moderation">
+      <AdminLayout title="Mobile Users">
         <div className="loading-container">
           <div className="loading-spinner"></div>
-          <p>Loading content...</p>
+          <p>Loading users...</p>
         </div>
         <style jsx>{`
           .loading-container {
@@ -427,31 +374,25 @@ export default function ContentModeration() {
     )
   }
 
-  if (error) {
-    return (
-      <AdminLayout title="Content Moderation">
-        <div className="error-container">
-          <i className="bi bi-shield-exclamation"></i>
-          <h3>Unable to Load Content</h3>
-          <p>{error}</p>
-          <button className="btn-primary" onClick={fetchPosts}>Try Again</button>
-        </div>
-      </AdminLayout>
-    )
-  }
-
   return (
-    <AdminLayout title="Content Moderation">
-      <div className="moderation-container">
+    <AdminLayout title="Mobile Users Management">
+      <div className="users-container">
         {/* Hero Section */}
         <div className="hero-section">
           <div className="hero-content">
-            <div className="hero-icon">
-              <i className="bi bi-shield-check"></i>
+            <div className="hero-text">
+              <div className="hero-icon-wrapper">
+                <i className="bi bi-people-fill"></i>
+              </div>
+              <div>
+                <h1 className="hero-title">Mobile Users Management</h1>
+                <p className="hero-subtitle">Manage and monitor all mobile application users</p>
+              </div>
             </div>
-            <div>
-              <h1 className="hero-title">Content Moderation</h1>
-              <p className="hero-subtitle">Review and manage user-generated content before publication</p>
+            <div className="hero-actions">
+              <button className="btn-refresh" onClick={() => { fetchUsers(); fetchStats(); }}>
+                <i className="bi bi-arrow-repeat"></i> Refresh
+              </button>
             </div>
           </div>
         </div>
@@ -459,328 +400,344 @@ export default function ContentModeration() {
         {/* Stats Cards */}
         <div className="stats-grid">
           <div className="stat-card total">
-            <div className="stat-icon"><i className="bi bi-files"></i></div>
+            <div className="stat-icon"><i className="bi bi-people"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Total Content</span>
-              <h2 className="stat-value">{stats.total}</h2>
+              <span className="stat-label">Total Users</span>
+              <h3>{stats.total}</h3>
+              <span className="stat-trend">All registered users</span>
             </div>
           </div>
-          <div className="stat-card pending">
-            <div className="stat-icon"><i className="bi bi-hourglass-split"></i></div>
+          <div className="stat-card active">
+            <div className="stat-icon"><i className="bi bi-person-check"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Pending Review</span>
-              <h2 className="stat-value text-warning">{stats.pending}</h2>
+              <span className="stat-label">Active Users</span>
+              <h3 className="text-success">{stats.active}</h3>
+              <span className="stat-trend">{stats.total > 0 ? ((stats.active/stats.total)*100).toFixed(0) : 0}% of total</span>
             </div>
           </div>
-          <div className="stat-card approved">
-            <div className="stat-icon"><i className="bi bi-check-circle"></i></div>
+          <div className="stat-card banned">
+            <div className="stat-icon"><i className="bi bi-ban"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Approved</span>
-              <h2 className="stat-value text-success">{stats.approved}</h2>
+              <span className="stat-label">Banned Users</span>
+              <h3 className="text-danger">{stats.banned}</h3>
+              <span className="stat-trend">Restricted access</span>
             </div>
           </div>
-          <div className="stat-card rejected">
-            <div className="stat-icon"><i className="bi bi-x-circle"></i></div>
+          <div className="stat-card farmers">
+            <div className="stat-icon"><i className="bi bi-tree"></i></div>
             <div className="stat-info">
-              <span className="stat-label">Rejected</span>
-              <h2 className="stat-value text-danger">{stats.rejected}</h2>
+              <span className="stat-label">Farmers</span>
+              <h3 className="text-info">{stats.farmers}</h3>
+              <span className="stat-trend">Agricultural producers</span>
+            </div>
+          </div>
+          <div className="stat-card vendors">
+            <div className="stat-icon"><i className="bi bi-shop"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">Vendors</span>
+              <h3 className="text-warning">{stats.vendors}</h3>
+              <span className="stat-trend">Product sellers</span>
+            </div>
+          </div>
+          <div className="stat-card new">
+            <div className="stat-icon"><i className="bi bi-calendar-plus"></i></div>
+            <div className="stat-info">
+              <span className="stat-label">New Today</span>
+              <h3 className="text-primary">{stats.newToday}</h3>
+              <span className="stat-trend">Last 24 hours</span>
             </div>
           </div>
         </div>
 
-        {/* Filter Tabs */}
-        <div className="filter-tabs">
-          <button className={`filter-tab ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>
-            <i className="bi bi-grid"></i> All
-            <span className="count">{stats.total}</span>
-          </button>
-          <button className={`filter-tab ${filter === 'PENDING' ? 'active' : ''}`} onClick={() => setFilter('PENDING')}>
-            <i className="bi bi-hourglass-split"></i> Pending
-            <span className="count pending">{stats.pending}</span>
-          </button>
-          <button className={`filter-tab ${filter === 'APPROVED' ? 'active' : ''}`} onClick={() => setFilter('APPROVED')}>
-            <i className="bi bi-check-circle"></i> Approved
-            <span className="count approved">{stats.approved}</span>
-          </button>
-          <button className={`filter-tab ${filter === 'REJECTED' ? 'active' : ''}`} onClick={() => setFilter('REJECTED')}>
-            <i className="bi bi-x-circle"></i> Rejected
-            <span className="count rejected">{stats.rejected}</span>
-          </button>
+        {/* Controls Bar */}
+        <div className="controls-bar">
+          <div className="controls-left">
+            <div className="search-box">
+              <i className="bi bi-search"></i>
+              <input 
+                type="text" 
+                placeholder="Search by name, email or phone..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              {searchTerm && (
+                <button className="clear-search" onClick={() => setSearchTerm('')}>
+                  <i className="bi bi-x-lg"></i>
+                </button>
+              )}
+            </div>
+            <select className="filter-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="banned">Banned</option>
+              <option value="pending">Pending</option>
+            </select>
+            <select className="filter-select" value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
+              <option value="all">All Roles</option>
+              <option value="farmer">Farmers</option>
+              <option value="vendor">Vendors</option>
+            </select>
+          </div>
+          <div className="info-text">
+            <i className="bi bi-info-circle"></i>
+            Showing {filteredUsers.length} of {users.length} users
+          </div>
         </div>
 
-        {/* Posts Grid */}
-        <div className="posts-grid">
-          {posts.length > 0 ? (
-            posts.map((post, index) => (
-              <div key={post.moderation_id} className="post-card" style={{ animationDelay: `${index * 0.05}s` }}>
-                <div className="post-card-header">
-                  <div className="post-type">
-                    <i className={`bi ${getContentTypeIcon(post.content_type)}`}></i>
-                    <span>{post.content_type}</span>
+        {/* Users Cards Grid - Replacing Table */}
+        <div className="users-cards-grid">
+          {filteredUsers.length > 0 ? (
+            filteredUsers.map((user) => (
+              <div key={user.user_id} className="user-card">
+                <div className="user-card-header">
+                  <div className="user-avatar">
+                    {userImages[user.user_id]?.profile ? (
+                      <img src={userImages[user.user_id].profile} alt={user.full_name} />
+                    ) : (
+                      <span>{user.full_name?.charAt(0) || 'U'}</span>
+                    )}
                   </div>
-                  {getStatusBadge(post.moderation_status)}
+                  <div className="user-header-info">
+                    <h3 className="user-name">{user.full_name}</h3>
+                    <div className="user-badges">
+                      {getRoleBadge(user.role_name)}
+                      {getStatusBadge(user.status)}
+                    </div>
+                  </div>
+                  <div className="user-actions">
+                    <button className="action-icon view" onClick={() => { setSelectedUser(user); setShowDetailsModal(true); }} title="View Details">
+                      <i className="bi bi-eye"></i>
+                    </button>
+                    {user.status !== 'banned' ? (
+                      <button className="action-icon ban" onClick={() => { setSelectedUser(user); setShowBanModal(true); }} title="Ban User">
+                        <i className="bi bi-ban"></i>
+                      </button>
+                    ) : (
+                      <button className="action-icon unban" onClick={() => handleUnbanUser(user.user_id)} title="Unban User">
+                        <i className="bi bi-check-circle"></i>
+                      </button>
+                    )}
+                    <button className="action-icon delete" onClick={() => { setSelectedUser(user); setShowDeleteModal(true); }} title="Delete User">
+                      <i className="bi bi-trash"></i>
+                    </button>
+                  </div>
                 </div>
-                
-                {post.images && post.images.length > 0 && (
-                  <div className="post-image-preview" onClick={() => openFullImage(post.images[0])}>
-                    <img src={post.images[0]} alt="Preview" />
-                    {post.images.length > 1 && (
-                      <div className="image-count-badge">
-                        <i className="bi bi-images"></i> +{post.images.length - 1}
+
+                <div className="user-card-body">
+                  <div className="user-contact">
+                    <div className="contact-item">
+                      <i className="bi bi-envelope"></i>
+                      <span>{user.email}</span>
+                    </div>
+                    {user.phone && (
+                      <div className="contact-item">
+                        <i className="bi bi-telephone"></i>
+                        <span>{user.phone}</span>
+                      </div>
+                    )}
+                    {user.location && (
+                      <div className="contact-item">
+                        <i className="bi bi-geo-alt"></i>
+                        <span>{user.location}</span>
+                      </div>
+                    )}
+                    {user.is_verified && (
+                      <div className="verified-badge">
+                        <i className="bi bi-check-circle-fill"></i> Verified Account
                       </div>
                     )}
                   </div>
-                )}
-                
-                <div className="post-card-body">
-                  <div className="post-meta">
-                    <span className="post-id">
-                      <i className="bi bi-hash"></i> {post.content_id?.slice(0, 12)}...
-                    </span>
-                    <span className="post-date">
-                      <i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                  {post.moderation_reason && (
-                    <div className="rejection-badge">
-                      <i className="bi bi-exclamation-triangle-fill"></i>
-                      <span>{post.moderation_reason}</span>
-                    </div>
-                  )}
-                </div>
-                
-                <div className="post-card-footer">
-                  {post.moderation_status === 'PENDING' ? (
-                    <div className="action-group">
-                      <button className="btn-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
-                        <i className="bi bi-check-lg"></i> Approve
-                      </button>
-                      <button className="btn-reject" onClick={() => {
-                        setSelectedPost(post)
-                        setShowRejectModal(true)
-                      }} disabled={actionLoading}>
-                        <i className="bi bi-x-lg"></i> Reject
-                      </button>
-                      <button className="btn-view" onClick={() => viewDetails(post)}>
-                        <i className="bi bi-eye"></i> Details
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="reviewed-info">
-                      <i className="bi bi-person-check"></i>
-                      Reviewed by {post.reviewed_by_admin?.full_name || 'System'}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="empty-state">
-              <i className="bi bi-inbox"></i>
-              <h4>No content found</h4>
-              <p>There are no {filter.toLowerCase()} content items to display.</p>
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* Details Modal with Full Content and Images */}
-      {showDetailsModal && selectedPost && (
-        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
-          <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-content">
-                <div className="modal-icon">
-                  <i className="bi bi-file-text-fill"></i>
-                </div>
-                <div>
-                  <h2>Content Details</h2>
-                  <p>Complete information about this content</p>
-                </div>
-              </div>
-              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-            
-            <div className="modal-body">
-              {loadingDetails ? (
-                <div className="loading-details">
-                  <div className="spinner-border text-primary"></div>
-                  <p>Loading content details...</p>
-                </div>
-              ) : (
-                <>
-                  {/* Content Info Section */}
-                  <div className="info-section">
-                    <h4><i className="bi bi-info-circle"></i> Content Information</h4>
-                    <div className="info-grid">
-                      <div className="info-item">
-                        <label>Content ID</label>
-                        <code>{selectedPost.content_id}</code>
+                  {/* User's Uploaded Images */}
+                  {userImages[user.user_id]?.posts && userImages[user.user_id].posts.length > 0 && (
+                    <div className="user-images-section">
+                      <div className="images-header">
+                        <i className="bi bi-images"></i>
+                        <span>Uploaded Images ({userImages[user.user_id].posts.length})</span>
                       </div>
-                      <div className="info-item">
-                        <label>Content Type</label>
-                        <span className="badge-type">{selectedPost.content_type}</span>
-                      </div>
-                      <div className="info-item">
-                        <label>Status</label>
-                        {getStatusBadge(selectedPost.moderation_status)}
-                      </div>
-                      <div className="info-item">
-                        <label>Created At</label>
-                        <span>{new Date(selectedPost.created_at).toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Author Information */}
-                  {postDetails && postDetails.users && (
-                    <div className="info-section">
-                      <h4><i className="bi bi-person-badge"></i> Author Information</h4>
-                      <div className="author-card">
-                        <div className="author-avatar">
-                          {postDetails.users.profile_image ? (
-                            <img src={getImageUrl(postDetails.users.profile_image)} alt={postDetails.users.full_name} />
-                          ) : (
-                            <i className="bi bi-person-circle"></i>
-                          )}
-                        </div>
-                        <div className="author-details">
-                          <div className="author-name">{postDetails.users.full_name || 'Unknown User'}</div>
-                          <div className="author-email">{postDetails.users.email || 'No email'}</div>
-                          {postDetails.users.phone && (
-                            <div className="author-phone"><i className="bi bi-telephone"></i> {postDetails.users.phone}</div>
-                          )}
-                          {postDetails.users.location && (
-                            <div className="author-location"><i className="bi bi-geo-alt"></i> {postDetails.users.location}</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Post Content with Images */}
-                  {selectedPost.content_type === 'POST' && postDetails && (
-                    <div className="info-section">
-                      <h4><i className="bi bi-file-text"></i> Post Content</h4>
-                      <div className="post-title">{postDetails.title}</div>
-                      <div className="post-content">{postDetails.content}</div>
-                      
-                      {/* All Images Gallery - FIXED */}
-                      {postDetails.images && postDetails.images.length > 0 && (
-                        <div className="images-section">
-                          <h5><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h5>
-                          <div className="images-grid">
-                            {postDetails.images.map((img, idx) => (
-                              <div key={idx} className="image-card" onClick={() => openFullImage(img)}>
-                                <img src={img} alt={`Image ${idx + 1}`} onError={(e) => {
-                                  e.target.src = 'https://placehold.co/400x300/e2e8f0/64748b?text=Image+Not+Found'
-                                }} />
-                                <div className="image-overlay">
-                                  <i className="bi bi-zoom-in"></i>
-                                  <span>Click to enlarge</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Show message if no images */}
-                      {(!postDetails.images || postDetails.images.length === 0) && (
-                        <div className="no-images-message">
-                          <i className="bi bi-image-slash"></i>
-                          <span>No images attached to this post</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Comment Content */}
-                  {selectedPost.content_type === 'COMMENT' && postDetails && (
-                    <div className="info-section">
-                      <h4><i className="bi bi-chat"></i> Comment Content</h4>
-                      <div className="comment-post-info">
-                        <i className="bi bi-file-post"></i> On Post: <strong>{postDetails.posts?.title || 'Unknown Post'}</strong>
-                      </div>
-                      <div className="comment-text">{postDetails.comment_text}</div>
-                    </div>
-                  )}
-
-                  {/* Comments Section for Posts - Optional */}
-                  {selectedPost.content_type === 'POST' && (
-                    <div className="comments-section">
-                      <h4><i className="bi bi-chat-dots"></i> Comments ({comments.length})</h4>
-                      
-                      {/* Comments List */}
-                      <div className="comments-list">
-                        {comments.length > 0 ? (
-                          comments.map((comment) => (
-                            <div key={comment.comment_id} className="comment-item">
-                              <div className="comment-avatar">
-                                {comment.users?.profile_image ? (
-                                  <img src={getImageUrl(comment.users.profile_image)} alt={comment.users.full_name} />
-                                ) : (
-                                  <i className="bi bi-person-circle"></i>
-                                )}
-                              </div>
-                              <div className="comment-content">
-                                <div className="comment-header">
-                                  <span className="comment-author">{comment.users?.full_name || 'Anonymous'}</span>
-                                  <span className="comment-time">{new Date(comment.created_at).toLocaleString()}</span>
-                                </div>
-                                <div className="comment-text">{comment.comment_text}</div>
-                              </div>
+                      <div className="user-images-grid">
+                        {userImages[user.user_id].posts.slice(0, 6).map((img, idx) => (
+                          <div key={idx} className="user-image-item" onClick={() => openFullImage(img)}>
+                            <img src={img} alt={`Uploaded by ${user.full_name}`} />
+                            <div className="image-overlay">
+                              <i className="bi bi-zoom-in"></i>
                             </div>
-                          ))
-                        ) : (
-                          <div className="no-comments">
-                            <i className="bi bi-chat"></i>
-                            <p>No comments yet</p>
+                          </div>
+                        ))}
+                        {userImages[user.user_id].posts.length > 6 && (
+                          <div className="more-images">
+                            +{userImages[user.user_id].posts.length - 6} more
                           </div>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* Rejection Reason */}
-                  {selectedPost.moderation_reason && (
-                    <div className="info-section rejection">
-                      <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
-                      <div className="rejection-box">{selectedPost.moderation_reason}</div>
+                  <div className="user-meta-info">
+                    <div className="meta-item">
+                      <i className="bi bi-calendar3"></i>
+                      Joined: {new Date(user.created_at).toLocaleDateString()}
                     </div>
-                  )}
-
-                  {/* Moderation Info */}
-                  {selectedPost.reviewed_by_admin && (
-                    <div className="info-section">
-                      <h4><i className="bi bi-person-check"></i> Moderation Information</h4>
-                      <div className="moderation-info">
-                        <div>Reviewed by: <strong>{selectedPost.reviewed_by_admin?.full_name}</strong></div>
-                        <div>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</div>
-                      </div>
+                    <div className="meta-item">
+                      <i className="bi bi-clock"></i>
+                      Last active: {user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}
                     </div>
-                  )}
-                </>
-              )}
-            </div>
-            
-            <div className="modal-footer">
-              {selectedPost.moderation_status === 'PENDING' && (
-                <div className="footer-actions">
-                  <button className="btn-approve-modal" onClick={() => handleApprove(selectedPost)}>
-                    <i className="bi bi-check-lg"></i> Approve
-                  </button>
-                  <button className="btn-reject-modal" onClick={() => {
-                    setShowDetailsModal(false)
-                    setShowRejectModal(true)
-                  }}>
-                    <i className="bi bi-x-lg"></i> Reject
-                  </button>
+                  </div>
                 </div>
-              )}
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">
+              <i className="bi bi-people-slash"></i>
+              <h3>No Users Found</h3>
+              <p>No mobile users match your search criteria</p>
+              <button className="btn-clear-filters" onClick={() => { setSearchTerm(''); setFilterStatus('all'); setFilterRole('all'); }}>
+                Clear Filters
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* User Details Modal */}
+      {showDetailsModal && selectedUser && (
+        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
+          <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-header-content">
+                <div className="modal-icon-wrapper">
+                  <i className="bi bi-person-circle"></i>
+                </div>
+                <div>
+                  <h2>User Details</h2>
+                  <p>Complete user information</p>
+                </div>
+              </div>
+              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="user-profile-header">
+                <div className="user-avatar-large">
+                  {userImages[selectedUser.user_id]?.profile ? (
+                    <img src={userImages[selectedUser.user_id].profile} alt={selectedUser.full_name} />
+                  ) : (
+                    <span>{selectedUser.full_name?.charAt(0) || 'U'}</span>
+                  )}
+                </div>
+                <div className="user-profile-info">
+                  <h3>{selectedUser.full_name}</h3>
+                  <div className="user-meta">
+                    {getRoleBadge(selectedUser.role_name)}
+                    {getStatusBadge(selectedUser.status)}
+                  </div>
+                  <div className="user-id-full">ID: {selectedUser.user_id}</div>
+                </div>
+              </div>
+
+              <div className="details-grid">
+                <div className="detail-section">
+                  <h4><i className="bi bi-envelope"></i> Contact Information</h4>
+                  <div><strong>Email:</strong> {selectedUser.email}</div>
+                  <div><strong>Phone:</strong> {selectedUser.phone || 'Not provided'}</div>
+                  <div><strong>Location:</strong> {selectedUser.location || 'Not provided'}</div>
+                  {selectedUser.is_verified && <div className="verified-badge-sm"><i className="bi bi-check-circle-fill"></i> Verified Account</div>}
+                </div>
+                <div className="detail-section">
+                  <h4><i className="bi bi-calendar"></i> Account Information</h4>
+                  <div><strong>Joined:</strong> {new Date(selectedUser.created_at).toLocaleString()}</div>
+                  <div><strong>Last Updated:</strong> {new Date(selectedUser.updated_at).toLocaleString()}</div>
+                  <div><strong>Last Login:</strong> {selectedUser.last_login ? new Date(selectedUser.last_login).toLocaleString() : 'Never'}</div>
+                </div>
+
+                {/* User's Uploaded Images in Modal */}
+                {userImages[selectedUser.user_id]?.posts && userImages[selectedUser.user_id].posts.length > 0 && (
+                  <div className="detail-section full-width">
+                    <h4><i className="bi bi-images"></i> Uploaded Images ({userImages[selectedUser.user_id].posts.length})</h4>
+                    <div className="modal-images-grid">
+                      {userImages[selectedUser.user_id].posts.map((img, idx) => (
+                        <div key={idx} className="modal-image-item" onClick={() => openFullImage(img)}>
+                          <img src={img} alt={`Upload ${idx + 1}`} />
+                          <div className="image-overlay">
+                            <i className="bi bi-zoom-in"></i>
+                            <span>Click to enlarge</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedUser.bio && (
+                  <div className="detail-section full-width">
+                    <h4><i className="bi bi-file-text"></i> Bio</h4>
+                    <p>{selectedUser.bio}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setShowDetailsModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ban User Modal */}
+      {showBanModal && selectedUser && (
+        <div className="modal-overlay" onClick={() => setShowBanModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header warning">
+              <div className="modal-icon-wrapper"><i className="bi bi-ban"></i></div>
+              <div><h2>Ban User</h2><p>Provide a reason for banning</p></div>
+              <button className="modal-close" onClick={() => setShowBanModal(false)}><i className="bi bi-x-lg"></i></button>
+            </div>
+            <div className="modal-body">
+              <div className="ban-user-info">
+                <div className="user-avatar-small">
+                  {userImages[selectedUser.user_id]?.profile ? (
+                    <img src={userImages[selectedUser.user_id].profile} alt={selectedUser.full_name} />
+                  ) : (
+                    <span>{selectedUser.full_name?.charAt(0)}</span>
+                  )}
+                </div>
+                <div><strong>{selectedUser.full_name}</strong><br />{selectedUser.email}</div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Ban Reason *</label>
+                <textarea className="form-textarea" rows="4" placeholder="Enter reason for banning..." value={banReason} onChange={(e) => setBanReason(e.target.value)} />
+              </div>
+              <div className="warning-message"><i className="bi bi-exclamation-triangle-fill"></i> Banned users cannot access the platform.</div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowBanModal(false)}>Cancel</button>
+              <button className="btn-primary danger" onClick={handleBanUser} disabled={actionLoading}>
+                {actionLoading ? 'Banning...' : 'Ban User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Modal */}
+      {showDeleteModal && selectedUser && (
+        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header danger">
+              <div className="modal-icon-wrapper"><i className="bi bi-trash"></i></div>
+              <div><h2>Delete User</h2><p>This action cannot be undone</p></div>
+              <button className="modal-close" onClick={() => setShowDeleteModal(false)}><i className="bi bi-x-lg"></i></button>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to permanently delete <strong>{selectedUser.full_name}</strong>?</p>
+              <div className="warning-message"><i className="bi bi-exclamation-triangle-fill"></i> All user data will be permanently removed.</div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+              <button className="btn-primary danger" onClick={handleDeleteUser} disabled={actionLoading}>
+                {actionLoading ? 'Deleting...' : 'Delete User'}
+              </button>
             </div>
           </div>
         </div>
@@ -803,86 +760,17 @@ export default function ContentModeration() {
         </div>
       )}
 
-      {/* Reject Modal */}
-      {showRejectModal && selectedPost && (
-        <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
-          <div className="modal-container modal-reject" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header warning">
-              <div className="modal-icon">
-                <i className="bi bi-exclamation-triangle-fill"></i>
-              </div>
-              <h3>Reject Content</h3>
-              <button className="modal-close" onClick={() => setShowRejectModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-            
-            <div className="modal-body">
-              <p>Please select a reason for rejecting this content:</p>
-              
-              <div className="quick-reasons">
-                {quickReasons.map((reason) => (
-                  <button
-                    key={reason.id}
-                    className={`quick-reason ${rejectReason === reason.reason ? 'selected' : ''}`}
-                    onClick={() => {
-                      setRejectReason(reason.reason)
-                      setCustomReason('')
-                    }}
-                    style={{ '--reason-color': reason.color }}
-                  >
-                    <i className={`bi ${reason.icon}`}></i>
-                    <span>{reason.reason}</span>
-                    {rejectReason === reason.reason && <i className="bi bi-check-circle-fill check"></i>}
-                  </button>
-                ))}
-              </div>
-
-              <div className="custom-reason">
-                <label>Or provide a custom reason:</label>
-                <textarea
-                  rows="3"
-                  placeholder="Enter custom rejection reason..."
-                  value={customReason}
-                  onChange={(e) => {
-                    setCustomReason(e.target.value)
-                    setRejectReason('')
-                  }}
-                />
-              </div>
-
-              {!rejectReason && !customReason && (
-                <div className="warning-note">
-                  <i className="bi bi-info-circle"></i>
-                  Please select or provide a reason for rejection
-                </div>
-              )}
-            </div>
-            
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
-              <button 
-                className="btn-danger" 
-                onClick={handleReject}
-                disabled={actionLoading || (!rejectReason && !customReason)}
-              >
-                {actionLoading ? 'Processing...' : 'Confirm Rejection'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <style jsx>{`
-        .moderation-container {
+        .users-container {
           max-width: 1400px;
           margin: 0 auto;
           padding: 0 24px;
         }
 
+        /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 24px;
+          border-radius: 28px;
           padding: 40px 32px;
           margin-bottom: 32px;
           position: relative;
@@ -907,24 +795,33 @@ export default function ContentModeration() {
 
         .hero-content {
           display: flex;
+          justify-content: space-between;
           align-items: center;
-          gap: 20px;
           position: relative;
           z-index: 1;
+          flex-wrap: wrap;
+          gap: 20px;
         }
 
-        .hero-icon {
+        .hero-text {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .hero-icon-wrapper {
           width: 60px;
           height: 60px;
           background: rgba(255,255,255,0.2);
-          border-radius: 16px;
+          border-radius: 20px;
           display: flex;
           align-items: center;
           justify-content: center;
+          backdrop-filter: blur(10px);
         }
 
-        .hero-icon i {
-          font-size: 28px;
+        .hero-icon-wrapper i {
+          font-size: 32px;
           color: white;
         }
 
@@ -941,11 +838,28 @@ export default function ContentModeration() {
           margin: 0;
         }
 
+        .btn-refresh {
+          padding: 10px 24px;
+          background: rgba(255,255,255,0.2);
+          border: 1px solid rgba(255,255,255,0.3);
+          border-radius: 12px;
+          color: white;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-refresh:hover {
+          background: rgba(255,255,255,0.3);
+          transform: translateY(-2px);
+        }
+
+        /* Stats Grid */
         .stats-grid {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(6, 1fr);
           gap: 20px;
-          margin-bottom: 28px;
+          margin-bottom: 32px;
         }
 
         .stat-card {
@@ -973,91 +887,170 @@ export default function ContentModeration() {
           font-size: 24px;
         }
 
-        .stat-card.total .stat-icon { background: linear-gradient(135deg, #667eea20, #764ba220); color: #667eea; }
-        .stat-card.pending .stat-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
-        .stat-card.approved .stat-icon { background: rgba(16,185,129,0.1); color: #10b981; }
-        .stat-card.rejected .stat-icon { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .total .stat-icon { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .active .stat-icon { background: rgba(16,185,129,0.1); color: #10b981; }
+        .banned .stat-icon { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .farmers .stat-icon { background: rgba(59,130,246,0.1); color: #3b82f6; }
+        .vendors .stat-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .new .stat-icon { background: rgba(139,92,246,0.1); color: #8b5cf6; }
 
         .stat-info { flex: 1; }
-        .stat-label { font-size: 13px; color: #6c757d; display: block; margin-bottom: 4px; }
-        .stat-value { font-size: 28px; font-weight: 700; margin: 0; }
-        .text-warning { color: #f59e0b; }
+        .stat-label { font-size: 12px; color: #6c757d; margin-bottom: 4px; display: block; }
+        .stat-info h3 { font-size: 28px; font-weight: 700; margin: 0; }
         .text-success { color: #10b981; }
         .text-danger { color: #ef4444; }
+        .text-info { color: #3b82f6; }
+        .text-warning { color: #f59e0b; }
+        .text-primary { color: #8b5cf6; }
+        .stat-trend { font-size: 11px; color: #6c757d; }
 
-        .filter-tabs {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 28px;
+        /* Controls Bar */
+        .controls-bar {
           background: white;
-          padding: 6px;
-          border-radius: 16px;
+          border-radius: 20px;
+          padding: 16px 20px;
+          margin-bottom: 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 16px;
           box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
 
-        .filter-tab {
-          flex: 1;
+        .controls-left {
           display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 12px 20px;
-          background: transparent;
-          border: none;
+          gap: 16px;
+          flex-wrap: wrap;
+          flex: 1;
+        }
+
+        .search-box {
+          position: relative;
+          min-width: 300px;
+          flex: 1;
+        }
+
+        .search-box i {
+          position: absolute;
+          left: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #9ca3af;
+        }
+
+        .search-box input {
+          width: 100%;
+          padding: 10px 40px 10px 40px;
+          border: 2px solid #e9ecef;
           border-radius: 12px;
           font-size: 14px;
-          font-weight: 500;
-          color: #6c757d;
-          cursor: pointer;
           transition: all 0.3s ease;
         }
 
-        .filter-tab:hover { background: #f8f9fa; }
-        .filter-tab.active { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
-        .count { background: rgba(0,0,0,0.1); padding: 2px 8px; border-radius: 20px; font-size: 11px; }
-        .filter-tab.active .count { background: rgba(255,255,255,0.2); }
+        .search-box input:focus {
+          outline: none;
+          border-color: #667eea;
+          box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
 
-        .posts-grid {
+        .clear-search {
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          cursor: pointer;
+        }
+
+        .filter-select {
+          padding: 10px 12px;
+          border: 2px solid #e9ecef;
+          border-radius: 12px;
+          font-size: 14px;
+          min-width: 140px;
+          background: white;
+          cursor: pointer;
+        }
+
+        .info-text {
+          padding: 8px 16px;
+          background: #f8f9fa;
+          border-radius: 12px;
+          font-size: 13px;
+          color: #6c757d;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        /* Users Cards Grid */
+        .users-cards-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
           gap: 24px;
         }
 
-        .post-card {
+        .user-card {
           background: white;
           border-radius: 20px;
           overflow: hidden;
           transition: all 0.3s ease;
           box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-          animation: fadeInUp 0.4s ease backwards;
         }
 
-        @keyframes fadeInUp {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
+        .user-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 24px rgba(0,0,0,0.1);
         }
 
-        .post-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
-
-        .post-card-header {
-          padding: 16px 20px;
-          background: #f8f9fa;
-          border-bottom: 1px solid #e9ecef;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .post-type {
+        .user-card-header {
+          padding: 20px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          color: white;
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: 12px;
+          gap: 16px;
+          position: relative;
+        }
+
+        .user-avatar {
+          width: 64px;
+          height: 64px;
+          background: rgba(255,255,255,0.2);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          font-size: 28px;
           font-weight: 600;
-          color: #6c757d;
         }
 
-        .status-badge {
+        .user-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .user-header-info {
+          flex: 1;
+        }
+
+        .user-name {
+          margin: 0 0 8px 0;
+          font-size: 18px;
+          font-weight: 600;
+        }
+
+        .user-badges {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .role-badge, .status-badge {
           display: inline-flex;
           align-items: center;
           gap: 6px;
@@ -1065,107 +1058,195 @@ export default function ContentModeration() {
           border-radius: 20px;
           font-size: 11px;
           font-weight: 500;
+          background: rgba(255,255,255,0.2);
+          color: white;
         }
 
-        .status-badge.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
-        .status-badge.approved { background: rgba(16,185,129,0.1); color: #10b981; }
-        .status-badge.rejected { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .user-actions {
+          display: flex;
+          gap: 8px;
+        }
 
-        .post-image-preview {
+        .action-icon {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          background: rgba(255,255,255,0.2);
+          border: none;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.3s ease;
+        }
+
+        .action-icon:hover {
+          background: rgba(255,255,255,0.3);
+          transform: scale(1.05);
+        }
+
+        .user-card-body {
+          padding: 20px;
+        }
+
+        .user-contact {
+          margin-bottom: 16px;
+        }
+
+        .contact-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: #4b5563;
+          margin-bottom: 8px;
+        }
+
+        .contact-item i {
+          width: 18px;
+          color: #9ca3af;
+        }
+
+        .verified-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          background: #d1fae5;
+          border-radius: 20px;
+          font-size: 11px;
+          color: #065f46;
+          margin-top: 8px;
+        }
+
+        /* User Images Section */
+        .user-images-section {
+          margin: 16px 0;
+          padding-top: 16px;
+          border-top: 1px solid #e9ecef;
+        }
+
+        .images-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #374151;
+          margin-bottom: 12px;
+        }
+
+        .images-header i {
+          color: #667eea;
+        }
+
+        .user-images-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 8px;
+        }
+
+        .user-image-item {
           position: relative;
-          height: 180px;
+          aspect-ratio: 1;
+          border-radius: 12px;
           overflow: hidden;
           cursor: pointer;
+          background: #f8f9fa;
         }
 
-        .post-image-preview img {
+        .user-image-item img {
           width: 100%;
           height: 100%;
           object-fit: cover;
           transition: transform 0.3s ease;
         }
 
-        .post-card:hover .post-image-preview img {
+        .user-image-item:hover img {
           transform: scale(1.05);
         }
 
-        .image-count-badge {
+        .image-overlay {
           position: absolute;
-          bottom: 12px;
-          right: 12px;
-          background: rgba(0,0,0,0.7);
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        }
+
+        .user-image-item:hover .image-overlay {
+          opacity: 1;
+        }
+
+        .image-overlay i {
+          font-size: 20px;
           color: white;
-          padding: 4px 10px;
-          border-radius: 20px;
+        }
+
+        .more-images {
+          background: #e9ecef;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6c757d;
+        }
+
+        .user-meta-info {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 16px;
+          padding-top: 16px;
+          border-top: 1px solid #e9ecef;
           font-size: 11px;
+          color: #9ca3af;
+        }
+
+        .meta-item {
           display: flex;
           align-items: center;
           gap: 4px;
         }
 
-        .post-card-body {
-          padding: 16px 20px;
-          border-bottom: 1px solid #e9ecef;
+        /* Modal Images Grid */
+        .modal-images-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px;
+          margin-top: 16px;
         }
 
-        .post-meta {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 12px;
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .post-meta i { margin-right: 4px; }
-
-        .rejection-badge {
-          background: #fef3c7;
-          padding: 8px 12px;
-          border-radius: 8px;
-          font-size: 12px;
-          color: #92400e;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .post-card-footer {
-          padding: 16px 20px;
-        }
-
-        .action-group {
-          display: flex;
-          gap: 12px;
-        }
-
-        .btn-approve, .btn-reject, .btn-view {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 8px 12px;
-          border: none;
-          border-radius: 10px;
-          font-size: 13px;
-          font-weight: 500;
+        .modal-image-item {
+          position: relative;
+          aspect-ratio: 1;
+          border-radius: 12px;
+          overflow: hidden;
           cursor: pointer;
+          border: 2px solid #e9ecef;
           transition: all 0.3s ease;
         }
 
-        .btn-approve { background: rgba(16,185,129,0.1); color: #10b981; }
-        .btn-approve:hover { background: #10b981; color: white; }
-        .btn-reject { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .btn-reject:hover { background: #ef4444; color: white; }
-        .btn-view { background: rgba(79,70,229,0.1); color: #4f46e5; }
-        .btn-view:hover { background: #4f46e5; color: white; }
-
-        .reviewed-info {
-          text-align: center;
-          font-size: 11px;
-          color: #6c757d;
+        .modal-image-item:hover {
+          border-color: #667eea;
+          transform: scale(1.02);
         }
 
+        .modal-image-item img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 80px 20px;
@@ -1174,10 +1255,44 @@ export default function ContentModeration() {
         }
 
         .empty-state i {
-          font-size: 64px;
+          font-size: 80px;
           color: #cbd5e1;
           margin-bottom: 16px;
           display: block;
+        }
+
+        .btn-clear-filters {
+          margin-top: 20px;
+          padding: 12px 32px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          border: none;
+          border-radius: 12px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        /* Loading */
+        .loading-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 400px;
+        }
+
+        .loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid #e9ecef;
+          border-top-color: #4f46e5;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
 
         /* Modal Styles */
@@ -1206,189 +1321,263 @@ export default function ContentModeration() {
           animation: slideUp 0.3s ease;
         }
 
-        .modal-container.modal-lg { max-width: 900px; }
-        .modal-container.modal-reject { max-width: 600px; }
+        .modal-container.modal-lg {
+          max-width: 800px;
+        }
 
         .modal-header {
           padding: 24px 28px 20px;
           border-bottom: 1px solid #e9ecef;
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .modal-header.warning .modal-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
-
-        .modal-header-content {
-          display: flex;
           align-items: center;
           gap: 16px;
+          position: relative;
         }
 
-        .modal-icon {
+        .modal-header.warning .modal-icon-wrapper {
+          background: rgba(245,158,11,0.1);
+          color: #f59e0b;
+        }
+
+        .modal-header.danger .modal-icon-wrapper {
+          background: rgba(239,68,68,0.1);
+          color: #ef4444;
+        }
+
+        .modal-icon-wrapper {
           width: 48px;
           height: 48px;
-          background: linear-gradient(135deg, #667eea20, #764ba220);
           border-radius: 24px;
           display: flex;
           align-items: center;
           justify-content: center;
         }
 
-        .modal-icon i { font-size: 24px; color: #667eea; }
+        .modal-icon-wrapper i {
+          font-size: 24px;
+        }
 
-        .modal-header h2 { font-size: 20px; margin: 0 0 4px 0; }
-        .modal-header p { margin: 0; color: #6c757d; font-size: 13px; }
+        .modal-header h2 {
+          font-size: 20px;
+          margin: 0 0 4px 0;
+        }
+
+        .modal-header p {
+          margin: 0;
+          color: #6c757d;
+          font-size: 13px;
+        }
 
         .modal-close {
-          width: 36px;
-          height: 36px;
-          background: #f8f9fa;
+          position: absolute;
+          right: 20px;
+          top: 20px;
+          background: none;
           border: none;
-          border-radius: 50%;
+          font-size: 18px;
           cursor: pointer;
+          color: #9ca3af;
           transition: all 0.3s ease;
         }
 
-        .modal-close:hover { background: #e9ecef; transform: rotate(90deg); }
+        .modal-close:hover {
+          transform: rotate(90deg);
+        }
 
-        .modal-body { padding: 28px; }
-        .modal-footer { padding: 16px 28px 28px; border-top: 1px solid #e9ecef; display: flex; justify-content: flex-end; gap: 12px; }
+        .modal-body {
+          padding: 28px;
+        }
 
-        .footer-actions { display: flex; gap: 12px; }
+        .modal-footer {
+          padding: 16px 28px 28px;
+          border-top: 1px solid #e9ecef;
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+        }
 
-        .loading-details { text-align: center; padding: 60px; }
-
-        /* Info Section */
-        .info-section { margin-bottom: 28px; }
-        .info-section h4 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-        .info-section h4 i { color: #667eea; }
-        .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-        .info-item label { display: block; font-size: 11px; font-weight: 600; color: #6c757d; margin-bottom: 4px; }
-        .info-item code { background: #f8f9fa; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
-        .badge-type { display: inline-block; padding: 4px 12px; background: #e9ecef; border-radius: 12px; font-size: 12px; }
-
-        /* Author Card */
-        .author-card {
+        .user-profile-header {
           display: flex;
           align-items: center;
-          gap: 20px;
-          padding: 20px;
-          background: #f8f9fa;
-          border-radius: 16px;
+          gap: 24px;
+          padding-bottom: 24px;
+          margin-bottom: 24px;
+          border-bottom: 1px solid #e9ecef;
         }
-        .author-avatar {
-          width: 64px;
-          height: 64px;
+
+        .user-avatar-large {
+          width: 80px;
+          height: 80px;
           background: linear-gradient(135deg, #667eea, #764ba2);
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
+          font-size: 32px;
+          font-weight: 600;
+          color: white;
           overflow: hidden;
         }
-        .author-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .author-avatar i { font-size: 32px; color: white; }
-        .author-name { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
-        .author-email, .author-phone, .author-location { font-size: 12px; color: #6c757d; margin: 2px 0; }
-        .author-email i, .author-phone i, .author-location i { margin-right: 4px; font-size: 11px; }
 
-        /* Post Content */
-        .post-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
-        .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; line-height: 1.6; margin-bottom: 16px; }
-
-        /* Images Section */
-        .images-section { margin-top: 20px; }
-        .images-section h5 { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-        .images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-        .image-card {
-          position: relative;
-          aspect-ratio: 1;
-          border-radius: 12px;
-          overflow: hidden;
-          cursor: pointer;
-          border: 2px solid #e9ecef;
-          transition: all 0.3s ease;
-          background: #f8f9fa;
+        .user-avatar-large img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
         }
-        .image-card:hover { transform: scale(1.02); border-color: #667eea; }
-        .image-card img { width: 100%; height: 100%; object-fit: cover; }
-        .image-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.6);
+
+        .user-profile-info h3 {
+          margin: 0 0 8px 0;
+          font-size: 20px;
+        }
+
+        .user-meta {
           display: flex;
-          flex-direction: column;
+          gap: 8px;
+          margin-bottom: 8px;
+          flex-wrap: wrap;
+        }
+
+        .user-id-full {
+          font-size: 12px;
+          color: #6c757d;
+          font-family: monospace;
+        }
+
+        .details-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 24px;
+        }
+
+        .detail-section {
+          background: #f8f9fa;
+          border-radius: 16px;
+          padding: 20px;
+        }
+
+        .detail-section.full-width {
+          grid-column: span 2;
+        }
+
+        .detail-section h4 {
+          margin: 0 0 16px 0;
+          font-size: 14px;
+          font-weight: 600;
+          color: #374151;
+        }
+
+        .detail-section h4 i {
+          margin-right: 8px;
+          color: #667eea;
+        }
+
+        .detail-section div {
+          margin-bottom: 8px;
+          font-size: 13px;
+        }
+
+        .verified-badge-sm {
+          font-size: 11px;
+          color: #10b981;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          margin-top: 8px;
+        }
+
+        .ban-user-info {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 16px;
+          background: #f8f9fa;
+          border-radius: 16px;
+          margin-bottom: 20px;
+        }
+
+        .user-avatar-small {
+          width: 48px;
+          height: 48px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          border-radius: 50%;
+          display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          opacity: 0;
-          transition: opacity 0.3s ease;
           color: white;
+          font-weight: 600;
+          font-size: 18px;
+          overflow: hidden;
         }
-        .image-card:hover .image-overlay { opacity: 1; }
-        .image-overlay i { font-size: 24px; }
-        .image-overlay span { font-size: 11px; }
 
-        .no-images-message {
-          text-align: center;
-          padding: 40px;
-          background: #f8f9fa;
-          border-radius: 12px;
-          color: #9ca3af;
+        .user-avatar-small img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
         }
-        .no-images-message i { font-size: 32px; margin-bottom: 8px; display: block; }
 
-        /* Comments Section */
-        .comments-section { margin-top: 28px; }
-        .comments-section h4 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .form-group {
+          margin-bottom: 20px;
+        }
 
-        .comments-list { max-height: 400px; overflow-y: auto; }
-        .comment-item { display: flex; gap: 12px; padding: 16px; background: #f8f9fa; border-radius: 16px; margin-bottom: 12px; }
-        .comment-avatar { width: 40px; height: 40px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .comment-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .comment-avatar i { font-size: 20px; color: white; }
-        .comment-content { flex: 1; }
-        .comment-header { display: flex; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
-        .comment-author { font-weight: 600; font-size: 13px; }
-        .comment-time { font-size: 11px; color: #9ca3af; }
-        .comment-text { font-size: 13px; color: #4b5563; line-height: 1.5; }
+        .form-label {
+          display: block;
+          font-size: 13px;
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: #374151;
+        }
 
-        .no-comments { text-align: center; padding: 40px; color: #9ca3af; }
-        .no-comments i { font-size: 48px; margin-bottom: 12px; display: block; }
-
-        /* Rejection Box */
-        .rejection-box { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
-        .moderation-info { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
-
-        /* Quick Reasons */
-        .quick-reasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
-        .quick-reason {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px 16px;
-          background: #f8f9fa;
+        .form-textarea {
+          width: 100%;
+          padding: 12px;
           border: 2px solid #e9ecef;
           border-radius: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          position: relative;
+          font-size: 14px;
+          resize: vertical;
         }
-        .quick-reason:hover { background: #e9ecef; transform: translateY(-2px); }
-        .quick-reason.selected { background: #fef3c7; border-color: #f59e0b; }
-        .quick-reason i { font-size: 18px; color: var(--reason-color); }
-        .quick-reason .check { position: absolute; right: 12px; top: 12px; color: #10b981; font-size: 16px; }
 
-        .custom-reason { margin-top: 20px; }
-        .custom-reason label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-        .custom-reason textarea { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
-        .custom-reason textarea:focus { outline: none; border-color: #667eea; }
+        .form-textarea:focus {
+          outline: none;
+          border-color: #667eea;
+        }
 
-        .warning-note { background: #fff3cd; padding: 12px; border-radius: 12px; margin-top: 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #856404; }
+        .warning-message {
+          background: #fef3c7;
+          padding: 12px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-size: 13px;
+          color: #92400e;
+        }
+
+        .btn-secondary {
+          padding: 10px 20px;
+          background: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 500;
+        }
+
+        .btn-primary {
+          padding: 10px 24px;
+          border: none;
+          border-radius: 10px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .btn-primary.danger {
+          background: #ef4444;
+          color: white;
+        }
+
+        .btn-primary:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
 
         /* Full Image Modal */
         .full-image-modal {
@@ -1400,7 +1589,14 @@ export default function ContentModeration() {
           overflow: hidden;
           animation: slideUp 0.3s ease;
         }
-        .full-image-modal img { max-width: 100%; max-height: 85vh; display: block; margin: 0 auto; }
+
+        .full-image-modal img {
+          max-width: 100%;
+          max-height: 85vh;
+          display: block;
+          margin: 0 auto;
+        }
+
         .close-image {
           position: absolute;
           top: 16px;
@@ -1417,41 +1613,138 @@ export default function ContentModeration() {
           justify-content: center;
           transition: all 0.3s ease;
         }
-        .close-image:hover { background: rgba(0,0,0,0.9); transform: rotate(90deg); }
-        .image-actions { position: absolute; bottom: 16px; right: 16px; }
-        .image-actions button { padding: 8px 16px; background: rgba(0,0,0,0.7); border: none; border-radius: 8px; color: white; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 13px; transition: all 0.3s ease; }
-        .image-actions button:hover { background: rgba(0,0,0,0.9); }
 
-        /* Buttons */
-        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; font-weight: 500; }
-        .btn-primary { padding: 10px 24px; background: #4f46e5; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-danger { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-approve-modal { padding: 10px 24px; background: #10b981; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
-        .btn-reject-modal { padding: 10px 24px; background: #ef4444; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; }
+        .close-image:hover {
+          background: rgba(0,0,0,0.9);
+          transform: rotate(90deg);
+        }
 
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .image-actions {
+          position: absolute;
+          bottom: 16px;
+          right: 16px;
+        }
 
+        .image-actions button {
+          padding: 8px 16px;
+          background: rgba(0,0,0,0.7);
+          border: none;
+          border-radius: 8px;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          transition: all 0.3s ease;
+        }
+
+        .image-actions button:hover {
+          background: rgba(0,0,0,0.9);
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        /* Responsive */
         @media (max-width: 1200px) {
-          .stats-grid { grid-template-columns: repeat(2, 1fr); }
-          .posts-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+          .stats-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
         }
 
         @media (max-width: 768px) {
-          .moderation-container { padding: 0 16px; }
-          .hero-section { padding: 32px 24px; }
-          .hero-content { flex-direction: column; text-align: center; }
-          .stats-grid { grid-template-columns: 1fr; }
-          .filter-tabs { flex-wrap: wrap; }
-          .filter-tab { flex: auto; }
-          .posts-grid { grid-template-columns: 1fr; }
-          .info-grid { grid-template-columns: 1fr; }
-          .images-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
-          .quick-reasons { grid-template-columns: 1fr; }
-          .author-card { flex-direction: column; text-align: center; }
-          .footer-actions { flex-direction: column; }
-          .btn-approve-modal, .btn-reject-modal { width: 100%; }
-          .action-group { flex-direction: column; }
+          .users-container {
+            padding: 0 16px;
+          }
+
+          .hero-section {
+            padding: 32px 24px;
+          }
+
+          .hero-content {
+            flex-direction: column;
+            text-align: center;
+          }
+
+          .hero-text {
+            flex-direction: column;
+          }
+
+          .hero-title {
+            font-size: 24px;
+          }
+
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .controls-bar {
+            flex-direction: column;
+          }
+
+          .controls-left {
+            width: 100%;
+            flex-direction: column;
+          }
+
+          .search-box {
+            width: 100%;
+          }
+
+          .filter-select {
+            width: 100%;
+          }
+
+          .users-cards-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .user-card-header {
+            flex-wrap: wrap;
+          }
+
+          .user-actions {
+            margin-left: auto;
+          }
+
+          .user-images-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
+
+          .details-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .detail-section.full-width {
+            grid-column: span 1;
+          }
+
+          .user-profile-header {
+            flex-direction: column;
+            text-align: center;
+          }
+
+          .user-meta {
+            justify-content: center;
+          }
+
+          .modal-images-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
       `}</style>
     </AdminLayout>
