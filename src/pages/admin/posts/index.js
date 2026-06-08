@@ -22,6 +22,7 @@ export default function ContentModeration() {
   const [comments, setComments] = useState([])
   const [newComment, setNewComment] = useState('')
   const [addingComment, setAddingComment] = useState(false)
+  const [currentAdminId, setCurrentAdminId] = useState(null)
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -42,9 +43,27 @@ export default function ContentModeration() {
   ]
 
   useEffect(() => {
+    getCurrentAdminId()
     fetchPosts()
     fetchStats()
   }, [filter])
+
+  const getCurrentAdminId = async () => {
+    const session = JSON.parse(localStorage.getItem('adminSession'))
+    if (session?.admin?.admin_id) {
+      setCurrentAdminId(session.admin.admin_id)
+    } else {
+      // Try to get from admin_users table
+      const { data } = await supabase
+        .from('admin_users')
+        .select('admin_id')
+        .limit(1)
+        .single()
+      if (data) {
+        setCurrentAdminId(data.admin_id)
+      }
+    }
+  }
 
   const getImageUrl = (imagePath) => {
     if (!imagePath) return null
@@ -82,6 +101,7 @@ export default function ContentModeration() {
 
       if (error) throw error
 
+      // Fetch images for each post
       const postsWithImages = await Promise.all((data || []).map(async (post) => {
         if (post.content_type === 'POST') {
           const { data: images, error: imagesError } = await supabase
@@ -135,6 +155,7 @@ export default function ContentModeration() {
       let details = null
       
       if (contentType === 'POST') {
+        // First fetch the post
         const { data, error } = await supabase
           .from('posts')
           .select(`
@@ -156,19 +177,25 @@ export default function ContentModeration() {
           .single()
         
         if (!error && data) {
+          // Fetch images from post_images table
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
-            .select('image_url')
+            .select('image_url, image_order')
             .eq('post_id', contentId)
+            .order('image_order', { ascending: true })
           
+          const imageUrls = []
           if (!imagesError && images && images.length > 0) {
-            data.images = images.map(img => getImageUrl(img.image_url))
+            for (const img of images) {
+              const url = getImageUrl(img.image_url)
+              if (url) imageUrls.push(url)
+            }
           } else if (data.image_url) {
-            data.images = [getImageUrl(data.image_url)]
-          } else {
-            data.images = []
+            const url = getImageUrl(data.image_url)
+            if (url) imageUrls.push(url)
           }
-          details = data
+          
+          details = { ...data, images: imageUrls, image_count: imageUrls.length }
         }
       } else if (contentType === 'COMMENT') {
         const { data, error } = await supabase
@@ -239,23 +266,38 @@ export default function ContentModeration() {
       return
     }
 
+    if (!currentAdminId) {
+      alert('Unable to identify admin user. Please refresh and try again.')
+      return
+    }
+
     setAddingComment(true)
-    const session = JSON.parse(localStorage.getItem('adminSession'))
     
     try {
-      // Get admin user ID from admin_users
-      const { data: adminUser } = await supabase
-        .from('admin_users')
-        .select('admin_id')
-        .eq('email', session?.user?.email)
+      // Use a system admin ID or the current admin ID
+      // The comments table might expect a user_id from the users table, not admin_users
+      // Let's try to get a valid user_id from the users table
+      let userId = currentAdminId
+      
+      // Check if the admin exists in users table
+      const { data: userExists } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('user_id', currentAdminId)
         .single()
+      
+      if (!userExists) {
+        // If not, we'll use a placeholder or skip the comment feature
+        alert('Comment feature requires a valid user account. Please contact support.')
+        setAddingComment(false)
+        return
+      }
 
-      // Add comment directly to comments table (no moderation needed)
       const { error } = await supabase
         .from('comments')
         .insert({
           post_id: selectedPost.content_id,
-          user_id: adminUser?.admin_id || session?.user?.id,
+          user_id: userId,
           comment_text: newComment,
           created_at: new Date().toISOString()
         })
@@ -542,7 +584,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal with Full Content and Comments */}
+      {/* Details Modal with Full Content and Images */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -625,14 +667,16 @@ export default function ContentModeration() {
                       <div className="post-title">{postDetails.title}</div>
                       <div className="post-content">{postDetails.content}</div>
                       
-                      {/* All Images Gallery */}
+                      {/* All Images Gallery - FIXED */}
                       {postDetails.images && postDetails.images.length > 0 && (
                         <div className="images-section">
                           <h5><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h5>
                           <div className="images-grid">
                             {postDetails.images.map((img, idx) => (
                               <div key={idx} className="image-card" onClick={() => openFullImage(img)}>
-                                <img src={img} alt={`Image ${idx + 1}`} />
+                                <img src={img} alt={`Image ${idx + 1}`} onError={(e) => {
+                                  e.target.src = 'https://placehold.co/400x300/e2e8f0/64748b?text=Image+Not+Found'
+                                }} />
                                 <div className="image-overlay">
                                   <i className="bi bi-zoom-in"></i>
                                   <span>Click to enlarge</span>
@@ -640,6 +684,14 @@ export default function ContentModeration() {
                               </div>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+                      {/* Show message if no images */}
+                      {(!postDetails.images || postDetails.images.length === 0) && (
+                        <div className="no-images-message">
+                          <i className="bi bi-image-slash"></i>
+                          <span>No images attached to this post</span>
                         </div>
                       )}
                     </div>
@@ -656,29 +708,11 @@ export default function ContentModeration() {
                     </div>
                   )}
 
-                  {/* Comments Section for Posts */}
+                  {/* Comments Section for Posts - Optional */}
                   {selectedPost.content_type === 'POST' && (
                     <div className="comments-section">
                       <h4><i className="bi bi-chat-dots"></i> Comments ({comments.length})</h4>
                       
-                      {/* Add Comment Form */}
-                      <div className="add-comment">
-                        <textarea
-                          className="comment-input"
-                          rows="3"
-                          placeholder="Add a comment..."
-                          value={newComment}
-                          onChange={(e) => setNewComment(e.target.value)}
-                        />
-                        <button 
-                          className="btn-submit-comment"
-                          onClick={addComment}
-                          disabled={addingComment}
-                        >
-                          {addingComment ? 'Posting...' : 'Post Comment'}
-                        </button>
-                      </div>
-
                       {/* Comments List */}
                       <div className="comments-list">
                         {comments.length > 0 ? (
@@ -703,7 +737,7 @@ export default function ContentModeration() {
                         ) : (
                           <div className="no-comments">
                             <i className="bi bi-chat"></i>
-                            <p>No comments yet. Be the first to comment!</p>
+                            <p>No comments yet</p>
                           </div>
                         )}
                       </div>
@@ -1275,6 +1309,7 @@ export default function ContentModeration() {
           cursor: pointer;
           border: 2px solid #e9ecef;
           transition: all 0.3s ease;
+          background: #f8f9fa;
         }
         .image-card:hover { transform: scale(1.02); border-color: #667eea; }
         .image-card img { width: 100%; height: 100%; object-fit: cover; }
@@ -1298,15 +1333,18 @@ export default function ContentModeration() {
         .image-overlay i { font-size: 24px; }
         .image-overlay span { font-size: 11px; }
 
+        .no-images-message {
+          text-align: center;
+          padding: 40px;
+          background: #f8f9fa;
+          border-radius: 12px;
+          color: #9ca3af;
+        }
+        .no-images-message i { font-size: 32px; margin-bottom: 8px; display: block; }
+
         /* Comments Section */
         .comments-section { margin-top: 28px; }
         .comments-section h4 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-
-        .add-comment { margin-bottom: 24px; }
-        .comment-input { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
-        .comment-input:focus { outline: none; border-color: #667eea; }
-        .btn-submit-comment { margin-top: 12px; padding: 10px 20px; background: linear-gradient(135deg, #667eea, #764ba2); border: none; border-radius: 10px; color: white; font-weight: 500; cursor: pointer; transition: all 0.3s ease; }
-        .btn-submit-comment:hover { transform: translateY(-2px); }
 
         .comments-list { max-height: 400px; overflow-y: auto; }
         .comment-item { display: flex; gap: 12px; padding: 16px; background: #f8f9fa; border-radius: 16px; margin-bottom: 12px; }
