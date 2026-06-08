@@ -111,9 +111,10 @@ export default function ContentModeration() {
             const userId = postDataResult.user_id || post.user_id
             
             if (userId) {
+              // Try to get user from users table
               const { data: userResult, error: userError } = await supabase
                 .from('users')
-                .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+                .select('*')
                 .eq('user_id', userId)
                 .maybeSingle()
               
@@ -124,53 +125,16 @@ export default function ContentModeration() {
               if (userResult) {
                 userData = userResult
               } else {
-                const { data: adminResult, error: adminError } = await supabase
+                // Try admin_users table
+                const { data: adminResult } = await supabase
                   .from('admin_users')
-                  .select('admin_id, full_name, email')
+                  .select('*')
                   .eq('admin_id', userId)
                   .maybeSingle()
                 
                 if (adminResult) {
-                  userData = {
-                    user_id: adminResult.admin_id,
-                    full_name: adminResult.full_name,
-                    email: adminResult.email,
-                    profile_image: null,
-                    phone: null,
-                    location: null,
-                    district: null
-                  }
-                } else {
-                  const { data: authUser } = await supabase
-                    .from('posts')
-                    .select('users!posts_user_id_fkey (user_id, full_name, email)')
-                    .eq('post_id', post.content_id)
-                    .maybeSingle()
-                  
-                  if (authUser?.users) {
-                    userData = {
-                      user_id: authUser.users.user_id,
-                      full_name: authUser.users.full_name,
-                      email: authUser.users.email,
-                      profile_image: null,
-                      phone: null,
-                      location: null,
-                      district: null
-                    }
-                  }
+                  userData = adminResult
                 }
-              }
-            }
-            
-            if (!userData && userId) {
-              userData = {
-                user_id: userId,
-                full_name: `User ${userId.slice(0, 8)}`,
-                email: 'Email not available',
-                profile_image: null,
-                phone: null,
-                location: null,
-                district: null
               }
             }
           } else {
@@ -187,10 +151,11 @@ export default function ContentModeration() {
           cover_image: images[0] || null,
           post_created_at: postData?.created_at || post.created_at,
           user: userData,
-          author_name: userData?.full_name || 'Mobile User',
+          author_name: userData?.full_name || userData?.name || 'User',
           author_email: userData?.email || 'Email not available',
           author_phone: userData?.phone || null,
           author_location: userData?.location || userData?.district || null,
+          author_joined: userData?.created_at || null,
           user_id: userData?.user_id || post.user_id,
           post_exists: postExists
         }
@@ -256,9 +221,10 @@ export default function ContentModeration() {
           const userId = postData.user_id
           
           if (userId) {
+            // First try users table
             const { data: userResult, error: userError } = await supabase
               .from('users')
-              .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+              .select('*')
               .eq('user_id', userId)
               .maybeSingle()
             
@@ -269,22 +235,15 @@ export default function ContentModeration() {
             if (userResult) {
               userData = userResult
             } else {
+              // Try admin_users table
               const { data: adminResult } = await supabase
                 .from('admin_users')
-                .select('admin_id, full_name, email')
+                .select('*')
                 .eq('admin_id', userId)
                 .maybeSingle()
               
               if (adminResult) {
-                userData = {
-                  user_id: adminResult.admin_id,
-                  full_name: adminResult.full_name,
-                  email: adminResult.email,
-                  profile_image: null,
-                  phone: null,
-                  location: null,
-                  district: null
-                }
+                userData = adminResult
               }
             }
           }
@@ -394,6 +353,17 @@ export default function ContentModeration() {
     if (postDetails && postDetails.images && currentImageIndex > 0) {
       setCurrentImageIndex(currentImageIndex - 1)
       setSelectedImage(postDetails.images[currentImageIndex - 1])
+    }
+  }
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Date not available'
+    try {
+      const date = new Date(dateString)
+      if (isNaN(date.getTime())) return 'Date not available'
+      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    } catch (e) {
+      return 'Date not available'
     }
   }
 
@@ -588,7 +558,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Details Modal with Proper User Data */}
       {showDetailsModal && selectedPost && postDetails && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
@@ -632,7 +602,7 @@ export default function ContentModeration() {
                     </div>
                   )}
 
-                  {/* Author Info */}
+                  {/* Author Info - Now with proper data from Supabase */}
                   <div className="modal-section">
                     <h4><i className="bi bi-person-badge"></i> Author Information</h4>
                     <div className="author-card">
@@ -640,15 +610,15 @@ export default function ContentModeration() {
                         {postDetails.user?.profile_image ? (
                           <img src={getImageUrl(postDetails.user.profile_image)} alt={postDetails.user.full_name} />
                         ) : (
-                          <span>{postDetails.user?.full_name?.charAt(0) || 'U'}</span>
+                          <span>{postDetails.user?.full_name?.charAt(0) || postDetails.user?.name?.charAt(0) || 'U'}</span>
                         )}
                       </div>
                       <div className="author-details">
-                        <h5>{postDetails.user?.full_name || 'Mobile User'}</h5>
+                        <h5>{postDetails.user?.full_name || postDetails.user?.name || 'User'}</h5>
                         <p><i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}</p>
                         {postDetails.user?.phone && <p><i className="bi bi-telephone"></i> {postDetails.user.phone}</p>}
                         {postDetails.user?.location && <p><i className="bi bi-geo-alt"></i> {postDetails.user.location}</p>}
-                        <p><i className="bi bi-calendar-check"></i> Joined: {new Date(postDetails.user?.created_at).toLocaleDateString()}</p>
+                        <p><i className="bi bi-calendar-check"></i> Joined: {formatDate(postDetails.user?.created_at)}</p>
                       </div>
                     </div>
                   </div>
@@ -845,7 +815,6 @@ export default function ContentModeration() {
           padding: 24px;
         }
 
-        /* Loading Screen */
         .loading-screen {
           display: flex;
           flex-direction: column;
@@ -868,7 +837,6 @@ export default function ContentModeration() {
           to { transform: rotate(360deg); }
         }
 
-        /* Hero Section */
         .hero-section {
           background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%);
           border-radius: 24px;
@@ -931,7 +899,6 @@ export default function ContentModeration() {
           margin: 0;
         }
 
-        /* Stats Cards */
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -979,7 +946,6 @@ export default function ContentModeration() {
         .text-danger { color: #ef4444; }
         .stat-trend { font-size: 11px; color: #9ca3af; margin-top: 4px; display: block; }
 
-        /* Filter Section */
         .filter-section {
           margin-bottom: 32px;
         }
@@ -1037,7 +1003,6 @@ export default function ContentModeration() {
         .filter-count.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
         .filter-btn.active .filter-count { color: white; background: rgba(255,255,255,0.2); }
 
-        /* Posts Grid */
         .posts-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
@@ -1069,7 +1034,6 @@ export default function ContentModeration() {
           box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.02);
         }
 
-        /* User Section */
         .post-user {
           padding: 20px;
           background: #fafbfc;
@@ -1139,7 +1103,6 @@ export default function ContentModeration() {
           margin-top: 4px;
         }
 
-        /* Images Section */
         .post-images {
           padding: 16px;
           background: #fafbfc;
@@ -1227,7 +1190,6 @@ export default function ContentModeration() {
           gap: 4px;
         }
 
-        /* Content Section */
         .post-content {
           padding: 20px;
         }
@@ -1257,7 +1219,6 @@ export default function ContentModeration() {
           margin-right: 4px;
         }
 
-        /* Actions */
         .post-actions {
           padding: 16px 20px 20px;
           border-top: 1px solid #f1f5f9;
@@ -1327,7 +1288,6 @@ export default function ContentModeration() {
           color: white;
         }
 
-        /* Status Badge */
         .status-badge {
           display: inline-flex;
           align-items: center;
@@ -1342,7 +1302,6 @@ export default function ContentModeration() {
         .status-badge.approved { background: #d1fae5; color: #10b981; }
         .status-badge.rejected { background: #fee2e2; color: #ef4444; }
 
-        /* Empty State */
         .empty-state {
           text-align: center;
           padding: 80px 20px;
@@ -1375,7 +1334,6 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
-        /* Modal Styles */
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -1483,7 +1441,6 @@ export default function ContentModeration() {
           flex: 1;
         }
 
-        /* Modal Content */
         .modal-images {
           margin-bottom: 28px;
         }
@@ -1565,7 +1522,6 @@ export default function ContentModeration() {
           color: #4f46e5;
         }
 
-        /* Author Card */
         .author-card {
           display: flex;
           align-items: center;
@@ -1615,7 +1571,6 @@ export default function ContentModeration() {
           color: #9ca3af;
         }
 
-        /* Info Grid */
         .info-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1638,7 +1593,6 @@ export default function ContentModeration() {
           font-size: 12px;
         }
 
-        /* Post Content */
         .post-title {
           font-size: 18px;
           font-weight: 600;
@@ -1688,7 +1642,6 @@ export default function ContentModeration() {
           margin-bottom: 0;
         }
 
-        /* Lightbox */
         .lightbox-overlay {
           position: fixed;
           top: 0;
@@ -1800,7 +1753,6 @@ export default function ContentModeration() {
           background: rgba(0,0,0,0.9);
         }
 
-        /* Quick Reasons */
         .quick-reasons {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -1881,7 +1833,6 @@ export default function ContentModeration() {
           color: #856404;
         }
 
-        /* Buttons */
         .btn-secondary {
           padding: 10px 20px;
           background: #f9fafb;
@@ -1968,7 +1919,6 @@ export default function ContentModeration() {
           }
         }
 
-        /* Responsive */
         @media (max-width: 1024px) {
           .moderation-container { padding: 20px; }
           .posts-grid { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
