@@ -322,7 +322,7 @@ export default function UserManagement() {
             </button>
           )}
           <button className="create-btn" onClick={() => router.push('/admin/mobile-users')}>
-              <i className="bi bi-person-plus-fill"></i>
+              <i className="bi bi-people-fill"></i>
               <span>Manage Mobile Users</span>
             </button>
         </div>
