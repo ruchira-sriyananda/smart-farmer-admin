@@ -82,6 +82,13 @@ export default function ContentModeration() {
       // Fetch images and user details for each post
       const postsWithDetails = await Promise.all((data || []).map(async (post) => {
         if (post.content_type === 'POST') {
+          // Fetch post content from posts table
+          const { data: postData, error: postError } = await supabase
+            .from('posts')
+            .select('title, content, description, created_at')
+            .eq('post_id', post.content_id)
+            .single()
+          
           // Fetch images
           const { data: images, error: imagesError } = await supabase
             .from('post_images')
@@ -96,21 +103,51 @@ export default function ContentModeration() {
             imageUrls = [getImageUrl(post.image_url)]
           }
           
-          // Fetch user details
-          const { data: userData } = await supabase
-            .from('users')
-            .select('full_name, email, profile_image')
-            .eq('user_id', post.user_id)
-            .single()
+          // Fetch user details - try multiple approaches to get user info
+          let userData = null
+          
+          // Method 1: Try from users table using user_id from content_moderation
+          if (post.user_id) {
+            const { data: userFromPosts } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location')
+              .eq('user_id', post.user_id)
+              .single()
+            
+            if (userFromPosts) {
+              userData = userFromPosts
+            }
+          }
+          
+          // Method 2: If no user found, try from posts table's user_id
+          if (!userData && postData?.user_id) {
+            const { data: userFromUsers } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location')
+              .eq('user_id', postData.user_id)
+              .single()
+            
+            if (userFromUsers) {
+              userData = userFromUsers
+            }
+          }
           
           return { 
             ...post, 
+            title: postData?.title || 'Untitled',
+            content: postData?.content || '',
+            description: postData?.description || '',
+            post_created_at: postData?.created_at || post.created_at,
             images: imageUrls, 
             image_count: imageUrls.length,
-            user: userData || { full_name: 'Unknown User', email: 'No email' }
+            user: userData || { 
+              full_name: 'Mobile User', 
+              email: 'No email provided',
+              profile_image: null
+            }
           }
         }
-        return { ...post, images: [], image_count: 0, user: null }
+        return { ...post, images: [], image_count: 0, user: null, title: '', content: '', description: '' }
       }))
 
       setPosts(postsWithDetails || [])
@@ -418,11 +455,28 @@ export default function ContentModeration() {
                     )}
                   </div>
                   <div className="post-user-details">
-                    <div className="post-user-name">{post.user?.full_name || 'Unknown User'}</div>
-                    <div className="post-user-email">{post.user?.email || 'No email'}</div>
+                    <div className="post-user-name">{post.user?.full_name || 'Mobile User'}</div>
+                    <div className="post-user-email">{post.user?.email || 'No email provided'}</div>
                   </div>
                   {getStatusBadge(post.moderation_status)}
                 </div>
+
+                {/* Post Title */}
+                {post.title && (
+                  <div className="post-title-section">
+                    <h3 className="post-title">{post.title}</h3>
+                  </div>
+                )}
+
+                {/* Post Description/Content Preview */}
+                {(post.content || post.description) && (
+                  <div className="post-content-preview">
+                    <p className="post-text">
+                      {post.content || post.description}
+                      {(post.content?.length > 200 || post.description?.length > 200) && '...'}
+                    </p>
+                  </div>
+                )}
 
                 {/* Images Section */}
                 {post.images && post.images.length > 0 && (
@@ -450,23 +504,20 @@ export default function ContentModeration() {
                 {(!post.images || post.images.length === 0) && (
                   <div className="no-image-placeholder">
                     <i className="bi bi-image-slash"></i>
-                    <span>No images</span>
+                    <span>No images attached</span>
                   </div>
                 )}
 
-                {/* Post Content */}
-                <div className="post-content-preview">
-                  <p className="post-text">{post.content_text?.substring(0, 120)}...</p>
-                  <div className="post-meta-preview">
-                    <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>
-                    <span><i className="bi bi-clock"></i> {new Date(post.created_at).toLocaleTimeString()}</span>
-                  </div>
+                {/* Post Meta */}
+                <div className="post-meta-preview">
+                  <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at || post.created_at).toLocaleDateString()}</span>
+                  <span><i className="bi bi-clock"></i> {new Date(post.post_created_at || post.created_at).toLocaleTimeString()}</span>
                 </div>
 
                 {/* Action Buttons */}
                 <div className="post-actions">
                   <button className="btn-view" onClick={() => viewDetails(post)}>
-                    <i className="bi bi-eye"></i> View Full
+                    <i className="bi bi-eye"></i> View Full Details
                   </button>
                   {post.moderation_status === 'PENDING' && (
                     <>
@@ -533,8 +584,8 @@ export default function ContentModeration() {
                         )}
                       </div>
                       <div className="author-details">
-                        <div className="author-name">{postDetails?.users?.full_name || 'Unknown User'}</div>
-                        <div className="author-email">{postDetails?.users?.email || 'No email'}</div>
+                        <div className="author-name">{postDetails?.users?.full_name || 'Mobile User'}</div>
+                        <div className="author-email">{postDetails?.users?.email || 'No email provided'}</div>
                         {postDetails?.users?.phone && (
                           <div className="author-phone"><i className="bi bi-telephone"></i> {postDetails.users.phone}</div>
                         )}
@@ -545,40 +596,53 @@ export default function ContentModeration() {
                     </div>
                   </div>
 
-                  {/* Post Content */}
-                  <div className="info-section">
-                    <h4><i className="bi bi-file-text"></i> Post Content</h4>
-                    <div className="post-title">{postDetails?.title}</div>
-                    <div className="post-content">{postDetails?.content}</div>
-                    
-                    {/* All Images Gallery */}
-                    {postDetails?.images && postDetails.images.length > 0 && (
-                      <div className="images-section">
-                        <h5><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h5>
-                        <div className="images-grid">
-                          {postDetails.images.map((img, idx) => (
-                            <div key={idx} className="image-card" onClick={() => openFullImage(img)}>
-                              <img src={img} alt={`Image ${idx + 1}`} onError={(e) => {
-                                e.target.src = 'https://placehold.co/400x300/e2e8f0/64748b?text=Image+Not+Found'
-                              }} />
-                              <div className="image-overlay">
-                                <i className="bi bi-zoom-in"></i>
-                                <span>Click to enlarge</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                  {/* Post Title */}
+                  {postDetails?.title && (
+                    <div className="info-section">
+                      <h4><i className="bi bi-heading"></i> Title</h4>
+                      <div className="post-title-full">{postDetails.title}</div>
+                    </div>
+                  )}
 
-                    {/* Show message if no images */}
-                    {(!postDetails?.images || postDetails.images.length === 0) && (
+                  {/* Post Content / Description */}
+                  {(postDetails?.content || postDetails?.description) && (
+                    <div className="info-section">
+                      <h4><i className="bi bi-file-text"></i> Content</h4>
+                      <div className="post-content-full">
+                        {postDetails.content || postDetails.description}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* All Images Gallery */}
+                  {postDetails?.images && postDetails.images.length > 0 && (
+                    <div className="info-section">
+                      <h4><i className="bi bi-images"></i> Attached Images ({postDetails.images.length})</h4>
+                      <div className="images-grid">
+                        {postDetails.images.map((img, idx) => (
+                          <div key={idx} className="image-card" onClick={() => openFullImage(img)}>
+                            <img src={img} alt={`Image ${idx + 1}`} onError={(e) => {
+                              e.target.src = 'https://placehold.co/400x300/e2e8f0/64748b?text=Image+Not+Found'
+                            }} />
+                            <div className="image-overlay">
+                              <i className="bi bi-zoom-in"></i>
+                              <span>Click to enlarge</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Show message if no images */}
+                  {(!postDetails?.images || postDetails.images.length === 0) && (
+                    <div className="info-section">
                       <div className="no-images-message">
                         <i className="bi bi-image-slash"></i>
                         <span>No images attached to this post</span>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {/* Moderation Info */}
                   {selectedPost.moderation_reason && (
@@ -855,7 +919,7 @@ export default function ContentModeration() {
         /* Posts Grid */
         .posts-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
           gap: 24px;
         }
 
@@ -920,6 +984,35 @@ export default function ContentModeration() {
         .post-user-email {
           font-size: 11px;
           color: #9ca3af;
+        }
+
+        /* Post Title Section */
+        .post-title-section {
+          padding: 16px 20px 8px 20px;
+        }
+
+        .post-title {
+          font-size: 16px;
+          font-weight: 600;
+          color: #1f2937;
+          margin: 0;
+          line-height: 1.4;
+        }
+
+        /* Post Content Preview */
+        .post-content-preview {
+          padding: 8px 20px;
+        }
+
+        .post-text {
+          font-size: 14px;
+          color: #4b5563;
+          line-height: 1.5;
+          margin: 0;
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
         }
 
         /* Images Preview */
@@ -1020,24 +1113,15 @@ export default function ContentModeration() {
           font-size: 13px;
         }
 
-        /* Post Content Preview */
-        .post-content-preview {
-          padding: 16px 20px;
-          border-bottom: 1px solid #e9ecef;
-        }
-
-        .post-text {
-          font-size: 14px;
-          color: #4b5563;
-          line-height: 1.5;
-          margin-bottom: 12px;
-        }
-
+        /* Post Meta */
         .post-meta-preview {
+          padding: 12px 20px;
           display: flex;
           gap: 16px;
           font-size: 11px;
           color: #9ca3af;
+          border-top: 1px solid #e9ecef;
+          border-bottom: 1px solid #e9ecef;
         }
 
         .post-meta-preview i {
@@ -1057,7 +1141,7 @@ export default function ContentModeration() {
           align-items: center;
           justify-content: center;
           gap: 6px;
-          padding: 8px 12px;
+          padding: 10px 12px;
           border: none;
           border-radius: 10px;
           font-size: 13px;
@@ -1212,12 +1296,26 @@ export default function ContentModeration() {
         .author-email i, .author-phone i, .author-location i { margin-right: 4px; font-size: 11px; }
 
         /* Post Content */
-        .post-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
-        .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; line-height: 1.6; margin-bottom: 16px; }
+        .post-title-full {
+          font-size: 18px;
+          font-weight: 600;
+          padding: 12px;
+          background: #f8f9fa;
+          border-radius: 12px;
+          margin-bottom: 0;
+        }
+
+        .post-content-full {
+          background: #f8f9fa;
+          padding: 16px;
+          border-radius: 12px;
+          line-height: 1.6;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+        }
 
         /* Images Section */
         .images-section { margin-top: 20px; }
-        .images-section h5 { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
         .images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 
         .image-card {
