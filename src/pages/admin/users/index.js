@@ -318,28 +318,15 @@ export default function UserManagement() {
           {isSuperAdmin && (
             <button className="create-btn" onClick={() => router.push('/admin/users/create')}>
               <i className="bi bi-person-plus-fill"></i>
-              <span>+ Add Admin</span>
+              <span>Add Admin</span>
             </button>
           )}
-        </div>
-        <div className="page-header">
-          <div className="header-content">
-            <div className="header-icon">
-              <i className="bi bi-people-fill"></i>
-              <span className="header-badge">{stats.total}</span>
-            </div>
-            <div>
-              <h1 className="header-title">Administrators</h1>
-              <p className="header-subtitle">Manage system administrators and their permissions</p>
-            </div>
-          </div>
-          {isSuperAdmin && (
-            <button className="create-btn" onClick={() => router.push('/admin/mobile-users')}>
+          <button className="create-btn" onClick={() => router.push('/admin/mobile-users')}>
               <i className="bi bi-person-plus-fill"></i>
               <span>Manage Mobile Users</span>
             </button>
-          )}
         </div>
+        
 
         {/* Role Info Banner */}
         <div className="role-info-banner">
