@@ -51,159 +51,196 @@ export default function ContentModeration() {
   }
 
   const fetchPosts = async () => {
-    try {
-      setLoading(true)
-      setError(null)
+  try {
+    setLoading(true)
+    setError(null)
+    
+    let query = supabase
+      .from('content_moderation')
+      .select(`
+        *,
+        reviewed_by_admin:admin_users!reviewed_by (
+          admin_id,
+          full_name,
+          email
+        )
+      `)
+      .order('created_at', { ascending: false })
+
+    if (filter !== 'ALL') {
+      query = query.eq('moderation_status', filter)
+    }
+
+    const { data, error } = await query
+
+    if (error) throw error
+
+    console.log('Content moderation records:', data?.length || 0)
+
+    const postsWithDetails = await Promise.all((data || []).map(async (post) => {
+      let postData = null
+      let userData = null
+      let images = []
+      let postExists = true
       
-      let query = supabase
-        .from('content_moderation')
-        .select(`
-          *,
-          reviewed_by_admin:admin_users!reviewed_by (
-            admin_id,
-            full_name,
-            email
-          )
-        `)
-        .order('created_at', { ascending: false })
-
-      if (filter !== 'ALL') {
-        query = query.eq('moderation_status', filter)
-      }
-
-      const { data, error } = await query
-
-      if (error) throw error
-
-      const postsWithDetails = await Promise.all((data || []).map(async (post) => {
-        let postData = null
-        let userData = null
-        let images = []
-        let postExists = true
+      console.log(`Processing post ${post.content_id}, user_id from moderation:`, post.user_id)
+      
+      if (post.content_type === 'POST' && post.content_id) {
+        // Fetch post content from posts table
+        const { data: postDataResult, error: postError } = await supabase
+          .from('posts')
+          .select('*')
+          .eq('post_id', post.content_id)
+          .maybeSingle()
         
-        if (post.content_type === 'POST' && post.content_id) {
-          const { data: postDataResult, error: postError } = await supabase
-            .from('posts')
-            .select('*')
-            .eq('post_id', post.content_id)
-            .maybeSingle()
+        if (postError) {
+          console.error(`Error fetching post ${post.content_id}:`, postError)
+          postExists = false
+        }
+        
+        if (postDataResult) {
+          postData = postDataResult
+          console.log(`Found post: ${postDataResult.title}, user_id from post:`, postDataResult.user_id)
           
-          if (postError) {
-            console.error(`Error fetching post ${post.content_id}:`, postError)
-            postExists = false
+          // Fetch images from post_images table
+          const { data: imagesData, error: imagesError } = await supabase
+            .from('post_images')
+            .select('image_url, image_order')
+            .eq('post_id', post.content_id)
+            .order('image_order', { ascending: true })
+          
+          if (!imagesError && imagesData && imagesData.length > 0) {
+            images = imagesData.map(img => getImageUrl(img.image_url))
+          } else if (postDataResult.image_url) {
+            images = [getImageUrl(postDataResult.image_url)]
           }
           
-          if (postDataResult) {
-            postData = postDataResult
+          // Try different methods to get user data
+          const userId = postDataResult.user_id || post.user_id
+          
+          if (userId) {
+            console.log(`Looking up user with ID: ${userId}`)
             
-            const { data: imagesData, error: imagesError } = await supabase
-              .from('post_images')
-              .select('image_url, image_order')
-              .eq('post_id', post.content_id)
-              .order('image_order', { ascending: true })
+            // Method 1: Try to get from users table using the ID directly
+            const { data: userResult, error: userError } = await supabase
+              .from('users')
+              .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+              .eq('user_id', userId)
+              .maybeSingle()
             
-            if (!imagesError && imagesData && imagesData.length > 0) {
-              images = imagesData.map(img => getImageUrl(img.image_url))
-            } else if (postDataResult.image_url) {
-              images = [getImageUrl(postDataResult.image_url)]
+            if (userError) {
+              console.error(`Error fetching user ${userId}:`, userError)
             }
             
-            const userId = postDataResult.user_id || post.user_id
-            
-            if (userId) {
-              const { data: userResult, error: userError } = await supabase
-                .from('users')
-                .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
-                .eq('user_id', userId)
+            if (userResult) {
+              console.log(`User found in users table:`, userResult.full_name)
+              userData = userResult
+            } else {
+              console.log(`User ${userId} not found in users table, trying other methods...`)
+              
+              // Method 2: Try to get from admin_users table
+              const { data: adminResult, error: adminError } = await supabase
+                .from('admin_users')
+                .select('admin_id, full_name, email')
+                .eq('admin_id', userId)
                 .maybeSingle()
               
-              if (userError) {
-                console.error(`Error fetching user ${userId}:`, userError)
+              if (adminError) {
+                console.error(`Error fetching admin user:`, adminError)
               }
               
-              if (userResult) {
-                userData = userResult
+              if (adminResult) {
+                console.log(`User found in admin_users table:`, adminResult.full_name)
+                userData = {
+                  user_id: adminResult.admin_id,
+                  full_name: adminResult.full_name,
+                  email: adminResult.email,
+                  profile_image: null,
+                  phone: null,
+                  location: null,
+                  district: null,
+                  created_at: null
+                }
               } else {
-                const { data: adminResult, error: adminError } = await supabase
-                  .from('admin_users')
-                  .select('admin_id, full_name, email')
-                  .eq('admin_id', userId)
-                  .maybeSingle()
-                
-                if (adminResult) {
-                  userData = {
-                    user_id: adminResult.admin_id,
-                    full_name: adminResult.full_name,
-                    email: adminResult.email,
-                    profile_image: null,
-                    phone: null,
-                    location: null,
-                    district: null
-                  }
-                } else {
-                  const { data: authUser } = await supabase
-                    .from('posts')
-                    .select('users!posts_user_id_fkey (user_id, full_name, email)')
-                    .eq('post_id', post.content_id)
+                // Method 3: Try to search users by email if we have it in posts
+                if (postDataResult.user_email) {
+                  console.log(`Trying to find user by email: ${postDataResult.user_email}`)
+                  const { data: emailUser } = await supabase
+                    .from('users')
+                    .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
+                    .eq('email', postDataResult.user_email)
                     .maybeSingle()
                   
-                  if (authUser?.users) {
-                    userData = {
-                      user_id: authUser.users.user_id,
-                      full_name: authUser.users.full_name,
-                      email: authUser.users.email,
-                      profile_image: null,
-                      phone: null,
-                      location: null,
-                      district: null
-                    }
+                  if (emailUser) {
+                    console.log(`User found by email:`, emailUser.full_name)
+                    userData = emailUser
+                  }
+                }
+                
+                // Method 4: Create a fallback user with what we know
+                if (!userData) {
+                  console.log(`Creating fallback user data for ID: ${userId}`)
+                  userData = {
+                    user_id: userId,
+                    full_name: postDataResult.author_name || `User ${userId.slice(0, 8)}`,
+                    email: postDataResult.user_email || 'Email not available',
+                    profile_image: null,
+                    phone: null,
+                    location: postDataResult.location || null,
+                    district: null,
+                    created_at: postDataResult.created_at || new Date().toISOString()
                   }
                 }
               }
             }
-            
-            if (!userData && userId) {
-              userData = {
-                user_id: userId,
-                full_name: `User ${userId.slice(0, 8)}`,
-                email: 'Email not available',
-                profile_image: null,
-                phone: null,
-                location: null,
-                district: null
-              }
-            }
           } else {
-            postExists = false
+            console.log(`No user_id found for post ${post.content_id}`)
+            // Create a default user
+            userData = {
+              user_id: null,
+              full_name: 'Guest User',
+              email: 'No email provided',
+              profile_image: null,
+              phone: null,
+              location: null,
+              district: null,
+              created_at: new Date().toISOString()
+            }
           }
+        } else {
+          postExists = false
+          console.log(`Post ${post.content_id} not found in posts table`)
         }
-        
-        return { 
-          ...post, 
-          title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
-          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
-          images: images,
-          image_count: images.length,
-          cover_image: images[0] || null,
-          post_created_at: postData?.created_at || post.created_at,
-          user: userData,
-          author_name: userData?.full_name || 'Mobile User',
-          author_email: userData?.email || 'Email not available',
-          author_phone: userData?.phone || null,
-          author_location: userData?.location || userData?.district || null,
-          user_id: userData?.user_id || post.user_id,
-          post_exists: postExists
-        }
-      }))
+      }
+      
+      return { 
+        ...post, 
+        title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
+        content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
+        images: images,
+        image_count: images.length,
+        cover_image: images[0] || null,
+        post_created_at: postData?.created_at || post.created_at,
+        user: userData,
+        author_name: userData?.full_name || 'Mobile User',
+        author_email: userData?.email || 'Email not available',
+        author_phone: userData?.phone || null,
+        author_location: userData?.location || userData?.district || null,
+        user_id: userData?.user_id || post.user_id,
+        post_exists: postExists,
+        user_created_at: userData?.created_at
+      }
+    }))
 
-      setPosts(postsWithDetails || [])
-    } catch (err) {
-      console.error('Error fetching posts:', err)
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
+    console.log('Final posts with user data:', postsWithDetails.length)
+    setPosts(postsWithDetails || [])
+  } catch (err) {
+    console.error('Error fetching posts:', err)
+    setError(err.message)
+  } finally {
+    setLoading(false)
   }
+}
 
   const fetchStats = async () => {
     try {
@@ -512,9 +549,15 @@ export default function ContentModeration() {
                   </div>
                   <div className="user-info">
                     <h4>{post.author_name}</h4>
-                    <p>{post.author_email}</p>
+                    <p><i className="bi bi-envelope"></i> {post.author_email}</p>
+                    {post.author_phone && (
+                      <p><i className="bi bi-telephone"></i> {post.author_phone}</p>
+                    )}
                     {post.author_location && (
-                      <span className="user-location"><i className="bi bi-geo-alt"></i> {post.author_location}</span>
+                      <p><i className="bi bi-geo-alt"></i> {post.author_location}</p>
+                    )}
+                    {post.user_created_at && (
+                      <p><i className="bi bi-calendar-check"></i> Joined: {new Date(post.user_created_at).toLocaleDateString()}</p>
                     )}
                   </div>
                   {getStatusBadge(post.moderation_status)}
@@ -550,9 +593,12 @@ export default function ContentModeration() {
                   <h3>{post.title}</h3>
                   <p>{post.content?.substring(0, 100)}...</p>
                   <div className="post-meta">
-                    <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at).toLocaleDateString()}</span>
-                    <span><i className="bi bi-clock"></i> {new Date(post.post_created_at).toLocaleTimeString()}</span>
-                  </div>
+                  <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at).toLocaleDateString()}</span>
+                  <span><i className="bi bi-clock"></i> {new Date(post.post_created_at).toLocaleTimeString()}</span>
+                  {post.user_created_at && (
+                    <span><i className="bi bi-person-plus"></i> Joined: {new Date(post.user_created_at).toLocaleDateString()}</span>
+                  )}
+                </div>
                 </div>
 
                 {/* Actions */}
