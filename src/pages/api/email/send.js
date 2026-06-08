@@ -76,6 +76,141 @@ export default async function handler(req, res) {
 
     // Email templates for different notification types
     const templates = {
+      // Admin Welcome Email Template
+      admin_welcome: {
+        subject: `Welcome to ${data.siteName || smtpSettings.site_name || 'Smart Farmer'} - Your Admin Account Details`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background: #f5f5f5;
+                margin: 0;
+                padding: 20px;
+              }
+              .container {
+                max-width: 600px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 16px;
+                overflow: hidden;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+              }
+              .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 40px 30px;
+                text-align: center;
+              }
+              .header h1 {
+                margin: 0;
+                font-size: 28px;
+              }
+              .content {
+                padding: 40px 30px;
+              }
+              .credentials {
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 12px;
+                margin: 20px 0;
+              }
+              .credential-item {
+                display: flex;
+                margin-bottom: 12px;
+                padding-bottom: 12px;
+                border-bottom: 1px solid #e9ecef;
+              }
+              .credential-label {
+                width: 100px;
+                font-weight: 600;
+                color: #374151;
+              }
+              .credential-value {
+                flex: 1;
+                font-family: monospace;
+                font-size: 14px;
+                color: #4f46e5;
+              }
+              .warning {
+                background: #fef3c7;
+                padding: 15px;
+                border-radius: 8px;
+                margin: 20px 0;
+                font-size: 13px;
+                color: #92400e;
+              }
+              .button {
+                display: inline-block;
+                padding: 12px 30px;
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                color: white;
+                text-decoration: none;
+                border-radius: 8px;
+                margin-top: 20px;
+              }
+              .footer {
+                text-align: center;
+                padding: 20px;
+                font-size: 12px;
+                color: #666;
+                border-top: 1px solid #e9ecef;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>Welcome to ${data.siteName || smtpSettings.site_name || 'Smart Farmer'}!</h1>
+              </div>
+              <div class="content">
+                <h2>Hello ${data.userName},</h2>
+                <p>Your administrator account has been created successfully. Below are your login credentials:</p>
+                
+                <div class="credentials">
+                  <div class="credential-item">
+                    <div class="credential-label">Email:</div>
+                    <div class="credential-value">${data.email}</div>
+                  </div>
+                  <div class="credential-item">
+                    <div class="credential-label">Password:</div>
+                    <div class="credential-value">${data.password}</div>
+                  </div>
+                  <div class="credential-item">
+                    <div class="credential-label">Role:</div>
+                    <div class="credential-value">${data.role || 'Administrator'}</div>
+                  </div>
+                </div>
+
+                <div class="warning">
+                  <strong>⚠️ Important Security Notice:</strong><br>
+                  Please change your password after your first login for security purposes. Do not share your credentials with anyone.
+                </div>
+
+                <div style="text-align: center;">
+                  <a href="${data.loginUrl}" class="button">Login to Dashboard</a>
+                </div>
+
+                <p style="margin-top: 30px; font-size: 14px;">
+                  If you have any questions or need assistance, please contact the system administrator.
+                </p>
+              </div>
+              <div class="footer">
+                <p>This is an automated message from ${data.siteName || smtpSettings.site_name || 'Smart Farmer'}. Please do not reply.</p>
+                <p>&copy; ${new Date().getFullYear()} ${data.siteName || smtpSettings.site_name || 'Smart Farmer'}. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+      },
+      
       // Advertisement Templates
       ad_approved: {
         subject: `✅ Campaign Approved - ${data.title || 'Smart Farmer'}`,
@@ -111,7 +246,7 @@ export default async function handler(req, res) {
                   End Date: ${new Date(data.endDate).toLocaleString()}
                 </div>
                 <div style="text-align: center;">
-                  <a href="https://yourdomain.com/dashboard" class="button">View Campaign</a>
+                  <a href="${data.loginUrl || 'https://yourdomain.com/dashboard'}" class="button">View Campaign</a>
                 </div>
               </div>
               <div class="footer">
@@ -153,7 +288,7 @@ export default async function handler(req, res) {
                   ${data.reason}
                 </div>
                 <div style="text-align: center;">
-                  <a href="https://yourdomain.com/dashboard" class="button">Edit Campaign</a>
+                  <a href="${data.loginUrl || 'https://yourdomain.com/dashboard'}" class="button">Edit Campaign</a>
                 </div>
               </div>
               <div class="footer">
@@ -200,7 +335,7 @@ export default async function handler(req, res) {
                   Approved At: ${new Date(data.approvedAt).toLocaleString()}
                 </div>
                 <div style="text-align: center;">
-                  <a href="https://yourdomain.com/barter" class="button">View My Listing</a>
+                  <a href="${data.loginUrl || 'https://yourdomain.com/barter'}" class="button">View My Listing</a>
                 </div>
               </div>
               <div class="footer">
@@ -243,7 +378,7 @@ export default async function handler(req, res) {
                 </div>
                 <p>Please review the feedback and update your listing accordingly.</p>
                 <div style="text-align: center;">
-                  <a href="https://yourdomain.com/barter/edit/${data.listingId}" class="button">Edit Listing</a>
+                  <a href="${data.loginUrl || 'https://yourdomain.com/barter/edit/${data.listingId}'}" class="button">Edit Listing</a>
                 </div>
               </div>
               <div class="footer">
@@ -255,7 +390,7 @@ export default async function handler(req, res) {
         `,
       },
       
-      // Welcome Email Template
+      // Welcome Email Template for Mobile Users
       welcome: {
         subject: `Welcome to ${smtpSettings.site_name || 'Smart Farmer'}!`,
         html: `

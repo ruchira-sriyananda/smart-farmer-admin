@@ -13,6 +13,7 @@ export default function CreateUser() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [passwordStrength, setPasswordStrength] = useState(0)
   const [rateLimitError, setRateLimitError] = useState(false)
+  const [emailSettings, setEmailSettings] = useState({ enable_notifications: false })
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -28,6 +29,7 @@ export default function CreateUser() {
   // Fetch roles
   useEffect(() => {
     fetchRoles()
+    fetchEmailSettings()
   }, [])
 
   const fetchRoles = async () => {
@@ -54,6 +56,70 @@ export default function CreateUser() {
       setRoleError(err.message)
     } finally {
       setFetchingRoles(false)
+    }
+  }
+
+  const fetchEmailSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('setting_key, setting_value')
+        .in('setting_key', ['enable_notifications', 'smtp_host', 'smtp_user', 'smtp_password', 'site_name'])
+
+      if (!error && data) {
+        const settings = {}
+        data.forEach(setting => {
+          settings[setting.setting_key] = setting.setting_value
+        })
+        setEmailSettings({
+          enable_notifications: settings.enable_notifications === 'true',
+          smtp_host: settings.smtp_host || '',
+          smtp_user: settings.smtp_user || '',
+          smtp_password: settings.smtp_password || '',
+          site_name: settings.site_name || 'Smart Farmer'
+        })
+      }
+    } catch (err) {
+      console.error('Error fetching email settings:', err)
+    }
+  }
+
+  // Send welcome email to new admin
+  const sendWelcomeEmail = async (email, fullName, password, roleName, siteName) => {
+    if (!emailSettings.enable_notifications) {
+      console.log('Email notifications are disabled')
+      return false
+    }
+
+    try {
+      const response = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'admin_welcome',
+          to: email,
+          data: {
+            userName: fullName,
+            email: email,
+            password: password,
+            role: roleName,
+            siteName: siteName || emailSettings.site_name,
+            loginUrl: `${window.location.origin}/admin/login`
+          }
+        })
+      })
+
+      const result = await response.json()
+      if (result.success) {
+        console.log('Welcome email sent successfully to', email)
+        return true
+      } else {
+        console.error('Failed to send welcome email:', result.error)
+        return false
+      }
+    } catch (error) {
+      console.error('Error sending welcome email:', error)
+      return false
     }
   }
 
@@ -153,6 +219,12 @@ export default function CreateUser() {
     return Object.keys(newErrors).length === 0
   }
 
+  // Get role name by ID
+  const getRoleName = (roleId) => {
+    const role = roles.find(r => r.role_id === roleId)
+    return role ? role.role_name : 'No Role Assigned'
+  }
+
   // Create user with proper error handling
   const createUser = async () => {
     try {
@@ -214,6 +286,9 @@ export default function CreateUser() {
       // Create auth user
       const authData = await createUser()
 
+      // Get role name for email
+      const roleName = getRoleName(formData.role_id)
+
       // Prepare admin data
       const adminData = {
         admin_id: authData.user.id,
@@ -231,12 +306,6 @@ export default function CreateUser() {
         adminData.role_id = formData.role_id
       }
 
-      console.log('Attempting to insert admin user:', { 
-        admin_id: adminData.admin_id, 
-        email: adminData.email,
-        role_id: adminData.role_id 
-      })
-
       // Insert into admin_users
       const { error: adminError } = await supabase
         .from('admin_users')
@@ -246,11 +315,25 @@ export default function CreateUser() {
       if (adminError) {
         console.error('Admin insert error:', adminError)
         
-        // Handle RLS error specifically
         if (adminError.message.includes('row-level security')) {
           throw new Error('Permission denied: Unable to create admin user due to security policies. Please contact your system administrator.')
         }
         throw adminError
+      }
+
+      // Send welcome email with credentials
+      const emailSent = await sendWelcomeEmail(
+        formData.email,
+        formData.full_name,
+        formData.password,
+        roleName,
+        emailSettings.site_name
+      )
+
+      if (emailSent) {
+        alert('✅ User created successfully! Welcome email has been sent to the new administrator.')
+      } else {
+        alert('⚠️ User created successfully, but welcome email could not be sent. Please check email settings.')
       }
 
       // Success - redirect
@@ -259,7 +342,6 @@ export default function CreateUser() {
     } catch (err) {
       console.error('Error:', err)
       
-      // User-friendly error messages
       if (err.message.includes('rate limit')) {
         setErrors({ submit: 'Too many attempts. Please wait a few minutes before trying again.' })
       } else if (err.message.includes('already registered')) {
@@ -335,7 +417,15 @@ export default function CreateUser() {
   return (
     <AdminLayout title="Create New Administrator">
       <div className="create-user-container">
-        {/* Rate Limit Warning */}
+        {/* Email Notification Status */}
+        <div className={`email-status-banner ${emailSettings.enable_notifications ? 'enabled' : 'disabled'}`}>
+          <i className={`bi ${emailSettings.enable_notifications ? 'bi-envelope-check-fill' : 'bi-envelope-slash-fill'}`}></i>
+          <div>
+            <strong>Email Notifications {emailSettings.enable_notifications ? 'Enabled' : 'Disabled'}</strong>
+            <p>{emailSettings.enable_notifications ? 'New admin will receive welcome email with login credentials' : 'Enable email notifications in settings to send welcome emails'}</p>
+          </div>
+        </div>
+
         {rateLimitError && (
           <div className="alert-rate-limit">
             <i className="bi bi-hourglass-split"></i>
@@ -363,7 +453,6 @@ export default function CreateUser() {
         </div>
 
         <div className="form-card">
-          {/* RLS Error Banner */}
           {errors.submit && errors.submit.includes('row-level security') && (
             <div className="alert-rls-error">
               <i className="bi bi-shield-exclamation"></i>
@@ -409,7 +498,6 @@ export default function CreateUser() {
 
           <form onSubmit={handleSubmit}>
             <div className="form-grid">
-              {/* Full Name Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-person"></i>
@@ -435,7 +523,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Email Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-envelope"></i>
@@ -461,7 +548,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Password Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-lock"></i>
@@ -504,7 +590,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Confirm Password Field */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-shield-lock"></i>
@@ -539,7 +624,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Role Selection */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-badge"></i>
@@ -562,7 +646,6 @@ export default function CreateUser() {
                 </div>
               </div>
 
-              {/* Active Status */}
               <div className="form-group">
                 <label className="form-label">
                   <i className="bi bi-check-circle"></i>
@@ -585,7 +668,6 @@ export default function CreateUser() {
               </div>
             </div>
 
-            {/* Super Admin Option */}
             <div className="super-admin-card">
               <div className="super-admin-checkbox">
                 <label className="checkbox-wrapper">
@@ -608,7 +690,6 @@ export default function CreateUser() {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="action-buttons">
               <button type="button" className="btn-cancel" onClick={() => router.push('/admin/users')}>
                 <i className="bi bi-x-lg"></i>
@@ -636,6 +717,47 @@ export default function CreateUser() {
         .create-user-container {
           max-width: 900px;
           margin: 0 auto;
+        }
+
+        .email-status-banner {
+          padding: 16px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
+
+        .email-status-banner.enabled {
+          background: #d1fae5;
+          border-left: 4px solid #10b981;
+        }
+
+        .email-status-banner.disabled {
+          background: #fef3c7;
+          border-left: 4px solid #f59e0b;
+        }
+
+        .email-status-banner i {
+          font-size: 24px;
+        }
+
+        .email-status-banner.enabled i {
+          color: #10b981;
+        }
+
+        .email-status-banner.disabled i {
+          color: #f59e0b;
+        }
+
+        .email-status-banner strong {
+          display: block;
+          margin-bottom: 4px;
+        }
+
+        .email-status-banner p {
+          margin: 0;
+          font-size: 12px;
         }
 
         .alert-rate-limit {
