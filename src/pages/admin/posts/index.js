@@ -17,6 +17,11 @@ export default function ContentModeration() {
   const [actionLoading, setActionLoading] = useState(false)
   const [postDetails, setPostDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
+  const [showFullImage, setShowFullImage] = useState(false)
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [imageLoading, setImageLoading] = useState({})
+  const [imageErrors, setImageErrors] = useState({})
+  const [postImages, setPostImages] = useState({})
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -40,6 +45,14 @@ export default function ContentModeration() {
     fetchPosts()
     fetchStats()
   }, [filter])
+
+  // Helper function to get Supabase storage URL
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return null
+    if (imagePath.startsWith('http')) return imagePath
+    const { data } = supabase.storage.from('post-images').getPublicUrl(imagePath)
+    return data?.publicUrl || imagePath
+  }
 
   const fetchPosts = async () => {
     try {
@@ -66,7 +79,29 @@ export default function ContentModeration() {
 
       if (error) throw error
 
-      setPosts(data || [])
+      // Fetch images for each post that is a POST type
+      const postsWithImages = []
+      for (const post of (data || [])) {
+        if (post.content_type === 'POST') {
+          const { data: images, error: imagesError } = await supabase
+            .from('post_images')
+            .select('image_id, image_url, image_order')
+            .eq('post_id', post.content_id)
+            .order('image_order', { ascending: true })
+          
+          if (!imagesError && images && images.length > 0) {
+            postsWithImages.push({ ...post, images })
+          } else if (post.image_url) {
+            postsWithImages.push({ ...post, images: [{ image_url: post.image_url }] })
+          } else {
+            postsWithImages.push({ ...post, images: [] })
+          }
+        } else {
+          postsWithImages.push({ ...post, images: [] })
+        }
+      }
+
+      setPosts(postsWithImages || [])
     } catch (err) {
       console.error('Error fetching posts:', err)
       setError(err.message)
@@ -112,12 +147,33 @@ export default function ContentModeration() {
             ),
             post_categories!posts_category_id_fkey (
               category_name
+            ),
+            post_images (
+              image_id,
+              image_url,
+              image_order
             )
           `)
           .eq('post_id', contentId)
           .single()
         
-        if (!error && data) details = data
+        if (!error && data) {
+          // Fetch images if they exist in separate table
+          const { data: images, error: imagesError } = await supabase
+            .from('post_images')
+            .select('image_id, image_url, image_order')
+            .eq('post_id', contentId)
+            .order('image_order', { ascending: true })
+          
+          if (!imagesError && images && images.length > 0) {
+            data.images = images
+          } else if (data.image_url) {
+            data.images = [{ image_url: data.image_url, image_order: 0 }]
+          } else {
+            data.images = []
+          }
+          details = data
+        }
       } else if (contentType === 'COMMENT') {
         const { data, error } = await supabase
           .from('comments')
@@ -176,6 +232,7 @@ export default function ContentModeration() {
       setRejectReason('')
       setCustomReason('')
       setSelectedPost(null)
+      if (showDetailsModal) setShowDetailsModal(false)
     } else {
       alert(`Error updating status: ${error.message}`)
     }
@@ -185,11 +242,6 @@ export default function ContentModeration() {
     if (confirm(`Are you sure you want to approve this content?`)) {
       await updateStatus(post.moderation_id, 'APPROVED')
     }
-  }
-
-  const handleQuickReject = (reason) => {
-    setRejectReason(reason)
-    setCustomReason('')
   }
 
   const handleReject = async () => {
@@ -205,6 +257,20 @@ export default function ContentModeration() {
     setSelectedPost(post)
     await fetchPostDetails(post.content_id, post.content_type)
     setShowDetailsModal(true)
+  }
+
+  const openFullImage = (imageUrl) => {
+    setSelectedImage(imageUrl)
+    setShowFullImage(true)
+  }
+
+  const handleImageLoad = (imageId) => {
+    setImageLoading(prev => ({ ...prev, [imageId]: false }))
+  }
+
+  const handleImageError = (imageId) => {
+    setImageLoading(prev => ({ ...prev, [imageId]: false }))
+    setImageErrors(prev => ({ ...prev, [imageId]: true }))
   }
 
   const getStatusBadge = (status) => {
@@ -352,6 +418,22 @@ export default function ContentModeration() {
                   {getStatusBadge(post.moderation_status)}
                 </div>
                 
+                {/* Image Preview in Card */}
+                {post.images && post.images.length > 0 && (
+                  <div className="content-image-preview">
+                    <img 
+                      src={getImageUrl(post.images[0].image_url)} 
+                      alt="Preview" 
+                      className="preview-image"
+                    />
+                    {post.images.length > 1 && (
+                      <div className="image-count-badge">
+                        +{post.images.length}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 <div className="content-card-body">
                   <div className="content-id">
                     <i className="bi bi-hash"></i>
@@ -390,7 +472,7 @@ export default function ContentModeration() {
                       <i className="bi bi-person-check"></i>
                       Reviewed by {post.reviewed_by_admin?.full_name || 'System'}
                       <br />
-                      <small>{post.reviewed_at ? new Date(post.reviewed_at).toLocaleString() : 'Unknown'}</small>
+                      <small>{post.reviewed_at ? new Date(post.reviewed_at).toLocaleString() : 'Auto-approved'}</small>
                     </div>
                   )}
                 </div>
@@ -406,7 +488,7 @@ export default function ContentModeration() {
         </div>
       </div>
 
-      {/* Details Modal with Full Content */}
+      {/* Details Modal with Full Content and Images */}
       {showDetailsModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -453,7 +535,7 @@ export default function ContentModeration() {
                       <div className="author-info">
                         <div className="author-avatar">
                           {postDetails.users?.profile_image ? (
-                            <img src={postDetails.users.profile_image} alt={postDetails.users.full_name} />
+                            <img src={getImageUrl(postDetails.users.profile_image)} alt={postDetails.users.full_name} />
                           ) : (
                             <i className="bi bi-person-circle"></i>
                           )}
@@ -469,17 +551,47 @@ export default function ContentModeration() {
                     </div>
                   )}
 
-                  {/* Post Content */}
+                  {/* Post Content with Images */}
                   {selectedPost.content_type === 'POST' && postDetails && (
                     <div className="details-section">
                       <h4><i className="bi bi-file-text"></i> Post Content</h4>
                       <div className="post-title">{postDetails.title}</div>
                       <div className="post-content">{postDetails.content}</div>
-                      {postDetails.image_url && (
-                        <div className="post-image">
-                          <img src={postDetails.image_url} alt={postDetails.title} />
+                      
+                      {/* Display Images from Supabase */}
+                      {postDetails.images && postDetails.images.length > 0 && (
+                        <div className="post-images">
+                          <label className="images-label">
+                            <i className="bi bi-images"></i> 
+                            Attached Images ({postDetails.images.length})
+                          </label>
+                          <div className="images-grid">
+                            {postDetails.images.map((img, idx) => {
+                              const imageUrl = getImageUrl(img.image_url)
+                              const imageId = `${selectedPost.content_id}_img_${idx}`
+                              return (
+                                <div 
+                                  key={idx} 
+                                  className="image-item"
+                                  onClick={() => openFullImage(imageUrl)}
+                                >
+                                  <img 
+                                    src={imageUrl} 
+                                    alt={`Post image ${idx + 1}`}
+                                    onLoad={() => handleImageLoad(imageId)}
+                                    onError={() => handleImageError(imageId)}
+                                  />
+                                  <div className="image-overlay">
+                                    <i className="bi bi-zoom-in"></i>
+                                    <span>Click to enlarge</span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
                       )}
+
                       {postDetails.post_categories?.category_name && (
                         <div className="post-category">
                           <i className="bi bi-tag"></i> Category: {postDetails.post_categories.category_name}
@@ -539,6 +651,24 @@ export default function ContentModeration() {
         </div>
       )}
 
+      {/* Full Image Modal */}
+      {showFullImage && selectedImage && (
+        <div className="modal-overlay" onClick={() => setShowFullImage(false)}>
+          <div className="full-image-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="close-image-btn" onClick={() => setShowFullImage(false)}>
+              <i className="bi bi-x-lg"></i>
+            </button>
+            <img src={selectedImage} alt="Full size" />
+            <button 
+              className="download-image-btn" 
+              onClick={() => window.open(selectedImage, '_blank')}
+            >
+              <i className="bi bi-box-arrow-up-right"></i> Open in new tab
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Quick Reject Modal with Preset Reasons */}
       {showRejectModal && selectedPost && (
         <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
@@ -557,7 +687,7 @@ export default function ContentModeration() {
                   <button
                     key={reason.id}
                     className={`quick-reason-btn ${rejectReason === reason.reason ? 'selected' : ''}`}
-                    onClick={() => handleQuickReject(reason.reason)}
+                    onClick={() => setRejectReason(reason.reason)}
                     style={{ '--reason-color': reason.color }}
                   >
                     <i className={`bi ${reason.icon}`}></i>
@@ -646,6 +776,12 @@ export default function ContentModeration() {
         .content-card { background: white; border-radius: 20px; overflow: hidden; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
         .content-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
         .content-card-header { padding: 16px 20px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Image Preview in Card */
+        .content-image-preview { position: relative; height: 160px; overflow: hidden; background: #f8f9fa; }
+        .preview-image { width: 100%; height: 100%; object-fit: cover; }
+        .image-count-badge { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+        
         .content-type { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #6c757d; }
         .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
         .status-badge.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
@@ -668,8 +804,29 @@ export default function ContentModeration() {
         .empty-state { text-align: center; padding: 80px 20px; background: white; border-radius: 24px; }
         .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; display: block; }
         
+        /* Images Grid */
+        .post-images { margin-top: 20px; }
+        .images-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 12px; }
+        .images-label i { color: #667eea; }
+        .images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+        .image-item { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; cursor: pointer; border: 2px solid #e9ecef; transition: all 0.3s ease; background: #f8f9fa; }
+        .image-item:hover { transform: scale(1.02); border-color: #667eea; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .image-item img { width: 100%; height: 100%; object-fit: cover; }
+        .image-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; opacity: 0; transition: opacity 0.3s ease; color: white; }
+        .image-item:hover .image-overlay { opacity: 1; }
+        .image-overlay i { font-size: 24px; }
+        .image-overlay span { font-size: 11px; }
+        
+        /* Full Image Modal */
+        .full-image-modal { position: relative; max-width: 90vw; max-height: 90vh; background: #1a1f2e; border-radius: 12px; overflow: hidden; animation: slideUp 0.3s ease; }
+        .full-image-modal img { max-width: 100%; max-height: 85vh; display: block; margin: 0 auto; }
+        .close-image-btn { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; background: rgba(0,0,0,0.7); border: none; border-radius: 50%; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+        .close-image-btn:hover { background: rgba(0,0,0,0.9); transform: rotate(90deg); }
+        .download-image-btn { position: absolute; bottom: 16px; right: 16px; padding: 8px 16px; background: rgba(0,0,0,0.7); border: none; border-radius: 8px; color: white; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 13px; transition: all 0.3s ease; }
+        .download-image-btn:hover { background: rgba(0,0,0,0.9); }
+        
         /* Modal */
-        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
         .modal-container { background: white; border-radius: 24px; width: 90%; max-width: 550px; animation: slideUp 0.3s ease; overflow: hidden; max-height: 90vh; overflow-y: auto; }
         .modal-container.modal-lg { max-width: 800px; }
         .modal-container.modal-reject { max-width: 600px; }
@@ -702,9 +859,7 @@ export default function ContentModeration() {
         /* Post Content */
         .post-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #1f2937; }
         .post-content { background: #f8f9fa; padding: 16px; border-radius: 12px; margin-bottom: 16px; line-height: 1.6; color: #4b5563; }
-        .post-image { margin-bottom: 16px; }
-        .post-image img { max-width: 100%; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .post-category { font-size: 12px; color: #6c757d; }
+        .post-category { font-size: 12px; color: #6c757d; margin-top: 12px; }
         .comment-text { background: #f8f9fa; padding: 16px; border-radius: 12px; line-height: 1.6; color: #4b5563; }
         .comment-post { background: #e7f1ff; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: #0d6efd; }
         .rejection-box { background: #fef3c7; padding: 12px; border-radius: 8px; color: #92400e; }
@@ -743,6 +898,7 @@ export default function ContentModeration() {
           .details-grid { grid-template-columns: 1fr; }
           .quick-reasons { grid-template-columns: 1fr; }
           .author-info { flex-direction: column; text-align: center; }
+          .images-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
         }
       `}</style>
     </AdminLayout>
