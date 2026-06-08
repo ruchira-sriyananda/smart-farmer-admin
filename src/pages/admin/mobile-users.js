@@ -213,73 +213,102 @@ export default function MobileUsers() {
     }
   }
 
-  const fetchStats = async () => {
-    try {
-      // Fetch all users for stats
-      const { data, error } = await supabase
-        .from('users')
-        .select('status, is_verified, created_at, role_id')
+  // Replace the fetchStats function with this corrected version
 
-      if (error) throw error
+const fetchStats = async () => {
+  try {
+    console.log('Fetching stats...')
+    
+    // Get ALL users from the users table
+    const { data: allUsers, error: usersError } = await supabase
+      .from('users')
+      .select('*')
 
-      console.log('Stats data:', data?.length || 0)
-
-      if (data && data.length > 0) {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        
-        // Get role IDs for accurate counting
-        const { data: roles } = await supabase
-          .from('roles')
-          .select('role_id, role_name')
-        
-        const roleMap = {}
-        roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
-        
-        const total = data.length
-        const active = data.filter(u => u.status === 'active').length
-        const banned = data.filter(u => u.status === 'banned').length
-        const pending = data.filter(u => u.status === 'pending').length
-        const verified = data.filter(u => u.is_verified === true).length
-        const newToday = data.filter(u => new Date(u.created_at) >= today).length
-        
-        // Count by role using role_id
-        let farmersCount = 0
-        let vendorsCount = 0
-        
-        if (roleMap['FARMER']) {
-          farmersCount = data.filter(u => u.role_id === roleMap['FARMER']).length
-        }
-        if (roleMap['VENDOR']) {
-          vendorsCount = data.filter(u => u.role_id === roleMap['VENDOR']).length
-        }
-
-        setStats({
-          total,
-          active,
-          banned,
-          farmers: farmersCount,
-          vendors: vendorsCount,
-          newToday,
-          verified,
-          pending
-        })
-      } else {
-        setStats({
-          total: 0,
-          active: 0,
-          banned: 0,
-          farmers: 0,
-          vendors: 0,
-          newToday: 0,
-          verified: 0,
-          pending: 0
-        })
-      }
-    } catch (err) {
-      console.error('Error fetching stats:', err)
+    if (usersError) {
+      console.error('Error fetching users for stats:', usersError)
+      throw usersError
     }
+
+    console.log('Total users found:', allUsers?.length || 0)
+
+    if (!allUsers || allUsers.length === 0) {
+      console.log('No users found in database')
+      setStats({
+        total: 0,
+        active: 0,
+        banned: 0,
+        farmers: 0,
+        vendors: 0,
+        newToday: 0,
+        verified: 0,
+        pending: 0
+      })
+      return
+    }
+
+    // Get role IDs from roles table
+    const { data: roles, error: rolesError } = await supabase
+      .from('roles')
+      .select('role_id, role_name')
+
+    if (rolesError) {
+      console.error('Error fetching roles:', rolesError)
+    }
+
+    console.log('Roles found:', roles)
+
+    const roleMap = {}
+    roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+
+    // Calculate today's date (start of day)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    // Calculate stats from actual data
+    const total = allUsers.length
+    const active = allUsers.filter(u => u.status === 'active').length
+    const banned = allUsers.filter(u => u.status === 'banned').length
+    const pending = allUsers.filter(u => u.status === 'pending').length
+    const verified = allUsers.filter(u => u.is_verified === true).length
+    const newToday = allUsers.filter(u => new Date(u.created_at) >= today).length
+    
+    // Count farmers (users with role_id matching FARMER)
+    let farmersCount = 0
+    let vendorsCount = 0
+    
+    if (roleMap['FARMER']) {
+      farmersCount = allUsers.filter(u => u.role_id === roleMap['FARMER']).length
+    }
+    if (roleMap['VENDOR']) {
+      vendorsCount = allUsers.filter(u => u.role_id === roleMap['VENDOR']).length
+    }
+
+    console.log('Stats calculated:', {
+      total,
+      active,
+      banned,
+      farmers: farmersCount,
+      vendors: vendorsCount,
+      newToday,
+      verified,
+      pending
+    })
+
+    setStats({
+      total,
+      active,
+      banned,
+      farmers: farmersCount,
+      vendors: vendorsCount,
+      newToday,
+      verified,
+      pending
+    })
+  } catch (err) {
+    console.error('Error in fetchStats:', err)
+    setError(err.message)
   }
+}
 
   const handleBanUser = async () => {
     if (!banReason.trim()) {
