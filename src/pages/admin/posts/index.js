@@ -111,14 +111,70 @@ export default function ContentModeration() {
             const userId = postDataResult.user_id || post.user_id
             
             if (userId) {
-              const { data: userResult } = await supabase
+              // First try to get from users table
+              const { data: userResult, error: userError } = await supabase
                 .from('users')
                 .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
                 .eq('user_id', userId)
                 .maybeSingle()
               
+              if (userError) {
+                console.error(`Error fetching user ${userId}:`, userError)
+              }
+              
               if (userResult) {
                 userData = userResult
+              } else {
+                // If not found in users, try to get from admin_users
+                const { data: adminResult, error: adminError } = await supabase
+                  .from('admin_users')
+                  .select('admin_id, full_name, email')
+                  .eq('admin_id', userId)
+                  .maybeSingle()
+                
+                if (adminResult) {
+                  userData = {
+                    user_id: adminResult.admin_id,
+                    full_name: adminResult.full_name,
+                    email: adminResult.email,
+                    profile_image: null,
+                    phone: null,
+                    location: null,
+                    district: null
+                  }
+                } else {
+                  // If still not found, try to get from auth.users via the posts table's user reference
+                  const { data: authUser } = await supabase
+                    .from('posts')
+                    .select('users!posts_user_id_fkey (user_id, full_name, email)')
+                    .eq('post_id', post.content_id)
+                    .maybeSingle()
+                  
+                  if (authUser?.users) {
+                    userData = {
+                      user_id: authUser.users.user_id,
+                      full_name: authUser.users.full_name,
+                      email: authUser.users.email,
+                      profile_image: null,
+                      phone: null,
+                      location: null,
+                      district: null
+                    }
+                  }
+                }
+              }
+            }
+            
+            // If we still don't have user data, create a placeholder with the ID
+            if (!userData && userId) {
+              userData = {
+                user_id: userId,
+                full_name: `User ${userId.slice(0, 8)}`,
+                email: 'Email not available',
+                profile_image: null,
+                phone: null,
+                location: null,
+                district: null
               }
             }
           } else {
@@ -136,9 +192,9 @@ export default function ContentModeration() {
           post_created_at: postData?.created_at || post.created_at,
           user: userData,
           author_name: userData?.full_name || 'Mobile User',
-          author_email: userData?.email || '',
-          author_phone: userData?.phone || '',
-          author_location: userData?.location || userData?.district || '',
+          author_email: userData?.email || 'Email not available',
+          author_phone: userData?.phone || null,
+          author_location: userData?.location || userData?.district || null,
           user_id: userData?.user_id || post.user_id,
           post_exists: postExists
         }
@@ -204,14 +260,38 @@ export default function ContentModeration() {
           const userId = postData.user_id
           
           if (userId) {
-            const { data: userResult } = await supabase
+            // First try to get from users table
+            const { data: userResult, error: userError } = await supabase
               .from('users')
               .select('user_id, full_name, email, profile_image, phone, location, district, created_at')
               .eq('user_id', userId)
               .maybeSingle()
             
+            if (userError) {
+              console.error('Error fetching user:', userError)
+            }
+            
             if (userResult) {
               userData = userResult
+            } else {
+              // Try admin_users
+              const { data: adminResult } = await supabase
+                .from('admin_users')
+                .select('admin_id, full_name, email')
+                .eq('admin_id', userId)
+                .maybeSingle()
+              
+              if (adminResult) {
+                userData = {
+                  user_id: adminResult.admin_id,
+                  full_name: adminResult.full_name,
+                  email: adminResult.email,
+                  profile_image: null,
+                  phone: null,
+                  location: null,
+                  district: null
+                }
+              }
             }
           }
           
@@ -426,12 +506,12 @@ export default function ContentModeration() {
                       )}
                     </div>
                     <div className="post-user-details">
-                      <div className="post-user-name">{post.author_name}</div>
-                      {post.author_email && (
-                        <div className="post-user-email">
-                          <i className="bi bi-envelope"></i> {post.author_email}
-                        </div>
-                      )}
+                      <div className="post-user-name">
+                        {post.author_name}
+                      </div>
+                      <div className="post-user-email">
+                        <i className="bi bi-envelope"></i> {post.author_email}
+                      </div>
                       {post.author_phone && (
                         <div className="post-user-phone">
                           <i className="bi bi-telephone"></i> {post.author_phone}
@@ -574,12 +654,12 @@ export default function ContentModeration() {
                         )}
                       </div>
                       <div className="detail-author-info">
-                        <div className="detail-author-name">{postDetails.user?.full_name || 'Mobile User'}</div>
-                        {postDetails.user?.email && (
-                          <div className="detail-author-email">
-                            <i className="bi bi-envelope"></i> {postDetails.user.email}
-                          </div>
-                        )}
+                        <div className="detail-author-name">
+                          {postDetails.user?.full_name || 'Mobile User'}
+                        </div>
+                        <div className="detail-author-email">
+                          <i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}
+                        </div>
                         {postDetails.user?.phone && (
                           <div className="detail-author-phone">
                             <i className="bi bi-telephone"></i> {postDetails.user.phone}
@@ -983,14 +1063,7 @@ export default function ContentModeration() {
 
         .post-user-details { flex: 1; }
         .post-user-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
-        .post-user-email, .post-user-phone, .post-user-location { 
-          font-size: 10px; 
-          color: #9ca3af; 
-          margin-top: 2px; 
-          display: flex; 
-          align-items: center; 
-          gap: 4px; 
-        }
+        .post-user-email, .post-user-phone, .post-user-location { font-size: 10px; color: #9ca3af; margin-top: 2px; display: flex; align-items: center; gap: 4px; }
         .post-user-email i, .post-user-phone i, .post-user-location i { font-size: 9px; }
 
         .post-images-gallery { padding: 12px; background: #fafbfc; }
