@@ -137,7 +137,7 @@ export default function Advertisements() {
       setError(null)
       
       let query = supabase
-        .from('mobile_advertisements')
+        .from('advertisements')
         .select('*')
         .order('created_at', { ascending: false })
 
@@ -396,7 +396,7 @@ export default function Advertisements() {
       }
 
       const { error } = await supabase
-        .from('advertisements')
+        .from('mobile_advertisements')
         .insert(adData)
 
       if (error) throw error
