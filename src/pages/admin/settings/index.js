@@ -368,21 +368,7 @@ const handleTestEmail = async () => {
                 <p>Basic configuration for your application</p>
               </div>
 
-              <div className="settings-grid">
-                <div className="setting-card">
-                  <label className="setting-label">
-                    <i className="bi bi-building"></i>
-                    Site Name
-                  </label>
-                  <input 
-                    type="text" 
-                    className="setting-input" 
-                    value={settings.site_name}
-                    onChange={(e) => handleSettingChange('site_name', e.target.value)}
-                    placeholder="Enter site name"
-                  />
-                  <small className="setting-hint">This appears in browser tabs and headers</small>
-                </div>
+            
 
                 <div className="setting-card">
                   <label className="setting-label">
