@@ -27,14 +27,11 @@ export default function MobileUsers() {
     verified: 0,
     pending: 0
   })
-  const [debugInfo, setDebugInfo] = useState(null)
 
   useEffect(() => {
-    checkAndInsertSampleData()
     fetchUsers()
     fetchStats()
     
-    // Subscribe to real-time changes
     const subscription = supabase
       .channel('mobile_users_changes')
       .on('postgres_changes', 
@@ -49,138 +46,12 @@ export default function MobileUsers() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Function to check and insert sample data
-  const checkAndInsertSampleData = async () => {
-    try {
-      // Check if users table has any data
-      const { count, error: countError } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-
-      if (countError) {
-        console.error('Error checking users:', countError)
-        setDebugInfo({ error: countError.message })
-        return
-      }
-
-      console.log('Current user count:', count)
-
-      if (count === 0) {
-        console.log('No users found, inserting sample data...')
-        await insertSampleUsers()
-      }
-    } catch (err) {
-      console.error('Error checking sample data:', err)
-    }
-  }
-
-  // Insert sample users
-  const insertSampleUsers = async () => {
-    try {
-      // First, get role IDs from roles table
-      const { data: roles, error: rolesError } = await supabase
-        .from('roles')
-        .select('role_id, role_name')
-
-      if (rolesError) {
-        console.error('Error fetching roles:', rolesError)
-        return
-      }
-
-      console.log('Available roles:', roles)
-
-      const roleMap = {}
-      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
-
-      const sampleUsers = [
-        {
-          full_name: 'John Farmer',
-          email: 'john.farmer@example.com',
-          phone: '+94 77 123 4567',
-          role_id: roleMap['FARMER'] || null,
-          status: 'active',
-          is_verified: true,
-          location: 'Kandy, Sri Lanka',
-          bio: 'Organic farmer specializing in vegetables',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          full_name: 'Sarah Vendor',
-          email: 'sarah.vendor@example.com',
-          phone: '+94 77 234 5678',
-          role_id: roleMap['VENDOR'] || null,
-          status: 'active',
-          is_verified: true,
-          location: 'Colombo, Sri Lanka',
-          bio: 'Fresh produce supplier',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          full_name: 'Mike Thompson',
-          email: 'mike.thompson@example.com',
-          phone: '+94 77 345 6789',
-          role_id: roleMap['FARMER'] || null,
-          status: 'banned',
-          is_verified: false,
-          location: 'Galle, Sri Lanka',
-          bio: 'Rice farmer',
-          ban_reason: 'Violation of community guidelines',
-          banned_at: new Date().toISOString(),
-          created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          full_name: 'Emma Wilson',
-          email: 'emma.wilson@example.com',
-          phone: '+94 77 456 7890',
-          role_id: roleMap['VENDOR'] || null,
-          status: 'active',
-          is_verified: true,
-          location: 'Kandy, Sri Lanka',
-          bio: 'Organic fertilizer supplier',
-          created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          full_name: 'David Perera',
-          email: 'david.perera@example.com',
-          phone: '+94 77 567 8901',
-          role_id: roleMap['FARMER'] || null,
-          status: 'pending',
-          is_verified: false,
-          location: 'Kurunegala, Sri Lanka',
-          bio: 'Spice farmer',
-          created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-          updated_at: new Date().toISOString()
-        }
-      ]
-
-      for (const user of sampleUsers) {
-        const { error } = await supabase
-          .from('users')
-          .insert(user)
-        
-        if (error) {
-          console.error('Error inserting sample user:', error)
-        } else {
-          console.log('Inserted user:', user.full_name)
-        }
-      }
-
-      console.log('Sample users inserted successfully')
-    } catch (err) {
-      console.error('Error inserting sample users:', err)
-    }
-  }
-
   const fetchUsers = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      // Fetch all users with their role names using join
+      // Fetch users with role information
       const { data, error } = await supabase
         .from('users')
         .select(`
@@ -194,12 +65,12 @@ export default function MobileUsers() {
 
       if (error) throw error
 
-      console.log('Fetched users:', data?.length || 0)
-
       if (data && data.length > 0) {
         const processedUsers = data.map(user => ({
           ...user,
-          role_name: user.roles?.role_name || 'USER'
+          role_name: user.roles?.role_name || 'USER',
+          status: user.status || 'active',
+          is_verified: user.is_verified || false
         }))
         setUsers(processedUsers)
       } else {
@@ -213,102 +84,70 @@ export default function MobileUsers() {
     }
   }
 
-  // Replace the fetchStats function with this corrected version
+  const fetchStats = async () => {
+    try {
+      const { data: allUsers, error: usersError } = await supabase
+        .from('users')
+        .select('*')
 
-const fetchStats = async () => {
-  try {
-    console.log('Fetching stats...')
-    
-    // Get ALL users from the users table
-    const { data: allUsers, error: usersError } = await supabase
-      .from('users')
-      .select('*')
+      if (usersError) throw usersError
 
-    if (usersError) {
-      console.error('Error fetching users for stats:', usersError)
-      throw usersError
-    }
+      if (!allUsers || allUsers.length === 0) {
+        setStats({
+          total: 0,
+          active: 0,
+          banned: 0,
+          farmers: 0,
+          vendors: 0,
+          newToday: 0,
+          verified: 0,
+          pending: 0
+        })
+        return
+      }
 
-    console.log('Total users found:', allUsers?.length || 0)
+      // Get role IDs from roles table
+      const { data: roles } = await supabase
+        .from('roles')
+        .select('role_id, role_name')
 
-    if (!allUsers || allUsers.length === 0) {
-      console.log('No users found in database')
+      const roleMap = {}
+      roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
+
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      const total = allUsers.length
+      const active = allUsers.filter(u => u.status === 'active').length
+      const banned = allUsers.filter(u => u.status === 'banned').length
+      const pending = allUsers.filter(u => u.status === 'pending').length
+      const verified = allUsers.filter(u => u.is_verified === true).length
+      const newToday = allUsers.filter(u => new Date(u.created_at) >= today).length
+      
+      let farmersCount = 0
+      let vendorsCount = 0
+      
+      if (roleMap['FARMER']) {
+        farmersCount = allUsers.filter(u => u.role_id === roleMap['FARMER']).length
+      }
+      if (roleMap['VENDOR']) {
+        vendorsCount = allUsers.filter(u => u.role_id === roleMap['VENDOR']).length
+      }
+
       setStats({
-        total: 0,
-        active: 0,
-        banned: 0,
-        farmers: 0,
-        vendors: 0,
-        newToday: 0,
-        verified: 0,
-        pending: 0
+        total,
+        active,
+        banned,
+        farmers: farmersCount,
+        vendors: vendorsCount,
+        newToday,
+        verified,
+        pending
       })
-      return
+    } catch (err) {
+      console.error('Error fetching stats:', err)
     }
-
-    // Get role IDs from roles table
-    const { data: roles, error: rolesError } = await supabase
-      .from('roles')
-      .select('role_id, role_name')
-
-    if (rolesError) {
-      console.error('Error fetching roles:', rolesError)
-    }
-
-    console.log('Roles found:', roles)
-
-    const roleMap = {}
-    roles?.forEach(r => { roleMap[r.role_name] = r.role_id })
-
-    // Calculate today's date (start of day)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-
-    // Calculate stats from actual data
-    const total = allUsers.length
-    const active = allUsers.filter(u => u.status === 'active').length
-    const banned = allUsers.filter(u => u.status === 'banned').length
-    const pending = allUsers.filter(u => u.status === 'pending').length
-    const verified = allUsers.filter(u => u.is_verified === true).length
-    const newToday = allUsers.filter(u => new Date(u.created_at) >= today).length
-    
-    // Count farmers (users with role_id matching FARMER)
-    let farmersCount = 0
-    let vendorsCount = 0
-    
-    if (roleMap['FARMER']) {
-      farmersCount = allUsers.filter(u => u.role_id === roleMap['FARMER']).length
-    }
-    if (roleMap['VENDOR']) {
-      vendorsCount = allUsers.filter(u => u.role_id === roleMap['VENDOR']).length
-    }
-
-    console.log('Stats calculated:', {
-      total,
-      active,
-      banned,
-      farmers: farmersCount,
-      vendors: vendorsCount,
-      newToday,
-      verified,
-      pending
-    })
-
-    setStats({
-      total,
-      active,
-      banned,
-      farmers: farmersCount,
-      vendors: vendorsCount,
-      newToday,
-      verified,
-      pending
-    })
-  } catch (err) {
-    console.error('Error in fetchStats:', err)
-    setError(err.message)
   }
-}
 
   const handleBanUser = async () => {
     if (!banReason.trim()) {
@@ -319,14 +158,14 @@ const fetchStats = async () => {
     setActionLoading(true)
     
     try {
+      const updateData = {
+        status: 'banned',
+        updated_at: new Date().toISOString()
+      }
+      
       const { error } = await supabase
         .from('users')
-        .update({ 
-          status: 'banned',
-          ban_reason: banReason,
-          banned_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('user_id', selectedUser.user_id)
 
       if (error) throw error
@@ -351,14 +190,14 @@ const fetchStats = async () => {
     setActionLoading(true)
     
     try {
+      const updateData = {
+        status: 'active',
+        updated_at: new Date().toISOString()
+      }
+      
       const { error } = await supabase
         .from('users')
-        .update({ 
-          status: 'active',
-          ban_reason: null,
-          unbanned_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('user_id', userId)
 
       if (error) throw error
@@ -445,92 +284,6 @@ const fetchStats = async () => {
           <div className="loading-spinner"></div>
           <p>Loading users...</p>
         </div>
-        <style jsx>{`
-          .loading-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 400px;
-          }
-          .loading-spinner {
-            width: 48px;
-            height: 48px;
-            border: 3px solid #e9ecef;
-            border-top-color: #4f46e5;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 16px;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </AdminLayout>
-    )
-  }
-
-  if (error && users.length === 0) {
-    return (
-      <AdminLayout title="Mobile Users">
-        <div className="error-container">
-          <i className="bi bi-exclamation-triangle-fill"></i>
-          <h3>Error Loading Users</h3>
-          <p>{error}</p>
-          {debugInfo && (
-            <div className="debug-info">
-              <details>
-                <summary>Debug Information</summary>
-                <pre>{JSON.stringify(debugInfo, null, 2)}</pre>
-              </details>
-            </div>
-          )}
-          <button className="retry-btn" onClick={() => { fetchUsers(); fetchStats(); }}>
-            Retry
-          </button>
-          <button className="insert-btn" onClick={insertSampleUsers}>
-            Insert Sample Users
-          </button>
-        </div>
-        <style jsx>{`
-          .error-container {
-            text-align: center;
-            padding: 60px 20px;
-            background: white;
-            border-radius: 24px;
-            max-width: 600px;
-            margin: 40px auto;
-          }
-          .error-container i {
-            font-size: 48px;
-            color: #f59e0b;
-            margin-bottom: 16px;
-          }
-          .debug-info {
-            margin: 20px 0;
-            text-align: left;
-            background: #f8f9fa;
-            padding: 12px;
-            border-radius: 8px;
-            overflow-x: auto;
-          }
-          .retry-btn, .insert-btn {
-            margin-top: 20px;
-            padding: 10px 24px;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            margin-right: 12px;
-          }
-          .retry-btn {
-            background: #4f46e5;
-            color: white;
-          }
-          .insert-btn {
-            background: #10b981;
-            color: white;
-          }
-        `}</style>
       </AdminLayout>
     )
   }
@@ -558,7 +311,7 @@ const fetchStats = async () => {
           </div>
         </div>
 
-        {/* Stats Cards - Real counts from database */}
+        {/* Stats Cards */}
         <div className="stats-grid">
           <div className="stat-card total">
             <div className="stat-icon"><i className="bi bi-people"></i></div>
@@ -659,7 +412,7 @@ const fetchStats = async () => {
                     <th>Joined</th>
                     <th>Last Active</th>
                     <th>Actions</th>
-                  </tr>
+                </tr>
                 </thead>
                 <tbody>
                   {filteredUsers.map((user) => (
@@ -679,18 +432,18 @@ const fetchStats = async () => {
                           </div>
                         </div>
                       </td>
-                      <td>
+                      <td className="contact-cell">
                         <div className="contact-info">
                           <div><i className="bi bi-envelope"></i> {user.email}</div>
                           {user.phone && <div><i className="bi bi-telephone"></i> {user.phone}</div>}
                           {user.is_verified && <span className="verified-badge"><i className="bi bi-check-circle-fill"></i> Verified</span>}
                         </div>
-                      </td>
-                      <td>{getRoleBadge(user.role_name)}</td>
-                      <td>{getStatusBadge(user.status)}</td>
+                       </td>
+                      <td className="role-cell">{getRoleBadge(user.role_name)}</td>
+                      <td className="status-cell">{getStatusBadge(user.status)}</td>
                       <td className="date-cell">{new Date(user.created_at).toLocaleDateString()}</td>
                       <td className="date-cell">{user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}</td>
-                      <td>
+                      <td className="actions-cell">
                         <div className="action-buttons">
                           <button className="action-btn view" onClick={() => { setSelectedUser(user); setShowDetailsModal(true); }} title="View Details">
                             <i className="bi bi-eye"></i>
@@ -723,14 +476,11 @@ const fetchStats = async () => {
             <button className="btn-clear-filters" onClick={() => { setSearchTerm(''); setFilterStatus('all'); setFilterRole('all'); }}>
               Clear Filters
             </button>
-            <button className="btn-insert-sample" onClick={insertSampleUsers}>
-              Insert Sample Users
-            </button>
           </div>
         )}
       </div>
 
-      {/* User Details Modal - Same as before */}
+      {/* User Details Modal */}
       {showDetailsModal && selectedUser && (
         <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
           <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -779,13 +529,6 @@ const fetchStats = async () => {
                   <div><strong>Last Updated:</strong> {new Date(selectedUser.updated_at).toLocaleString()}</div>
                   <div><strong>Last Login:</strong> {selectedUser.last_login ? new Date(selectedUser.last_login).toLocaleString() : 'Never'}</div>
                 </div>
-                {selectedUser.ban_reason && (
-                  <div className="detail-section full-width">
-                    <h4><i className="bi bi-exclamation-triangle"></i> Ban Information</h4>
-                    <div><strong>Reason:</strong> {selectedUser.ban_reason}</div>
-                    <div><strong>Banned At:</strong> {new Date(selectedUser.banned_at).toLocaleString()}</div>
-                  </div>
-                )}
                 {selectedUser.bio && (
                   <div className="detail-section full-width">
                     <h4><i className="bi bi-file-text"></i> Bio</h4>
@@ -859,33 +602,65 @@ const fetchStats = async () => {
       <style jsx>{`
         .users-container { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
 
-        /* Hero Section */
+        /* Loading */
+        .loading-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 400px;
+        }
+        .loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid #e9ecef;
+          border-top-color: #4f46e5;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Hero */
         .hero-section {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           border-radius: 28px;
           padding: 40px 32px;
           margin-bottom: 32px;
+          position: relative;
+          overflow: hidden;
         }
-        .hero-content { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
+        .hero-section::before {
+          content: '';
+          position: absolute;
+          top: -50%;
+          right: -50%;
+          width: 200%;
+          height: 200%;
+          background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+          animation: pulse 10s ease-in-out infinite;
+        }
+        @keyframes pulse { 0%,100% { transform: scale(1); opacity: 0.5; } 50% { transform: scale(1.1); opacity: 0.8; } }
+        .hero-content { display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1; flex-wrap: wrap; gap: 20px; }
         .hero-text { display: flex; align-items: center; gap: 20px; }
-        .hero-icon-wrapper { width: 60px; height: 60px; background: rgba(255,255,255,0.2); border-radius: 20px; display: flex; align-items: center; justify-content: center; }
+        .hero-icon-wrapper { width: 60px; height: 60px; background: rgba(255,255,255,0.2); border-radius: 20px; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
         .hero-icon-wrapper i { font-size: 32px; color: white; }
         .hero-title { font-size: 28px; font-weight: 700; color: white; margin: 0 0 8px 0; }
         .hero-subtitle { font-size: 14px; color: rgba(255,255,255,0.9); margin: 0; }
-        .btn-refresh { padding: 10px 24px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 12px; color: white; cursor: pointer; transition: all 0.3s ease; }
+        .btn-refresh { padding: 10px 24px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 12px; color: white; font-weight: 500; cursor: pointer; transition: all 0.3s ease; }
         .btn-refresh:hover { background: rgba(255,255,255,0.3); transform: translateY(-2px); }
 
-        /* Stats Grid */
+        /* Stats */
         .stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; margin-bottom: 32px; }
         .stat-card { background: white; border-radius: 20px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: all 0.3s ease; }
         .stat-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
         .stat-icon { width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
         .total .stat-icon { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
-        .active .stat-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .banned .stat-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .farmers .stat-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        .vendors .stat-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .new .stat-icon { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
+        .active .stat-icon { background: rgba(16,185,129,0.1); color: #10b981; }
+        .banned .stat-icon { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .farmers .stat-icon { background: rgba(59,130,246,0.1); color: #3b82f6; }
+        .vendors .stat-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .new .stat-icon { background: rgba(139,92,246,0.1); color: #8b5cf6; }
         .stat-info { flex: 1; }
         .stat-label { font-size: 12px; color: #6c757d; margin-bottom: 4px; display: block; }
         .stat-info h3 { font-size: 28px; font-weight: 700; margin: 0; }
@@ -901,8 +676,8 @@ const fetchStats = async () => {
         .controls-left { display: flex; gap: 16px; flex-wrap: wrap; flex: 1; }
         .search-box { position: relative; min-width: 300px; flex: 1; }
         .search-box i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #9ca3af; }
-        .search-box input { width: 100%; padding: 10px 40px 10px 40px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; transition: all 0.3s ease; }
-        .search-box input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+        .search-box input { width: 100%; padding: 10px 40px 10px 40px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; }
+        .search-box input:focus { outline: none; border-color: #667eea; }
         .clear-search { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; }
         .filter-select { padding: 10px 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; min-width: 140px; background: white; cursor: pointer; }
         .info-text { padding: 8px 16px; background: #f8f9fa; border-radius: 12px; font-size: 13px; color: #6c757d; display: flex; align-items: center; gap: 8px; }
@@ -923,83 +698,83 @@ const fetchStats = async () => {
         .contact-info i { font-size: 12px; color: #9ca3af; margin-right: 6px; }
         .verified-badge { font-size: 11px; color: #10b981; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; }
         .date-cell { font-size: 13px; color: #6c757d; }
-        
+
         /* Badges */
         .role-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
-        .role-badge.farmer { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-        .role-badge.vendor { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .role-badge.admin { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .role-badge.default { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
-        
+        .role-badge.farmer { background: rgba(59,130,246,0.1); color: #3b82f6; }
+        .role-badge.vendor { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .role-badge.admin { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .role-badge.default { background: rgba(107,114,128,0.1); color: #6c757d; }
+
         .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
-        .status-badge.success { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-        .status-badge.danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-        .status-badge.warning { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .status-badge.secondary { background: rgba(107, 114, 128, 0.1); color: #6c757d; }
+        .status-badge.success { background: rgba(16,185,129,0.1); color: #10b981; }
+        .status-badge.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .status-badge.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .status-badge.secondary { background: rgba(107,114,128,0.1); color: #6c757d; }
 
         /* Action Buttons */
-        .action-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-        .action-btn { padding: 6px 10px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 4px; }
-        .action-btn.view { background: rgba(79, 70, 229, 0.1); color: #4f46e5; }
+        .action-buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .action-btn { padding: 6px 10px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+        .action-btn.view { background: rgba(79,70,229,0.1); color: #4f46e5; }
         .action-btn.view:hover { background: #4f46e5; color: white; }
-        .action-btn.ban { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .action-btn.ban { background: rgba(239,68,68,0.1); color: #ef4444; }
         .action-btn.ban:hover { background: #ef4444; color: white; }
-        .action-btn.unban { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .action-btn.unban { background: rgba(16,185,129,0.1); color: #10b981; }
         .action-btn.unban:hover { background: #10b981; color: white; }
-        .action-btn.delete { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .action-btn.delete { background: rgba(239,68,68,0.1); color: #ef4444; }
         .action-btn.delete:hover { background: #ef4444; color: white; }
 
+        /* Empty State */
         .empty-state { text-align: center; padding: 80px 20px; background: white; border-radius: 24px; }
-        .empty-state i { font-size: 64px; color: #cbd5e1; margin-bottom: 16px; }
-        .btn-clear-filters, .btn-insert-sample { margin-top: 20px; padding: 12px 32px; border: none; border-radius: 12px; color: white; cursor: pointer; margin-right: 12px; }
-        .btn-clear-filters { background: linear-gradient(135deg, #667eea, #764ba2); }
-        .btn-insert-sample { background: #10b981; }
+        .empty-state i { font-size: 80px; color: #cbd5e1; margin-bottom: 16px; display: block; }
+        .btn-clear-filters { padding: 12px 32px; background: linear-gradient(135deg, #667eea, #764ba2); border: none; border-radius: 12px; color: white; font-weight: 600; cursor: pointer; margin-top: 20px; }
 
-        /* Modal Styles */
+        /* Modals */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1100; animation: fadeIn 0.2s ease; }
         .modal-container { background: white; border-radius: 28px; width: 90%; max-width: 700px; max-height: 85vh; overflow-y: auto; animation: slideUp 0.3s ease; }
         .modal-container.modal-lg { max-width: 800px; }
-        .modal-header { padding: 24px 28px; border-bottom: 1px solid #e9ecef; display: flex; align-items: center; gap: 16px; position: relative; }
-        .modal-header.warning .modal-icon-wrapper { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-        .modal-header.danger .modal-icon-wrapper { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .modal-header { padding: 24px 28px 20px; border-bottom: 1px solid #e9ecef; display: flex; align-items: center; gap: 16px; position: relative; }
+        .modal-header.warning .modal-icon-wrapper { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .modal-header.danger .modal-icon-wrapper { background: rgba(239,68,68,0.1); color: #ef4444; }
         .modal-icon-wrapper { width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; }
         .modal-icon-wrapper i { font-size: 24px; }
         .modal-header h2 { font-size: 20px; margin: 0 0 4px 0; }
         .modal-header p { margin: 0; color: #6c757d; font-size: 13px; }
-        .modal-close { position: absolute; right: 20px; top: 20px; background: none; border: none; font-size: 18px; cursor: pointer; transition: all 0.3s ease; }
+        .modal-close { position: absolute; right: 20px; top: 20px; background: none; border: none; font-size: 18px; cursor: pointer; color: #9ca3af; transition: all 0.3s ease; }
         .modal-close:hover { transform: rotate(90deg); }
         .modal-body { padding: 28px; }
         .modal-footer { padding: 16px 28px 28px; border-top: 1px solid #e9ecef; display: flex; justify-content: flex-end; gap: 12px; }
-        
-        .user-profile-header { display: flex; align-items: center; gap: 24px; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #e9ecef; flex-wrap: wrap; }
-        .user-avatar-large { width: 80px; height: 80px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: white; overflow: hidden; }
+
+        .user-profile-header { display: flex; align-items: center; gap: 24px; padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #e9ecef; }
+        .user-avatar-large { width: 80px; height: 80px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 600; color: white; overflow: hidden; }
         .user-avatar-large img { width: 100%; height: 100%; object-fit: cover; }
         .user-profile-info h3 { margin: 0 0 8px 0; font-size: 20px; }
         .user-meta { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
         .user-id-full { font-size: 12px; color: #6c757d; font-family: monospace; }
-        .user-avatar-small { width: 48px; height: 48px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; overflow: hidden; }
-        .ban-user-info { display: flex; align-items: center; gap: 16px; padding: 16px; background: #f8f9fa; border-radius: 16px; margin-bottom: 20px; }
-        
+
         .details-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
         .detail-section { background: #f8f9fa; border-radius: 16px; padding: 20px; }
         .detail-section.full-width { grid-column: span 2; }
-        .detail-section h4 { margin: 0 0 16px 0; font-size: 14px; font-weight: 600; }
+        .detail-section h4 { margin: 0 0 16px 0; font-size: 14px; font-weight: 600; color: #374151; }
         .detail-section h4 i { margin-right: 8px; color: #667eea; }
         .detail-section div { margin-bottom: 8px; font-size: 13px; }
-        .verified-badge-sm { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #10b981; margin-top: 8px; }
-        
+        .verified-badge-sm { font-size: 11px; color: #10b981; display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; }
+
+        .ban-user-info { display: flex; align-items: center; gap: 16px; padding: 16px; background: #f8f9fa; border-radius: 16px; margin-bottom: 20px; }
+        .user-avatar-small { width: 48px; height: 48px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 18px; overflow: hidden; }
+        .user-avatar-small img { width: 100%; height: 100%; object-fit: cover; }
+
         .form-group { margin-bottom: 20px; }
         .form-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #374151; }
-        .form-textarea { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; transition: all 0.3s ease; }
-        .form-textarea:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
-        .warning-message { background: #fef3c7; padding: 12px; border-radius: 12px; display: flex; align-items: center; gap: 12px; font-size: 13px; color: #92400e; margin-top: 16px; }
-        
-        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; font-weight: 500; transition: all 0.3s ease; }
-        .btn-secondary:hover { background: #e9ecef; }
-        .btn-primary { padding: 10px 24px; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+        .form-textarea { width: 100%; padding: 12px; border: 2px solid #e9ecef; border-radius: 12px; font-size: 14px; resize: vertical; }
+        .form-textarea:focus { outline: none; border-color: #667eea; }
+
+        .warning-message { background: #fef3c7; padding: 12px; border-radius: 12px; display: flex; align-items: center; gap: 12px; font-size: 13px; color: #92400e; }
+
+        .btn-secondary { padding: 10px 20px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; cursor: pointer; font-weight: 500; }
+        .btn-primary { padding: 10px 24px; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; }
         .btn-primary.danger { background: #ef4444; color: white; }
-        .btn-primary.danger:hover { background: #dc2626; transform: translateY(-1px); }
-        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-primary.danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -1012,14 +787,16 @@ const fetchStats = async () => {
           .hero-text { flex-direction: column; }
           .hero-title { font-size: 24px; }
           .stats-grid { grid-template-columns: repeat(2, 1fr); }
-          .controls-left { flex-direction: column; width: 100%; }
+          .controls-bar { flex-direction: column; }
+          .controls-left { width: 100%; flex-direction: column; }
           .search-box { width: 100%; }
           .filter-select { width: 100%; }
           .details-grid { grid-template-columns: 1fr; }
           .detail-section.full-width { grid-column: span 1; }
           .user-profile-header { flex-direction: column; text-align: center; }
           .user-meta { justify-content: center; }
-          .action-buttons { justify-content: center; }
+          .action-buttons { flex-wrap: wrap; }
+          .action-btn span { display: none; }
         }
       `}</style>
     </AdminLayout>
