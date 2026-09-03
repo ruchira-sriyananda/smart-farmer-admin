@@ -88,15 +88,8 @@ export default function AdminSidebar() {
       roles: ['SUPER_ADMIN'],
       description: 'Manage ad campaigns'
     },
-    { 
-      path: '/admin/ai-chatbot', 
-      icon: 'bi-robot', 
-      label: 'AI Chatbot', 
-      color: 'primary',
-      roles: ['SUPER_ADMIN', 'CONTENT_ADMIN'],
-      description: 'Chatbot monitoring and logs'
-    },
-    { 
+
+    {
       path: '/admin/settings', 
       icon: 'bi-gear', 
       label: 'Settings', 
