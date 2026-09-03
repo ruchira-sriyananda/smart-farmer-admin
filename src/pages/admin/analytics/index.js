@@ -37,7 +37,7 @@ export default function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true)
   const [dateRange, setDateRange] = useState('month')
   const [analytics, setAnalytics] = useState({
-    userGrowth: [],
+    userGrowth: { labels: [], values: [] },
     userStats: {
       total: 0,
       active: 0,
@@ -426,7 +426,8 @@ export default function AnalyticsDashboard() {
   }
 
   // Predictive calculation
-  const dailyAvg = analytics.userGrowth.values?.reduce((a, b) => a + b, 0) / (analytics.userGrowth.values?.length || 1)
+  const growthValues = Array.isArray(analytics.userGrowth?.values) ? analytics.userGrowth.values : []
+  const dailyAvg = growthValues.reduce((a, b) => a + b, 0) / (growthValues.length || 1)
   const predictedNextMonth = Math.round(analytics.userStats.total + (dailyAvg * 30))
 
   const HeatmapChart = ({ data }) => {
@@ -657,7 +658,7 @@ export default function AnalyticsDashboard() {
             <div className="dist-body">
               <div className="dist-chart"><Doughnut data={categoryChart} options={chartOptions} /></div>
               <div className="dist-list">
-                {analytics.popularCategories.map((cat, idx) => (
+                {Array.isArray(analytics.popularCategories) && analytics.popularCategories.map((cat, idx) => (
                   <div key={idx} className="dist-item">
                     <span className="dist-color" style={{ background: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][idx] }}></span>
                     <span className="dist-name">{cat.name}</span>
@@ -675,7 +676,7 @@ export default function AnalyticsDashboard() {
             </div>
             <div className="dist-body">
               <div className="contributor-list-vertical">
-                {analytics.topContributors.map((c, idx) => (
+                {Array.isArray(analytics.topContributors) && analytics.topContributors.map((c, idx) => (
                   <div key={idx} className="contributor-item-vertical">
                     <div className="rank">#{idx+1}</div>
                     <div className="name">{c.name}</div>
@@ -696,7 +697,7 @@ export default function AnalyticsDashboard() {
             <div className="dist-body">
               <div className="dist-chart"><Doughnut data={categoryChart} options={chartOptions} /></div>
               <div className="dist-list">
-                {analytics.popularCategories.map((cat, idx) => (
+                {Array.isArray(analytics.popularCategories) && analytics.popularCategories.map((cat, idx) => (
                   <div key={idx} className="dist-item">
                     <span className="dist-color" style={{ background: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][idx] }}></span>
                     <span className="dist-name">{cat.name}</span>
