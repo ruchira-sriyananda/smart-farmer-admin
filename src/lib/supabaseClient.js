@@ -345,3 +345,54 @@ export const getWeeklyActivity = async () => {
   }
 }
 
+// Helper to get activity heatmap data
+export const getActivityHeatmapData = async (days = 30) => {
+  try {
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - days)
+
+    const { data, error } = await supabase
+      .from('admin_activity_logs')
+      .select('created_at')
+      .gte('created_at', startDate.toISOString())
+
+    if (error) throw error
+
+    const heatmap = Array(7).fill(0).map(() => Array(24).fill(0))
+    data?.forEach(log => {
+      const date = new Date(log.created_at)
+      heatmap[date.getDay()][date.getHours()]++
+    })
+
+    return { data: heatmap, error: null }
+  } catch (err) {
+    console.error('Error fetching heatmap data:', err)
+    return { data: [], error: err }
+  }
+}
+
+// Helper to get advanced activity distribution
+export const getAdvancedActivityDistribution = async (days = 30) => {
+  try {
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - days)
+
+    const { data, error } = await supabase
+      .from('admin_activity_logs')
+      .select('activity_type')
+      .gte('created_at', startDate.toISOString())
+
+    if (error) throw error
+
+    const counts = {}
+    data?.forEach(log => {
+      counts[log.activity_type] = (counts[log.activity_type] || 0) + 1
+    })
+
+    return { data: counts, error: null }
+  } catch (err) {
+    console.error('Error fetching activity distribution:', err)
+    return { data: {}, error: err }
+  }
+}
+

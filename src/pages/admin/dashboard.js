@@ -553,6 +553,11 @@ export default function AdminDashboard() {
 
   const perms = getPermissions()
 
+  // Predictive calculations
+  const dailyAvg = userGrowthData.reduce((a, b) => a + b, 0) / (userGrowthData.length * 7 || 1)
+  const predictedTotal = Math.round(stats.totalUsers + (dailyAvg * 30))
+  const healthScore = Math.round((stats.verifiedUsers / (stats.totalUsers || 1)) * 100)
+
   if (loading) {
     return (
       <AdminLayout title="Dashboard">
@@ -643,12 +648,34 @@ export default function AdminDashboard() {
               <span className="stat-change positive"><i className="bi bi-store"></i> Suppliers</span>
             </div>
           </div>
-          <div className="stat-card warning">
+          <div className="stat-card warning" onClick={handleViewAllBarter}>
             <div className="stat-card-icon"><i className="bi bi-arrow-left-right"></i></div>
             <div className="stat-card-content">
               <span className="stat-label">Active Barter</span>
               <h2 className="stat-value">{stats.activeBarterTrades}</h2>
               <span className="stat-change positive"><i className="bi bi-graph-up"></i> Active trades</span>
+            </div>
+          </div>
+          <div className="stat-card predictive">
+            <div className="stat-card-icon"><i className="bi bi-magic"></i></div>
+            <div className="stat-card-content">
+              <span className="stat-label">Projected Users (30d)</span>
+              <h2 className="stat-value">{predictedTotal.toLocaleString()}</h2>
+              <span className="stat-change positive"><i className="bi bi-stars"></i> Predicted Growth</span>
+            </div>
+          </div>
+          <div className="stat-card health">
+            <div className="stat-card-icon"><i className="bi bi-heart-pulse-fill"></i></div>
+            <div className="stat-card-content">
+              <span className="stat-label">Verification Health</span>
+              <h2 className="stat-value">{healthScore}%</h2>
+              <div className="progress mt-2" style={{ height: '6px' }}>
+                <div
+                  className={`progress-bar bg-${healthScore > 80 ? 'success' : healthScore > 50 ? 'warning' : 'danger'}`}
+                  role="progressbar"
+                  style={{ width: `${healthScore}%` }}
+                ></div>
+              </div>
             </div>
           </div>
         </div>
@@ -923,13 +950,16 @@ export default function AdminDashboard() {
         .last-update { font-size: 13px; color: #6c757d; }
         .refresh-btn { width: 36px; height: 36px; border-radius: 10px; background: #f8f9fa; border: 1px solid #e9ecef; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.3s ease; }
         .refresh-btn:hover { background: #e9ecef; transform: rotate(15deg); }
-        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 24px; }
         .stat-card { background: white; border-radius: 24px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: all 0.3s ease; cursor: pointer; }
         .stat-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
         .stat-card.primary .stat-card-icon { background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); color: #667eea; }
-        .stat-card.success .stat-card-icon { background: rgba(16,185,129,0.1); color: #10b981; }
-        .stat-card.info .stat-card-icon { background: rgba(59,130,246,0.1); color: #3b82f6; }
-        .stat-card.warning .stat-card-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+        .stat-card.success .stat-card-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .stat-card.info .stat-card-icon { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+        .stat-card.warning .stat-card-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .stat-card.predictive { background: #fdf2f2; border: 1px solid #fecaca; }
+        .stat-card.predictive .stat-card-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .stat-card.health .stat-card-icon { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .stat-card-icon { width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; }
         .stat-card-icon i { font-size: 28px; }
         .stat-card-content { flex: 1; }

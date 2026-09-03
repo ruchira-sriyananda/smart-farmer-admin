@@ -61,7 +61,14 @@ export default function AnalyticsDashboard() {
     postActivity: [],
     userActivity: [],
     topContributors: [],
-    popularCategories: []
+    popularCategories: [],
+    activityHeatmap: [],
+    funnelData: {
+      registered: 0,
+      verified: 0,
+      active: 0
+    },
+    advancedDistribution: {}
   })
 
   useEffect(() => {
@@ -102,7 +109,9 @@ export default function AnalyticsDashboard() {
         userGrowthData,
         weeklyActivity,
         topContributorsData,
-        popularCategoriesData
+        popularCategoriesData,
+        heatmapData,
+        advancedDist
       ] = await Promise.all([
         supabase.from('users').select('*', { count: 'exact', head: true }),
         supabase.from('user_sessions').select('*', { count: 'exact', head: true }).eq('session_status', 'ACTIVE'),
@@ -120,7 +129,9 @@ export default function AnalyticsDashboard() {
         fetchUserGrowth(startDate),
         fetchWeeklyActivity(startDate),
         fetchTopContributors(),
-        fetchPopularCategories()
+        fetchPopularCategories(),
+        fetchEngagementHeatmap(startDate),
+        fetchAdvancedDistribution(startDate)
       ])
 
       const { data: roles } = await supabase.from('roles').select('role_id, role_name')
@@ -168,7 +179,14 @@ export default function AnalyticsDashboard() {
         userGrowth: userGrowthData,
         postActivity: weeklyActivity,
         topContributors: topContributorsData,
-        popularCategories: popularCategoriesData
+        popularCategories: popularCategoriesData,
+        activityHeatmap: heatmapData,
+        funnelData: {
+          registered: totalUsers.count || 0,
+          verified: verifiedUsers.count || 0,
+          active: activeUsers.count || 0
+        },
+        advancedDistribution: advancedDist
       })
     } catch (err) {
       console.error('Error fetching analytics:', err)
@@ -256,6 +274,71 @@ export default function AnalyticsDashboard() {
       .map(([name, count]) => ({ name, count }))
   }
 
+  const fetchEngagementHeatmap = async (startDate) => {
+    try {
+      const { data } = await supabase
+        .from('admin_activity_logs')
+        .select('created_at')
+        .gte('created_at', startDate.toISOString())
+
+      // 7 days x 24 hours matrix
+      const heatmap = Array(7).fill(0).map(() => Array(24).fill(0))
+
+      data?.forEach(log => {
+        const date = new Date(log.created_at)
+        const day = date.getDay() // 0-6 (Sun-Sat)
+        const hour = date.getHours() // 0-23
+        heatmap[day][hour]++
+      })
+
+      return heatmap
+    } catch (err) {
+      console.error('Heatmap error:', err)
+      return []
+    }
+  }
+
+  const fetchAdvancedDistribution = async (startDate) => {
+    try {
+      const { data } = await supabase
+        .from('admin_activity_logs')
+        .select('activity_type')
+        .gte('created_at', startDate.toISOString())
+
+      const counts = {}
+      data?.forEach(log => {
+        counts[log.activity_type] = (counts[log.activity_type] || 0) + 1
+      })
+      return counts
+    } catch (err) {
+      console.error('Distribution error:', err)
+      return {}
+    }
+  }
+
+  const exportAnalyticsCSV = () => {
+    const rows = [
+      ['Metric', 'Value'],
+      ['Total Users', analytics.userStats.total],
+      ['Active Users', analytics.userStats.active],
+      ['Total Posts', analytics.contentStats.posts],
+      ['Verified Users', analytics.userStats.verified],
+      ['Farmers', analytics.userStats.farmers],
+      ['Vendors', analytics.userStats.vendors]
+    ]
+
+    const csvContent = "data:text/csv;charset=utf-8,"
+      + rows.map(e => e.join(",")).join("\n")
+
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement("a")
+    link.setAttribute("href", encodedUri)
+    link.setAttribute("download", `analytics_report_${new Date().toLocaleDateString()}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
   const userGrowthChart = {
     labels: analytics.userGrowth.labels || [],
     datasets: [{
@@ -304,6 +387,16 @@ export default function AnalyticsDashboard() {
     }]
   }
 
+  const distributionChart = {
+    labels: Object.keys(analytics.advancedDistribution),
+    datasets: [{
+      data: Object.values(analytics.advancedDistribution),
+      backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899'],
+      borderWidth: 0,
+      borderRadius: 8
+    }]
+  }
+
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -330,6 +423,95 @@ export default function AnalyticsDashboard() {
         grid: { display: false }
       }
     }
+  }
+
+  // Predictive calculation
+  const dailyAvg = analytics.userGrowth.values?.reduce((a, b) => a + b, 0) / (analytics.userGrowth.values?.length || 1)
+  const predictedNextMonth = Math.round(analytics.userStats.total + (dailyAvg * 30))
+
+  const HeatmapChart = ({ data }) => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const hours = Array.from({length: 24}, (_, i) => i)
+
+    const getMax = () => {
+      let max = 0
+      data?.forEach(row => row.forEach(val => { if(val > max) max = val }))
+      return max || 1
+    }
+
+    const max = getMax()
+
+    return (
+      <div className="heatmap-wrapper">
+        <div className="heatmap-header">
+          <div className="empty-corner"></div>
+          {hours.map(h => <div key={h} className="hour-label">{h}h</div>)}
+        </div>
+        {days.map((day, dayIdx) => (
+          <div key={day} className="heatmap-row">
+            <div className="day-label">{day}</div>
+            {hours.map(hour => {
+              const value = data[dayIdx]?.[hour] || 0
+              const opacity = (value / max) * 0.9 + 0.1
+              return (
+                <div
+                  key={hour}
+                  className="heatmap-cell"
+                  style={{ background: `rgba(79, 70, 229, ${value > 0 ? opacity : 0.05})` }}
+                  title={`${day} ${hour}h: ${value} activities`}
+                ></div>
+              )
+            })}
+          </div>
+        ))}
+        <style jsx>{`
+          .heatmap-wrapper { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; padding: 10px; }
+          .heatmap-header { display: flex; gap: 4px; margin-bottom: 4px; }
+          .empty-corner { width: 40px; flex-shrink: 0; }
+          .hour-label { width: 100%; min-width: 15px; font-size: 8px; text-align: center; color: #94a3b8; }
+          .heatmap-row { display: flex; gap: 4px; align-items: center; }
+          .day-label { width: 40px; font-size: 10px; font-weight: 600; color: #64748b; flex-shrink: 0; }
+          .heatmap-cell { width: 100%; height: 20px; min-width: 15px; border-radius: 4px; transition: transform 0.2s; cursor: pointer; }
+          .heatmap-cell:hover { transform: scale(1.2); z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        `}</style>
+      </div>
+    )
+  }
+
+  const FunnelChart = ({ registered, verified, active }) => {
+    const steps = [
+      { label: 'Registered', value: registered, color: '#4f46e5' },
+      { label: 'Verified', value: verified, color: '#10b981' },
+      { label: 'Active', value: active, color: '#f59e0b' }
+    ]
+
+    return (
+      <div className="funnel-container">
+        {steps.map((step, idx) => {
+          const prevValue = idx === 0 ? step.value : steps[idx-1].value
+          const dropOff = prevValue > 0 ? Math.round((1 - step.value / prevValue) * 100) : 0
+          const width = (step.value / registered) * 100
+
+          return (
+            <div key={step.label} className="funnel-step-wrapper">
+              {idx > 0 && <div className="drop-off-label">-{dropOff}% drop-off</div>}
+              <div className="funnel-step" style={{ width: `${width}%`, background: step.color }}>
+                <span className="step-label">{step.label}</span>
+                <span className="step-value">{step.value.toLocaleString()}</span>
+              </div>
+            </div>
+          )
+        })}
+        <style jsx>{`
+          .funnel-container { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px; }
+          .funnel-step-wrapper { width: 100%; display: flex; flex-direction: column; align-items: center; }
+          .funnel-step { height: 50px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; border-radius: 12px; color: white; font-weight: 600; min-width: 150px; }
+          .drop-off-label { font-size: 11px; color: #ef4444; margin: 4px 0; font-weight: 700; }
+          .step-label { font-size: 13px; }
+          .step-value { font-size: 16px; }
+        `}</style>
+      </div>
+    )
   }
 
   if (loading) {
@@ -382,6 +564,9 @@ export default function AnalyticsDashboard() {
             <button className={`range-btn ${dateRange === 'week' ? 'active' : ''}`} onClick={() => setDateRange('week')}>This Week</button>
             <button className={`range-btn ${dateRange === 'month' ? 'active' : ''}`} onClick={() => setDateRange('month')}>This Month</button>
           </div>
+          <button className="export-btn" onClick={exportAnalyticsCSV}>
+            <i className="bi bi-download"></i> Export Data
+          </button>
         </div>
 
         <div className="metrics-grid">
@@ -401,57 +586,12 @@ export default function AnalyticsDashboard() {
               <span className="metric-trend positive">Currently online</span>
             </div>
           </div>
-          <div className="metric-card">
-            <div className="metric-icon info"><i className="bi bi-file-post-fill"></i></div>
+          <div className="metric-card predictive">
+            <div className="metric-icon warning"><i className="bi bi-graph-up-arrow"></i></div>
             <div className="metric-info">
-              <span className="metric-label">Total Posts</span>
-              <h2 className="metric-value">{analytics.contentStats.posts.toLocaleString()}</h2>
-              <span className="metric-trend">Community content</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="secondary-metrics">
-          <div className="secondary-card">
-            <div className="secondary-icon"><i className="bi bi-tree-fill"></i></div>
-            <div className="secondary-info">
-              <span className="secondary-label">Farmers</span>
-              <strong className="secondary-value">{analytics.userStats.farmers.toLocaleString()}</strong>
-            </div>
-          </div>
-          <div className="secondary-card">
-            <div className="secondary-icon"><i className="bi bi-shop"></i></div>
-            <div className="secondary-info">
-              <span className="secondary-label">Vendors</span>
-              <strong className="secondary-value">{analytics.userStats.vendors.toLocaleString()}</strong>
-            </div>
-          </div>
-          <div className="secondary-card">
-            <div className="secondary-icon"><i className="bi bi-chat-dots"></i></div>
-            <div className="secondary-info">
-              <span className="secondary-label">Messages</span>
-              <strong className="secondary-value">{analytics.contentStats.messages.toLocaleString()}</strong>
-            </div>
-          </div>
-          <div className="secondary-card">
-            <div className="secondary-icon"><i className="bi bi-arrow-left-right"></i></div>
-            <div className="secondary-info">
-              <span className="secondary-label">Active Barter</span>
-              <strong className="secondary-value">{analytics.contentStats.activeBarter}</strong>
-            </div>
-          </div>
-          <div className="secondary-card">
-            <div className="secondary-icon"><i className="bi bi-megaphone"></i></div>
-            <div className="secondary-info">
-              <span className="secondary-label">Active Ads</span>
-              <strong className="secondary-value">{analytics.contentStats.ads}</strong>
-            </div>
-          </div>
-          <div className="secondary-card">
-            <div className="secondary-icon"><i className="bi bi-check-circle"></i></div>
-            <div className="secondary-info">
-              <span className="secondary-label">Verified Users</span>
-              <strong className="secondary-value">{Math.round((analytics.userStats.verified / analytics.userStats.total) * 100)}%</strong>
+              <span className="metric-label">Predicted Users (30d)</span>
+              <h2 className="metric-value">{predictedNextMonth.toLocaleString()}</h2>
+              <span className="metric-trend">Expected base</span>
             </div>
           </div>
         </div>
@@ -464,25 +604,82 @@ export default function AnalyticsDashboard() {
             </div>
             <div className="chart-body"><Line data={userGrowthChart} options={chartOptions} /></div>
           </div>
+
           <div className="chart-card">
             <div className="chart-header">
-              <h5>📊 Platform Activity</h5>
+              <h5>🔥 User Engagement Heatmap</h5>
+              <p>Activity density by day and hour</p>
+            </div>
+            <div className="chart-body">
+              <HeatmapChart data={analytics.activityHeatmap} />
+            </div>
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-header">
+              <h5>📊 Verification Funnel</h5>
+              <p>Conversion from registered to active</p>
+            </div>
+            <div className="chart-body">
+              <FunnelChart
+                registered={analytics.funnelData.registered}
+                verified={analytics.funnelData.verified}
+                active={analytics.funnelData.active}
+              />
+            </div>
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-header">
+              <h5>⚙️ Advanced Activity Distribution</h5>
+              <p>System-wide action breakdown</p>
+            </div>
+            <div className="chart-body">
+              <Doughnut data={distributionChart} options={chartOptions} />
+            </div>
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-header">
+              <h5>📊 Weekly Activity</h5>
               <p>Posts created per day</p>
             </div>
             <div className="chart-body"><Bar data={activityChart} options={chartOptions} /></div>
           </div>
-          <div className="chart-card">
-            <div className="chart-header">
+        </div>
+
+        <div className="distribution-section">
+          <div className="dist-card">
+            <div className="dist-header">
+              <h5><i className="bi bi-pie-chart"></i> Popular Categories</h5>
+              <p>Most discussed topics</p>
+            </div>
+            <div className="dist-body">
+              <div className="dist-chart"><Doughnut data={categoryChart} options={chartOptions} /></div>
+              <div className="dist-list">
+                {analytics.popularCategories.map((cat, idx) => (
+                  <div key={idx} className="dist-item">
+                    <span className="dist-color" style={{ background: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][idx] }}></span>
+                    <span className="dist-name">{cat.name}</span>
+                    <span className="dist-value">{cat.count} posts</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="dist-card">
+            <div className="dist-header">
               <h5>🏆 Top Contributors</h5>
               <p>Most active community members</p>
             </div>
-            <div className="chart-body">
-              <div className="contributor-summary">
-                {analytics.topContributors.map((contributor, idx) => (
-                  <div key={idx} className="contributor-summary-item">
-                    <div className="contributor-rank">#{idx + 1}</div>
-                    <div className="contributor-name">{contributor.name}</div>
-                    <div className="contributor-count">{contributor.count} posts</div>
+            <div className="dist-body">
+              <div className="contributor-list-vertical">
+                {analytics.topContributors.map((c, idx) => (
+                  <div key={idx} className="contributor-item-vertical">
+                    <div className="rank">#{idx+1}</div>
+                    <div className="name">{c.name}</div>
+                    <div className="count">{c.count} posts</div>
                   </div>
                 ))}
               </div>
@@ -648,11 +845,37 @@ export default function AnalyticsDashboard() {
           color: white;
         }
 
+        .export-btn {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 20px;
+          background: white;
+          border: 2px solid #e2e8f0;
+          border-radius: 12px;
+          color: #475569;
+          font-weight: 600;
+          font-size: 13px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .export-btn:hover {
+          border-color: #4f46e5;
+          color: #4f46e5;
+          transform: translateY(-1px);
+        }
+
         .metrics-grid {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
           gap: 20px;
           margin-bottom: 24px;
+        }
+
+        .metric-card.predictive {
+          background: #fdf2f2;
+          border: 1px solid #fecaca;
         }
 
         .metric-card {
@@ -664,6 +887,26 @@ export default function AnalyticsDashboard() {
           gap: 16px;
           transition: all 0.3s ease;
         }
+
+        .contributor-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 16px;
+          width: 100%;
+        }
+
+        .contributor-card {
+          background: #f8f9fa;
+          padding: 16px;
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .rank { font-weight: 800; font-size: 20px; color: #4f46e5; width: 30px; }
+        .name { flex: 1; font-weight: 600; color: #1e293b; }
+        .count { font-size: 12px; color: #64748b; }
 
         .metric-card:hover {
           transform: translateY(-4px);
@@ -803,6 +1046,46 @@ export default function AnalyticsDashboard() {
 
         .dist-chart { flex: 1; min-width: 200px; height: 200px; }
         .polar-container { flex: 1; height: 280px; }
+        .dist-list { flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: center; }
+
+        .dist-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .dist-color { width: 12px; height: 12px; border-radius: 50%; }
+        .dist-name { flex: 1; font-size: 13px; color: #4b5563; }
+        .dist-value { font-size: 13px; font-weight: 600; color: #1f2937; }
+
+        .contributor-list-vertical { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+        .contributor-item-vertical { display: flex; align-items: center; gap: 12px; padding: 12px; background: #f8f9fa; border-radius: 12px; }
+
+        .distribution-section {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-bottom: 28px;
+        }
+
+        .dist-card {
+          background: white;
+          border-radius: 20px;
+          padding: 20px;
+        }
+
+        .dist-header { margin-bottom: 20px; }
+        .dist-header h5 { font-size: 16px; font-weight: 600; margin: 0 0 4px 0; color: #1f2937; }
+        .dist-header h5 i { margin-right: 8px; color: #4f46e5; }
+        .dist-header p { font-size: 12px; color: #6c757d; margin: 0; }
+
+        .dist-body {
+          display: flex;
+          gap: 20px;
+          flex-wrap: wrap;
+        }
+
+        .dist-chart { flex: 1; min-width: 200px; height: 200px; }
         .dist-list { flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: center; }
 
         .dist-item {
