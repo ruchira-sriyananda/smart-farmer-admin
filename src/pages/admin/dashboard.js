@@ -554,7 +554,8 @@ export default function AdminDashboard() {
   const perms = getPermissions()
 
   // Predictive calculations
-  const dailyAvg = userGrowthData.reduce((a, b) => a + b, 0) / (userGrowthData.length * 7 || 1)
+  const growthArray = Array.isArray(userGrowthData) ? userGrowthData : []
+  const dailyAvg = growthArray.reduce((a, b) => a + b, 0) / (growthArray.length * 7 || 1)
   const predictedTotal = Math.round(stats.totalUsers + (dailyAvg * 30))
   const healthScore = Math.round((stats.verifiedUsers / (stats.totalUsers || 1)) * 100)
 
