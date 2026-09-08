@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { supabase } from '@/lib/supabaseClient'
+import { supabase, resolveImageUrl } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 
 export default function MobileUsers() {
@@ -28,26 +28,6 @@ export default function MobileUsers() {
     verified: 0,
     pending: 0
   })
-
-  const getImageUrl = (path) => {
-    if (!path) return null
-    if (path.startsWith('http')) return path
-    if (path.startsWith('data:')) return path
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
-
-    if (supabaseUrl) {
-      const cleanPath = path.startsWith('/') ? path.substring(1) : path
-      const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles']
-      const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(bucket))
-
-      if (hasBucket || cleanPath.includes('/')) {
-        return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`
-      }
-      return `${supabaseUrl}/storage/v1/object/public/profile-images/${cleanPath}`
-    }
-    return path
-  }
 
   useEffect(() => {
     checkTableColumns()
@@ -499,7 +479,7 @@ export default function MobileUsers() {
                           <div className="user-avatar">
                             {user.profile_image ? (
                               <img
-                                src={getImageUrl(user.profile_image)}
+                                src={resolveImageUrl(user.profile_image, 'profile-images')}
                                 alt=""
                                 onError={(e) => {
                                   e.target.style.display = 'none'
@@ -586,7 +566,7 @@ export default function MobileUsers() {
                 <div className="user-avatar-large">
                   {selectedUser.profile_image ? (
                     <img
-                      src={getImageUrl(selectedUser.profile_image)}
+                      src={resolveImageUrl(selectedUser.profile_image, 'profile-images')}
                       alt=""
                       onError={(e) => {
                         e.target.style.display = 'none'
@@ -658,7 +638,7 @@ export default function MobileUsers() {
                 <div className="user-avatar-small">
                   {selectedUser.profile_image ? (
                     <img
-                      src={getImageUrl(selectedUser.profile_image)}
+                      src={resolveImageUrl(selectedUser.profile_image, 'profile-images')}
                       alt=""
                       onError={(e) => {
                         e.target.style.display = 'none'

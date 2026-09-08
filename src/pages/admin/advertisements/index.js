@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { createClient } from '@supabase/supabase-js'
 import AdminLayout from '@/components/AdminLayout'
+import { resolveImageUrl } from '@/lib/supabaseClient'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -35,26 +36,6 @@ export default function Advertisements() {
     smtp_port: '587'
   })
   const [hoveredCard, setHoveredCard] = useState(null)
-
-  const getImageUrl = (path) => {
-    if (!path) return null
-    if (path.startsWith('http')) return path
-    if (path.startsWith('data:')) return path
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
-
-    if (supabaseUrl) {
-      const cleanPath = path.startsWith('/') ? path.substring(1) : path
-      const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles']
-      const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(bucket))
-
-      if (hasBucket || cleanPath.includes('/')) {
-        return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`
-      }
-      return `${supabaseUrl}/storage/v1/object/public/ad-images/${cleanPath}`
-    }
-    return path
-  }
 
   const [formData, setFormData] = useState({
     title: '',
@@ -907,7 +888,7 @@ export default function Advertisements() {
                   {ad.image_url && (
                     <div className="ad-image-wrapper">
                       <img
-                        src={getImageUrl(ad.image_url)}
+                        src={resolveImageUrl(ad.image_url, 'ad-images')}
                         alt=""
                         onError={(e) => {
                           e.target.style.display = 'none'
@@ -1182,7 +1163,7 @@ export default function Advertisements() {
             <div className="modal-body">
               {selectedAd.image_url && (
                 <div className="view-image">
-                  <img src={getImageUrl(selectedAd.image_url)} alt="" />
+                  <img src={resolveImageUrl(selectedAd.image_url, 'ad-images')} alt="" />
                 </div>
               )}
               

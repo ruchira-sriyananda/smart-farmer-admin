@@ -24,11 +24,42 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
     })
   : new Proxy({}, {
       get: (target, prop) => {
+        if (prop === 'supabaseUrl') return supabaseUrl || 'https://vclmowfkmrshlqswhffv.supabase.co'
         return () => {
           throw new Error(`Supabase client is not initialized. Missing environment variables: ${prop}`)
         }
       }
     })
+
+/**
+ * Robustly resolves an image path to a full public URL.
+ * Handles full URLs, relative paths, and common bucket fallbacks.
+ */
+export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
+  if (!path) return null
+  if (path.startsWith('http')) return path
+  if (path.startsWith('data:')) return path
+
+  // Get base URL from client or env
+  const baseUrl = supabase.supabaseUrl || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
+  const cleanPath = path.startsWith('/') ? path.substring(1) : path
+
+  // Check if path already starts with a known bucket name
+  const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles', 'product-images']
+  const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(`${bucket}/`))
+
+  if (hasBucket) {
+    return `${baseUrl}/storage/v1/object/public/${cleanPath}`
+  }
+
+  // If path has a directory structure, assume the first part is the bucket
+  if (cleanPath.includes('/')) {
+    return `${baseUrl}/storage/v1/object/public/${cleanPath}`
+  }
+
+  // Fallback: use the provided default bucket
+  return `${baseUrl}/storage/v1/object/public/${defaultBucket}/${cleanPath}`
+}
 
 // Get current admin user from session
 export const getCurrentAdmin = () => {

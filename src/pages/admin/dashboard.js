@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { supabase } from '@/lib/supabaseClient'
+import { supabase, resolveImageUrl } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 import {
   Chart as ChartJS,
@@ -64,26 +64,6 @@ export default function AdminDashboard() {
   const [roleDistribution, setRoleDistribution] = useState({})
   const [weeklyActivity, setWeeklyActivity] = useState([0, 0, 0, 0, 0, 0, 0])
   const [topContributors, setTopContributors] = useState([])
-
-  const getImageUrl = (path) => {
-    if (!path) return null
-    if (path.startsWith('http')) return path
-    if (path.startsWith('data:')) return path
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
-
-    if (supabaseUrl) {
-      const cleanPath = path.startsWith('/') ? path.substring(1) : path
-      const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles']
-      const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(bucket))
-
-      if (hasBucket || cleanPath.includes('/')) {
-        return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`
-      }
-      return `${supabaseUrl}/storage/v1/object/public/barter-images/${cleanPath}`
-    }
-    return path
-  }
 
   const handleImageError = (e) => {
     e.target.style.display = 'none'
@@ -839,7 +819,7 @@ export default function AdminDashboard() {
                   <div className="online-avatar">
                     {user.user?.profile_image ? (
                       <img
-                        src={getImageUrl(user.user.profile_image)}
+                        src={resolveImageUrl(user.user.profile_image, 'profile-images')}
                         alt=""
                         onError={(e) => {
                           e.target.style.display = 'none'
@@ -881,7 +861,7 @@ export default function AdminDashboard() {
                         <div className="user-avatar-sm">
                           {user.profile_image ? (
                             <img
-                              src={getImageUrl(user.profile_image)}
+                              src={resolveImageUrl(user.profile_image, 'profile-images')}
                               alt=""
                               onError={(e) => {
                                 e.target.style.display = 'none'
@@ -919,7 +899,7 @@ export default function AdminDashboard() {
                   {post.image_url && (
                     <div className="post-card-image">
                       <img
-                        src={getImageUrl(post.image_url)}
+                        src={resolveImageUrl(post.image_url, 'post-images')}
                         alt=""
                         onError={handleImageError}
                       />
@@ -953,7 +933,7 @@ export default function AdminDashboard() {
                   {listing.image_url && (
                     <div className="barter-card-image">
                       <img
-                        src={getImageUrl(listing.image_url)}
+                        src={resolveImageUrl(listing.image_url, 'barter-images')}
                         alt=""
                         onError={handleImageError}
                       />

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { supabase } from '@/lib/supabaseClient'
+import { supabase, resolveImageUrl } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 import {
   Chart as ChartJS,
@@ -51,45 +51,19 @@ export default function BarterTransactions() {
   const [selectedImage, setSelectedImage] = useState('')
   const [emailSettings, setEmailSettings] = useState({ enable_notifications: false })
 
-  const getImageUrl = (path) => {
-    if (!path) return null
-    if (path.startsWith('http')) return path
-    if (path.startsWith('data:')) return path
-
-    // Extract project ID from env or fallback to your project ID
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
-
-    if (supabaseUrl) {
-      const cleanPath = path.startsWith('/') ? path.substring(1) : path
-
-      // If path already contains a bucket name in it (e.g. "barter-images/image.jpg")
-      // Check for common bucket names
-      const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles']
-      const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(bucket))
-
-      if (hasBucket || cleanPath.includes('/')) {
-        return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`
-      }
-
-      // Default fallback
-      return `${supabaseUrl}/storage/v1/object/public/barter-images/${cleanPath}`
-    }
-    return path
-  }
-
   const handleImageError = (e) => {
     e.target.style.display = 'none'
-    e.target.parentElement.classList.add('no-image-fallback')
-    // Optionally add a placeholder icon to the parent
-    const icon = document.createElement('i')
-    icon.className = 'bi bi-image text-muted'
-    icon.style.fontSize = '2rem'
-    e.target.parentElement.appendChild(icon)
-    const text = document.createElement('span')
-    text.innerText = 'Image not available'
-    text.className = 'text-muted mt-2'
-    text.style.fontSize = '0.8rem'
-    e.target.parentElement.appendChild(text)
+    const parent = e.target.parentElement
+    if (parent) {
+      parent.classList.add('no-image-fallback')
+      // Only add if not already there
+      if (!parent.querySelector('.error-placeholder')) {
+        const div = document.createElement('div')
+        div.className = 'error-placeholder d-flex flex-column align-items-center justify-content-center w-100 h-100 text-muted'
+        div.innerHTML = '<i class="bi bi-image" style="font-size: 2rem;"></i><span style="font-size: 0.8rem;">Image not available</span>'
+        parent.appendChild(div)
+      }
+    }
   }
 
   // Quick rejection reasons
@@ -765,7 +739,7 @@ export default function BarterTransactions() {
                       <div className="user-avatar">
                         {listing.users?.profile_image ? (
                           <img
-                            src={getImageUrl(listing.users.profile_image)}
+                            src={resolveImageUrl(listing.users.profile_image, 'profile-images')}
                             alt=""
                             onError={(e) => {
                               e.target.style.display = 'none'
@@ -787,9 +761,9 @@ export default function BarterTransactions() {
 
                   {/* Listing Image */}
                   {listing.image_url ? (
-                    <div className="listing-image-preview" onClick={() => viewImage(getImageUrl(listing.image_url))}>
+                    <div className="listing-image-preview" onClick={() => viewImage(resolveImageUrl(listing.image_url))}>
                       <img
-                        src={getImageUrl(listing.image_url)}
+                        src={resolveImageUrl(listing.image_url)}
                         alt=""
                         onError={handleImageError}
                       />
@@ -920,9 +894,9 @@ export default function BarterTransactions() {
             <div className="modal-body">
               <div className="listing-summary">
                 {selectedListing.image_url && (
-                  <div className="modal-image-preview" onClick={() => viewImage(getImageUrl(selectedListing.image_url))}>
+                  <div className="modal-image-preview" onClick={() => viewImage(resolveImageUrl(selectedListing.image_url))}>
                     <img
-                      src={getImageUrl(selectedListing.image_url)}
+                      src={resolveImageUrl(selectedListing.image_url)}
                       alt=""
                       onError={handleImageError}
                     />
@@ -1020,9 +994,9 @@ export default function BarterTransactions() {
             <div className="modal-body">
               {selectedTransaction.image_url && (
                 <div className="image-section">
-                  <div className="image-container" onClick={() => viewImage(getImageUrl(selectedTransaction.image_url))}>
+                  <div className="image-container" onClick={() => viewImage(resolveImageUrl(selectedTransaction.image_url))}>
                     <img
-                      src={getImageUrl(selectedTransaction.image_url)}
+                      src={resolveImageUrl(selectedTransaction.image_url)}
                       alt=""
                       onError={handleImageError}
                     />
@@ -1049,7 +1023,7 @@ export default function BarterTransactions() {
                   <div className="seller-avatar">
                     {selectedTransaction.users?.profile_image ? (
                       <img
-                        src={getImageUrl(selectedTransaction.users.profile_image)}
+                        src={resolveImageUrl(selectedTransaction.users.profile_image, 'profile-images')}
                         alt=""
                         onError={(e) => {
                           e.target.style.display = 'none'
@@ -1122,7 +1096,7 @@ export default function BarterTransactions() {
                       <div className="requester-avatar">
                         {request.requester?.profile_image ? (
                           <img
-                            src={getImageUrl(request.requester.profile_image)}
+                            src={resolveImageUrl(request.requester.profile_image, 'profile-images')}
                             alt=""
                             onError={(e) => {
                               e.target.style.display = 'none'
@@ -1144,9 +1118,9 @@ export default function BarterTransactions() {
                   <div className="offered-section">
                     <strong>Offered Item:</strong> {request.offered_item}
                     {request.offered_item_image && (
-                      <div className="offered-image-preview" onClick={() => viewImage(getImageUrl(request.offered_item_image))}>
+                      <div className="offered-image-preview" onClick={() => viewImage(resolveImageUrl(request.offered_item_image))}>
                         <img
-                          src={getImageUrl(request.offered_item_image)}
+                          src={resolveImageUrl(request.offered_item_image)}
                           alt=""
                           onError={handleImageError}
                         />

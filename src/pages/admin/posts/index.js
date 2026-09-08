@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { supabase } from '@/lib/supabaseClient'
+import { supabase, resolveImageUrl } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 
 export default function ContentModeration() {
@@ -42,26 +42,6 @@ export default function ContentModeration() {
     fetchPosts()
     fetchStats()
   }, [filter])
-
-  const getImageUrl = (path) => {
-    if (!path) return null
-    if (path.startsWith('http')) return path
-    if (path.startsWith('data:')) return path
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
-
-    if (supabaseUrl) {
-      const cleanPath = path.startsWith('/') ? path.substring(1) : path
-      const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles']
-      const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(bucket))
-
-      if (hasBucket || cleanPath.includes('/')) {
-        return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`
-      }
-      return `${supabaseUrl}/storage/v1/object/public/post-images/${cleanPath}`
-    }
-    return path
-  }
 
   const fetchPosts = async () => {
     try {
@@ -488,7 +468,7 @@ export default function ContentModeration() {
                   <div className="user-avatar">
                     {post.user?.profile_image ? (
                       <img
-                        src={getImageUrl(post.user.profile_image)}
+                        src={resolveImageUrl(post.user.profile_image, 'profile-images')}
                         alt=""
                         onError={(e) => {
                           e.target.style.display = 'none'
@@ -630,7 +610,7 @@ export default function ContentModeration() {
                       <div className="author-avatar">
                         {postDetails.user?.profile_image ? (
                           <img
-                            src={getImageUrl(postDetails.user.profile_image)}
+                            src={resolveImageUrl(postDetails.user.profile_image, 'profile-images')}
                             alt=""
                             onError={(e) => {
                               e.target.style.display = 'none'
