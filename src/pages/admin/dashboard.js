@@ -65,6 +65,18 @@ export default function AdminDashboard() {
   const [weeklyActivity, setWeeklyActivity] = useState([0, 0, 0, 0, 0, 0, 0])
   const [topContributors, setTopContributors] = useState([])
 
+  const handleImageError = (e) => {
+    e.target.style.display = 'none'
+    const parent = e.target.parentElement
+    parent.classList.add('no-image-fallback')
+    if (!parent.querySelector('.fallback-content')) {
+      const container = document.createElement('div')
+      container.className = 'fallback-content d-flex flex-column align-items-center justify-content-center w-100 h-100'
+      container.innerHTML = '<i class="bi bi-image text-muted" style="font-size: 1.5rem;"></i><span class="text-muted small">N/A</span>'
+      parent.appendChild(container)
+    }
+  }
+
   // Role-based permissions
   const permissions = {
     SUPER_ADMIN: {
@@ -838,7 +850,21 @@ export default function AdminDashboard() {
                   {recentUsers.map((user) => (
                     <tr key={user.user_id}>
                       <td className="user-cell">
-                        <div className="user-avatar-sm">{user.profile_image ? <img src={user.profile_image} alt={user.full_name} /> : <span>{user.full_name?.charAt(0)}</span>}</div>
+                        <div className="user-avatar-sm">
+                          {user.profile_image ? (
+                            <img
+                              src={user.profile_image}
+                              alt={user.full_name}
+                              onError={(e) => {
+                                e.target.style.display = 'none'
+                                e.target.nextSibling.style.display = 'flex'
+                              }}
+                            />
+                          ) : null}
+                          <span style={{ display: user.profile_image ? 'none' : 'flex' }}>
+                            {user.full_name?.charAt(0)}
+                          </span>
+                        </div>
                         <div><div className="user-name-sm">{user.full_name}</div><div className="user-email">{user.email}</div></div>
                       </td>
                       <td>{getRoleBadge(user.role_name)}</td>
@@ -862,7 +888,15 @@ export default function AdminDashboard() {
             <div className="posts-grid">
               {recentPosts.map((post) => (
                 <div key={post.post_id} className="post-card">
-                  {post.image_url && <div className="post-card-image"><img src={post.image_url} alt={post.title} /></div>}
+                  {post.image_url && (
+                    <div className="post-card-image">
+                      <img
+                        src={post.image_url}
+                        alt={post.title}
+                        onError={handleImageError}
+                      />
+                    </div>
+                  )}
                   <div className="post-card-content">
                     <h6>{post.title}</h6>
                     <p>{post.content?.substring(0, 80)}...</p>
@@ -888,7 +922,15 @@ export default function AdminDashboard() {
             <div className="barter-grid">
               {recentBarterListings.map((listing) => (
                 <div key={listing.listing_id} className="barter-card" onClick={() => router.push(`/admin/barter?id=${listing.listing_id}`)}>
-                  {listing.image_url && <div className="barter-card-image"><img src={listing.image_url} alt={listing.title} /></div>}
+                  {listing.image_url && (
+                    <div className="barter-card-image">
+                      <img
+                        src={listing.image_url}
+                        alt={listing.title}
+                        onError={handleImageError}
+                      />
+                    </div>
+                  )}
                   <div className="barter-card-content-wrapper">
                     <div className="barter-card-header">
                       <h6>{listing.title}</h6>
@@ -1078,6 +1120,9 @@ export default function AdminDashboard() {
         .barter-status { padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; }
         .barter-status.active { background: #d1fae5; color: #065f46; }
         .barter-status.inactive { background: #fee2e2; color: #991b1b; }
+
+        :global(.no-image-fallback) { background: #f3f4f6 !important; position: relative; }
+
         .no-data-card { grid-column: span 3; text-align: center; padding: 60px 20px; color: #9ca3af; }
         .no-data-card i { font-size: 48px; margin-bottom: 12px; display: block; }
         .quick-actions { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }

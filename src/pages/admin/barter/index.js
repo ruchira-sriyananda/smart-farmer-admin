@@ -50,7 +50,22 @@ export default function BarterTransactions() {
   const [showImageModal, setShowImageModal] = useState(false)
   const [selectedImage, setSelectedImage] = useState('')
   const [emailSettings, setEmailSettings] = useState({ enable_notifications: false })
-  
+
+  const handleImageError = (e) => {
+    e.target.style.display = 'none'
+    e.target.parentElement.classList.add('no-image-fallback')
+    // Optionally add a placeholder icon to the parent
+    const icon = document.createElement('i')
+    icon.className = 'bi bi-image text-muted'
+    icon.style.fontSize = '2rem'
+    e.target.parentElement.appendChild(icon)
+    const text = document.createElement('span')
+    text.innerText = 'Image not available'
+    text.className = 'text-muted mt-2'
+    text.style.fontSize = '0.8rem'
+    e.target.parentElement.appendChild(text)
+  }
+
   // Quick rejection reasons
   const quickReasons = [
     { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
@@ -739,7 +754,11 @@ export default function BarterTransactions() {
                   {/* Listing Image */}
                   {listing.image_url ? (
                     <div className="listing-image-preview" onClick={() => viewImage(listing.image_url)}>
-                      <img src={listing.image_url} alt={listing.title} />
+                      <img
+                        src={listing.image_url}
+                        alt={listing.title}
+                        onError={handleImageError}
+                      />
                       <div className="image-overlay-small">
                         <i className="bi bi-zoom-in"></i>
                       </div>
@@ -868,7 +887,11 @@ export default function BarterTransactions() {
               <div className="listing-summary">
                 {selectedListing.image_url && (
                   <div className="modal-image-preview" onClick={() => viewImage(selectedListing.image_url)}>
-                    <img src={selectedListing.image_url} alt={selectedListing.title} />
+                    <img
+                      src={selectedListing.image_url}
+                      alt={selectedListing.title}
+                      onError={handleImageError}
+                    />
                     <div className="image-hint">Click to enlarge</div>
                   </div>
                 )}
@@ -964,7 +987,11 @@ export default function BarterTransactions() {
               {selectedTransaction.image_url && (
                 <div className="image-section">
                   <div className="image-container" onClick={() => viewImage(selectedTransaction.image_url)}>
-                    <img src={selectedTransaction.image_url} alt={selectedTransaction.title} />
+                    <img
+                      src={selectedTransaction.image_url}
+                      alt={selectedTransaction.title}
+                      onError={handleImageError}
+                    />
                     <div className="image-overlay"><i className="bi bi-zoom-in"></i><span>Click to enlarge</span></div>
                   </div>
                 </div>
@@ -1052,10 +1079,18 @@ export default function BarterTransactions() {
                     <div className="requester-info">
                       <div className="requester-avatar">
                         {request.requester?.profile_image ? (
-                          <img src={request.requester.profile_image} alt={request.requester.full_name} />
-                        ) : (
-                          <span>{request.requester?.full_name?.charAt(0) || 'U'}</span>
-                        )}
+                          <img
+                            src={request.requester.profile_image}
+                            alt={request.requester.full_name}
+                            onError={(e) => {
+                              e.target.style.display = 'none'
+                              e.target.nextSibling.style.display = 'flex'
+                            }}
+                          />
+                        ) : null}
+                        <span style={{ display: request.requester?.profile_image ? 'none' : 'flex' }}>
+                          {request.requester?.full_name?.charAt(0) || 'U'}
+                        </span>
                       </div>
                       <div>
                         <div className="requester-name">{request.requester?.full_name || 'Anonymous'}</div>
@@ -1068,7 +1103,11 @@ export default function BarterTransactions() {
                     <strong>Offered Item:</strong> {request.offered_item}
                     {request.offered_item_image && (
                       <div className="offered-image-preview" onClick={() => viewImage(request.offered_item_image)}>
-                        <img src={request.offered_item_image} alt="Offered Item" />
+                        <img
+                          src={request.offered_item_image}
+                          alt="Offered Item"
+                          onError={handleImageError}
+                        />
                         <div className="image-overlay-small">
                           <i className="bi bi-zoom-in"></i>
                         </div>
@@ -1154,6 +1193,9 @@ export default function BarterTransactions() {
         .listing-image-preview:hover img { transform: scale(1.05); }
         .listing-image-preview.no-image { display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; gap: 8px; font-size: 12px; }
         .listing-image-preview.no-image i { font-size: 24px; }
+
+        :global(.no-image-fallback) { display: flex !important; flex-direction: column; align-items: center; justify-content: center; background: #f3f4f6 !important; height: 100%; min-height: 160px; color: #9ca3af; }
+
         .image-overlay-small { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s ease; }
         .listing-image-preview:hover .image-overlay-small { opacity: 1; }
         .image-overlay-small i { color: white; font-size: 20px; }
