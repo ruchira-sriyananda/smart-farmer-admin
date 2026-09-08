@@ -1064,7 +1064,17 @@ export default function BarterTransactions() {
                     </div>
                     {getRequestStatusBadge(request.request_status)}
                   </div>
-                  <div className="offered-section"><strong>Offered Item:</strong> {request.offered_item}</div>
+                  <div className="offered-section">
+                    <strong>Offered Item:</strong> {request.offered_item}
+                    {request.offered_item_image && (
+                      <div className="offered-image-preview" onClick={() => viewImage(request.offered_item_image)}>
+                        <img src={request.offered_item_image} alt="Offered Item" />
+                        <div className="image-overlay-small">
+                          <i className="bi bi-zoom-in"></i>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div className="request-footer">
                     <div className="request-date"><i className="bi bi-calendar3"></i>{new Date(request.created_at).toLocaleString()}</div>
                   </div>
@@ -1256,7 +1266,10 @@ export default function BarterTransactions() {
         .requester-avatar { width: 44px; height: 44px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; overflow: hidden; }
         .requester-name { font-weight: 600; color: #1f2937; }
         .requester-contact { font-size: 11px; color: #6c757d; }
-        .offered-section { margin-bottom: 12px; padding: 8px 12px; background: white; border-radius: 8px; font-size: 13px; }
+        .offered-section { margin-bottom: 12px; padding: 12px; background: white; border-radius: 12px; font-size: 13px; }
+        .offered-image-preview { width: 100%; height: 120px; border-radius: 8px; overflow: hidden; margin-top: 10px; cursor: pointer; position: relative; }
+        .offered-image-preview img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+        .offered-image-preview:hover img { transform: scale(1.05); }
         .request-date { font-size: 11px; color: #9ca3af; }
         
         .modal-footer { padding: 16px 24px 24px; display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid #e9ecef; }
