@@ -33,9 +33,6 @@ export default function Settings() {
     timezone: 'Asia/Colombo',
     posts_per_page: 20,
     enable_notifications: true,
-    backup_frequency: 'daily',
-    auto_backup_time: '00:00',
-    retention_days: 30,
     currency: 'LKR',
     currency_symbol: 'Rs',
     enable_analytics: true,
@@ -231,27 +228,6 @@ const handleTestEmail = async () => {
   }
 }
 
-  const handleBackupNow = async () => {
-    if (!confirm('Creating a backup may take a few minutes. Continue?')) return
-    
-    showMessage('info', 'Creating backup...')
-    
-    try {
-      const { error } = await supabase.functions.invoke('create-backup', {
-        body: { 
-          type: 'manual',
-          timestamp: new Date().toISOString()
-        }
-      })
-      
-      if (error) throw error
-      showMessage('success', 'Backup created successfully!')
-    } catch (err) {
-      console.error('Error creating backup:', err)
-      showMessage('error', 'Failed to create backup. Please try again later.')
-    }
-  }
-
   const handleClearCache = async () => {
     if (confirm('Clear all application cache? Users may need to reload the page.')) {
       localStorage.clear()
@@ -266,7 +242,6 @@ const handleTestEmail = async () => {
     { id: 'security', label: 'Security', icon: 'bi-shield-lock' },
     { id: 'users', label: 'Users', icon: 'bi-people' },
     { id: 'email', label: 'Email', icon: 'bi-envelope' },
-    { id: 'backup', label: 'Backup', icon: 'bi-database' },
     { id: 'social', label: 'Social Media', icon: 'bi-share' },
     { id: 'advanced', label: 'Advanced', icon: 'bi-sliders' }
   ]
@@ -787,82 +762,6 @@ const handleTestEmail = async () => {
                   <button className="btn-test-email" onClick={handleTestEmail}>
                     <i className="bi bi-send"></i>
                     Send Test Email
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Backup Settings */}
-          {activeTab === 'backup' && (
-            <div className="settings-section fade-in">
-              <div className="section-header">
-                <h2>
-                  <i className="bi bi-database-fill"></i>
-                  Backup Settings
-                </h2>
-                <p>Configure automatic backups and data retention</p>
-              </div>
-
-              <div className="settings-grid">
-                <div className="setting-card">
-                  <label className="setting-label">
-                    <i className="bi bi-calendar-week"></i>
-                    Backup Frequency
-                  </label>
-                  <select 
-                    className="setting-select"
-                    value={settings.backup_frequency}
-                    onChange={(e) => handleSettingChange('backup_frequency', e.target.value)}
-                  >
-                    <option value="daily">📅 Daily</option>
-                    <option value="weekly">📆 Weekly</option>
-                    <option value="monthly">📊 Monthly</option>
-                    <option value="never">⛔ Never</option>
-                  </select>
-                </div>
-
-                <div className="setting-card">
-                  <label className="setting-label">
-                    <i className="bi bi-clock"></i>
-                    Auto Backup Time
-                  </label>
-                  <input 
-                    type="time" 
-                    className="setting-input" 
-                    value={settings.auto_backup_time}
-                    onChange={(e) => handleSettingChange('auto_backup_time', e.target.value)}
-                  />
-                </div>
-
-                <div className="setting-card">
-                  <label className="setting-label">
-                    <i className="bi bi-database"></i>
-                    Retention Days
-                  </label>
-                  <input 
-                    type="number" 
-                    className="setting-input" 
-                    value={settings.retention_days}
-                    onChange={(e) => handleSettingChange('retention_days', parseInt(e.target.value))}
-                    min="1"
-                    max="365"
-                  />
-                  <small className="setting-hint">Number of days to keep backup files</small>
-                </div>
-
-                <div className="setting-card">
-                  <div className="backup-info">
-                    <i className="bi bi-info-circle"></i>
-                    <div>
-                      <strong>Last Backup:</strong> {localStorage.getItem('last_backup') || 'Not performed yet'}
-                      <br />
-                      <strong>Next Backup:</strong> {settings.backup_frequency !== 'never' ? 'Scheduled' : 'Not scheduled'}
-                    </div>
-                  </div>
-                  <button className="btn-backup-now" onClick={handleBackupNow}>
-                    <i className="bi bi-cloud-upload"></i>
-                    Backup Now
                   </button>
                 </div>
               </div>
