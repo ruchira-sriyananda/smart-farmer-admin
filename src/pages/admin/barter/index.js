@@ -56,14 +56,23 @@ export default function BarterTransactions() {
     if (path.startsWith('http')) return path
     if (path.startsWith('data:')) return path
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    if (supabaseUrl && !path.startsWith('/')) {
-      // If path contains a slash, it might already include the bucket name
-      if (path.includes('/')) {
-        return `${supabaseUrl}/storage/v1/object/public/${path}`
+    // Extract project ID from env or fallback to your project ID
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
+
+    if (supabaseUrl) {
+      const cleanPath = path.startsWith('/') ? path.substring(1) : path
+
+      // If path already contains a bucket name in it (e.g. "barter-images/image.jpg")
+      // Check for common bucket names
+      const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles']
+      const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(bucket))
+
+      if (hasBucket || cleanPath.includes('/')) {
+        return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`
       }
-      // Fallback to barter-images bucket
-      return `${supabaseUrl}/storage/v1/object/public/barter-images/${path}`
+
+      // Default fallback
+      return `${supabaseUrl}/storage/v1/object/public/barter-images/${cleanPath}`
     }
     return path
   }

@@ -70,12 +70,17 @@ export default function AdminDashboard() {
     if (path.startsWith('http')) return path
     if (path.startsWith('data:')) return path
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    if (supabaseUrl && !path.startsWith('/')) {
-      if (path.includes('/')) {
-        return `${supabaseUrl}/storage/v1/object/public/${path}`
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
+
+    if (supabaseUrl) {
+      const cleanPath = path.startsWith('/') ? path.substring(1) : path
+      const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles']
+      const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(bucket))
+
+      if (hasBucket || cleanPath.includes('/')) {
+        return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`
       }
-      return `${supabaseUrl}/storage/v1/object/public/barter-images/${path}`
+      return `${supabaseUrl}/storage/v1/object/public/barter-images/${cleanPath}`
     }
     return path
   }
