@@ -717,7 +717,7 @@ export default function BarterTransactions() {
           </div>
           <div className="listings-grid">
             {filteredListings.length > 0 ? (
-              filteredListings.slice(0, 6).map((listing) => (
+              filteredListings.map((listing) => (
                 <div key={listing.listing_id} className="listing-card">
                   <div className="listing-header">
                     <div className="listing-user">
@@ -735,6 +735,22 @@ export default function BarterTransactions() {
                     </div>
                     {getStatusBadge(listing.status)}
                   </div>
+
+                  {/* Listing Image */}
+                  {listing.image_url ? (
+                    <div className="listing-image-preview" onClick={() => viewImage(listing.image_url)}>
+                      <img src={listing.image_url} alt={listing.title} />
+                      <div className="image-overlay-small">
+                        <i className="bi bi-zoom-in"></i>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="listing-image-preview no-image">
+                      <i className="bi bi-image"></i>
+                      <span>No image provided</span>
+                    </div>
+                  )}
+
                   <div className="listing-body">
                     <h6 className="listing-title">{listing.title}</h6>
                     <p className="listing-description">{listing.description?.substring(0, 80)}...</p>
@@ -850,6 +866,12 @@ export default function BarterTransactions() {
             </div>
             <div className="modal-body">
               <div className="listing-summary">
+                {selectedListing.image_url && (
+                  <div className="modal-image-preview" onClick={() => viewImage(selectedListing.image_url)}>
+                    <img src={selectedListing.image_url} alt={selectedListing.title} />
+                    <div className="image-hint">Click to enlarge</div>
+                  </div>
+                )}
                 <h4>{selectedListing.title}</h4>
                 <p>{selectedListing.description}</p>
                 <div className="summary-details">
@@ -1117,6 +1139,19 @@ export default function BarterTransactions() {
         .user-name { font-weight: 600; color: #1f2937; font-size: 14px; }
         .listing-date { font-size: 10px; color: #9ca3af; }
         
+        .listing-image-preview { width: 100%; height: 160px; background: #e5e7eb; position: relative; cursor: pointer; overflow: hidden; }
+        .listing-image-preview img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+        .listing-image-preview:hover img { transform: scale(1.05); }
+        .listing-image-preview.no-image { display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; gap: 8px; font-size: 12px; }
+        .listing-image-preview.no-image i { font-size: 24px; }
+        .image-overlay-small { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s ease; }
+        .listing-image-preview:hover .image-overlay-small { opacity: 1; }
+        .image-overlay-small i { color: white; font-size: 20px; }
+
+        .modal-image-preview { width: 100%; height: 200px; border-radius: 12px; overflow: hidden; margin-bottom: 16px; cursor: pointer; position: relative; }
+        .modal-image-preview img { width: 100%; height: 100%; object-fit: cover; }
+        .image-hint { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); color: white; padding: 4px 8px; border-radius: 6px; font-size: 10px; }
+
         .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
         .status-badge.pending-approval { background: rgba(245,158,11,0.1); color: #f59e0b; }
         .status-badge.active { background: rgba(16,185,129,0.1); color: #10b981; }

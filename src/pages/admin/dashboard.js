@@ -339,7 +339,7 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('barter_listings')
-        .select('listing_id, title, description, quantity, unit, status, created_at, user_id')
+        .select('listing_id, title, description, quantity, unit, status, created_at, user_id, image_url')
         .order('created_at', { ascending: false })
         .limit(4)
 
@@ -887,15 +887,18 @@ export default function AdminDashboard() {
             </div>
             <div className="barter-grid">
               {recentBarterListings.map((listing) => (
-                <div key={listing.listing_id} className="barter-card">
-                  <div className="barter-card-header">
-                    <h6>{listing.title}</h6>
-                    <span className={`barter-status ${listing.status === 'ACTIVE' ? 'active' : 'inactive'}`}>{listing.status}</span>
-                  </div>
-                  <p>{listing.description?.substring(0, 80)}...</p>
-                  <div className="barter-card-meta">
-                    <span><i className="bi bi-box"></i> {listing.quantity} {listing.unit}</span>
-                    <span><i className="bi bi-person"></i> {listing.owner_name}</span>
+                <div key={listing.listing_id} className="barter-card" onClick={() => router.push(`/admin/barter?id=${listing.listing_id}`)}>
+                  {listing.image_url && <div className="barter-card-image"><img src={listing.image_url} alt={listing.title} /></div>}
+                  <div className="barter-card-content-wrapper">
+                    <div className="barter-card-header">
+                      <h6>{listing.title}</h6>
+                      <span className={`barter-status ${listing.status === 'ACTIVE' ? 'active' : 'inactive'}`}>{listing.status}</span>
+                    </div>
+                    <p>{listing.description?.substring(0, 80)}...</p>
+                    <div className="barter-card-meta">
+                      <span><i className="bi bi-box"></i> {listing.quantity} {listing.unit}</span>
+                      <span><i className="bi bi-person"></i> {listing.owner_name}</span>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1062,8 +1065,11 @@ export default function AdminDashboard() {
         .post-card-meta i { margin-right: 4px; }
         .recent-barter-section { background: white; border-radius: 24px; padding: 20px; margin-bottom: 28px; }
         .barter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-        .barter-card { background: #f8f9fa; border-radius: 16px; padding: 16px; transition: all 0.3s ease; cursor: pointer; }
+        .barter-card { background: #f8f9fa; border-radius: 16px; transition: all 0.3s ease; cursor: pointer; overflow: hidden; display: flex; flex-direction: column; }
         .barter-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .barter-card-image { height: 140px; overflow: hidden; }
+        .barter-card-image img { width: 100%; height: 100%; object-fit: cover; }
+        .barter-card-content-wrapper { padding: 16px; flex: 1; display: flex; flex-direction: column; }
         .barter-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .barter-card-header h6 { margin: 0; font-size: 14px; font-weight: 600; }
         .barter-card p { margin: 0 0 12px 0; font-size: 12px; color: #6c757d; line-height: 1.4; }
