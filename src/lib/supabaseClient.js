@@ -50,10 +50,13 @@ export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
   if (cleanPath.startsWith('http')) return cleanPath
   if (cleanPath.startsWith('data:')) return cleanPath
 
-  // Use environment variable primarily. Fallback to known stable URL.
-  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
+  // Priority project URLs - ensure NO trailing slash
+  let supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://hdzzrfoztbfx8tsqrakr8w.supabase.co').trim()
+  if (supabaseUrl.endsWith('/')) {
+    supabaseUrl = supabaseUrl.slice(0, -1)
+  }
 
-  // Clean the path
+  // Strip leading slash from path
   let finalPath = cleanPath.startsWith('/') ? cleanPath.substring(1) : cleanPath
 
   // Common agricultural app buckets
@@ -65,11 +68,11 @@ export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
 
   // If path already includes a bucket structure
   if (finalPath.includes('/')) {
-    return `${baseUrl}/storage/v1/object/public/${finalPath}`
+    return `${supabaseUrl}/storage/v1/object/public/${finalPath}`
   }
 
   // If it's just a filename, use the provided default bucket
-  return `${baseUrl}/storage/v1/object/public/${defaultBucket}/${finalPath}`
+  return `${supabaseUrl}/storage/v1/object/public/${defaultBucket}/${finalPath}`
 }
 
 // Get current admin user from session

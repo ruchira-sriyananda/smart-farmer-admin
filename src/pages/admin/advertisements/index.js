@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { createClient } from '@supabase/supabase-js'
+import { supabase, resolveImageUrl } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
-import { resolveImageUrl } from '@/lib/supabaseClient'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 export default function Advertisements() {
   const router = useRouter()
