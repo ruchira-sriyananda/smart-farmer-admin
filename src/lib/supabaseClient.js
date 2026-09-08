@@ -1,19 +1,34 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
+// During build time on Vercel, env vars might be missing initially.
+// We warn instead of throwing to allow the build to proceed if possible,
+// though actual database features will fail until vars are provided.
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables')
+  if (typeof window !== 'undefined') {
+    console.error('Missing Supabase environment variables')
+  } else {
+    console.warn('Supabase environment variables are missing. Database features will be unavailable.')
+  }
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
-  }
-})
+export const supabase = (supabaseUrl && supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    })
+  : new Proxy({}, {
+      get: (target, prop) => {
+        return () => {
+          throw new Error(`Supabase client is not initialized. Missing environment variables: ${prop}`)
+        }
+      }
+    })
 
 // Get current admin user from session
 export const getCurrentAdmin = () => {
