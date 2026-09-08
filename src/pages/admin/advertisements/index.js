@@ -35,7 +35,22 @@ export default function Advertisements() {
     smtp_port: '587'
   })
   const [hoveredCard, setHoveredCard] = useState(null)
-  
+
+  const getImageUrl = (path) => {
+    if (!path) return null
+    if (path.startsWith('http')) return path
+    if (path.startsWith('data:')) return path
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    if (supabaseUrl && !path.startsWith('/')) {
+      if (path.includes('/')) {
+        return `${supabaseUrl}/storage/v1/object/public/${path}`
+      }
+      return `${supabaseUrl}/storage/v1/object/public/ad-images/${path}`
+    }
+    return path
+  }
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -887,7 +902,7 @@ export default function Advertisements() {
                   {ad.image_url && (
                     <div className="ad-image-wrapper">
                       <img
-                        src={ad.image_url}
+                        src={getImageUrl(ad.image_url)}
                         alt=""
                         onError={(e) => {
                           e.target.style.display = 'none'
@@ -1162,7 +1177,7 @@ export default function Advertisements() {
             <div className="modal-body">
               {selectedAd.image_url && (
                 <div className="view-image">
-                  <img src={selectedAd.image_url} alt={selectedAd.title} />
+                  <img src={getImageUrl(selectedAd.image_url)} alt="" />
                 </div>
               )}
               

@@ -65,6 +65,21 @@ export default function AdminDashboard() {
   const [weeklyActivity, setWeeklyActivity] = useState([0, 0, 0, 0, 0, 0, 0])
   const [topContributors, setTopContributors] = useState([])
 
+  const getImageUrl = (path) => {
+    if (!path) return null
+    if (path.startsWith('http')) return path
+    if (path.startsWith('data:')) return path
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    if (supabaseUrl && !path.startsWith('/')) {
+      if (path.includes('/')) {
+        return `${supabaseUrl}/storage/v1/object/public/${path}`
+      }
+      return `${supabaseUrl}/storage/v1/object/public/barter-images/${path}`
+    }
+    return path
+  }
+
   const handleImageError = (e) => {
     e.target.style.display = 'none'
     const parent = e.target.parentElement
@@ -819,7 +834,7 @@ export default function AdminDashboard() {
                   <div className="online-avatar">
                     {user.user?.profile_image ? (
                       <img
-                        src={user.user.profile_image}
+                        src={getImageUrl(user.user.profile_image)}
                         alt=""
                         onError={(e) => {
                           e.target.style.display = 'none'
@@ -861,7 +876,7 @@ export default function AdminDashboard() {
                         <div className="user-avatar-sm">
                           {user.profile_image ? (
                             <img
-                              src={user.profile_image}
+                              src={getImageUrl(user.profile_image)}
                               alt=""
                               onError={(e) => {
                                 e.target.style.display = 'none'
@@ -899,8 +914,8 @@ export default function AdminDashboard() {
                   {post.image_url && (
                     <div className="post-card-image">
                       <img
-                        src={post.image_url}
-                        alt={post.title}
+                        src={getImageUrl(post.image_url)}
+                        alt=""
                         onError={handleImageError}
                       />
                     </div>
@@ -933,8 +948,8 @@ export default function AdminDashboard() {
                   {listing.image_url && (
                     <div className="barter-card-image">
                       <img
-                        src={listing.image_url}
-                        alt={listing.title}
+                        src={getImageUrl(listing.image_url)}
+                        alt=""
                         onError={handleImageError}
                       />
                     </div>

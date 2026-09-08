@@ -43,11 +43,19 @@ export default function ContentModeration() {
     fetchStats()
   }, [filter])
 
-  const getImageUrl = (imagePath) => {
-    if (!imagePath) return null
-    if (imagePath.startsWith('http')) return imagePath
-    if (imagePath.startsWith('/')) return imagePath
-    return imagePath
+  const getImageUrl = (path) => {
+    if (!path) return null
+    if (path.startsWith('http')) return path
+    if (path.startsWith('data:')) return path
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    if (supabaseUrl && !path.startsWith('/')) {
+      if (path.includes('/')) {
+        return `${supabaseUrl}/storage/v1/object/public/${path}`
+      }
+      return `${supabaseUrl}/storage/v1/object/public/post-images/${path}`
+    }
+    return path
   }
 
   const fetchPosts = async () => {

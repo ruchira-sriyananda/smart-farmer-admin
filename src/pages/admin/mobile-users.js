@@ -29,6 +29,21 @@ export default function MobileUsers() {
     pending: 0
   })
 
+  const getImageUrl = (path) => {
+    if (!path) return null
+    if (path.startsWith('http')) return path
+    if (path.startsWith('data:')) return path
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    if (supabaseUrl && !path.startsWith('/')) {
+      if (path.includes('/')) {
+        return `${supabaseUrl}/storage/v1/object/public/${path}`
+      }
+      return `${supabaseUrl}/storage/v1/object/public/profile-images/${path}`
+    }
+    return path
+  }
+
   useEffect(() => {
     checkTableColumns()
     fetchUsers()
@@ -479,7 +494,7 @@ export default function MobileUsers() {
                           <div className="user-avatar">
                             {user.profile_image ? (
                               <img
-                                src={user.profile_image}
+                                src={getImageUrl(user.profile_image)}
                                 alt=""
                                 onError={(e) => {
                                   e.target.style.display = 'none'
@@ -566,7 +581,7 @@ export default function MobileUsers() {
                 <div className="user-avatar-large">
                   {selectedUser.profile_image ? (
                     <img
-                      src={selectedUser.profile_image}
+                      src={getImageUrl(selectedUser.profile_image)}
                       alt=""
                       onError={(e) => {
                         e.target.style.display = 'none'
@@ -638,7 +653,7 @@ export default function MobileUsers() {
                 <div className="user-avatar-small">
                   {selectedUser.profile_image ? (
                     <img
-                      src={selectedUser.profile_image}
+                      src={getImageUrl(selectedUser.profile_image)}
                       alt=""
                       onError={(e) => {
                         e.target.style.display = 'none'
