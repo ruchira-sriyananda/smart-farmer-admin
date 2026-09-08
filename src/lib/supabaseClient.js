@@ -24,7 +24,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
     })
   : new Proxy({}, {
       get: (target, prop) => {
-        if (prop === 'supabaseUrl') return supabaseUrl || 'https://vclmowfkmrshlqswhffv.supabase.co'
+        if (prop === 'supabaseUrl') return supabaseUrl || 'https://hdzzrfoztbfx8tsqrakr8w.supabase.co'
         return () => {
           throw new Error(`Supabase client is not initialized. Missing environment variables: ${prop}`)
         }
@@ -40,24 +40,31 @@ export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
   if (path.startsWith('http')) return path
   if (path.startsWith('data:')) return path
 
-  // Get base URL from client or env
-  const baseUrl = supabase.supabaseUrl || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co'
-  const cleanPath = path.startsWith('/') ? path.substring(1) : path
+  // Use environment variable primarily. Fallback ONLY if absolutely necessary.
+  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://hdzzrfoztbfx8tsqrakr8w.supabase.co'
 
-  // Check if path already starts with a known bucket name
-  const knownBuckets = ['barter-images', 'profile-images', 'post-images', 'ad-images', 'admin-profiles', 'product-images']
-  const hasBucket = knownBuckets.some(bucket => cleanPath.startsWith(`${bucket}/`))
+  // Clean the path
+  let cleanPath = path.trim()
+  if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1)
 
-  if (hasBucket) {
-    return `${baseUrl}/storage/v1/object/public/${cleanPath}`
-  }
+  // Potential Supabase storage buckets
+  const knownBuckets = [
+    'barter-images', 'barters', 'listings', 'products', 'product-images',
+    'profile-images', 'avatars', 'profiles', 'post-images', 'posts',
+    'public', 'images'
+  ]
 
-  // If path has a directory structure, assume the first part is the bucket
+  // If path already contains a bucket structure
   if (cleanPath.includes('/')) {
+    const firstSegment = cleanPath.split('/')[0]
+    if (knownBuckets.includes(firstSegment)) {
+      return `${baseUrl}/storage/v1/object/public/${cleanPath}`
+    }
+    // If it's a directory structure we don't recognize, still assume it's bucket/path
     return `${baseUrl}/storage/v1/object/public/${cleanPath}`
   }
 
-  // Fallback: use the provided default bucket
+  // If it's just a filename, use the provided default bucket
   return `${baseUrl}/storage/v1/object/public/${defaultBucket}/${cleanPath}`
 }
 
