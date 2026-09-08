@@ -738,10 +738,18 @@ export default function BarterTransactions() {
                     <div className="listing-user">
                       <div className="user-avatar">
                         {listing.users?.profile_image ? (
-                          <img src={listing.users.profile_image} alt={listing.users.full_name} />
-                        ) : (
-                          <span>{listing.users?.full_name?.charAt(0) || 'U'}</span>
-                        )}
+                          <img
+                            src={listing.users.profile_image}
+                            alt=""
+                            onError={(e) => {
+                              e.target.style.display = 'none'
+                              if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                            }}
+                          />
+                        ) : null}
+                        <span style={{ display: listing.users?.profile_image ? 'none' : 'flex' }}>
+                          {listing.users?.full_name?.charAt(0) || 'U'}
+                        </span>
                       </div>
                       <div className="user-info">
                         <div className="user-name">{listing.users?.full_name || 'Anonymous'}</div>
@@ -1014,10 +1022,18 @@ export default function BarterTransactions() {
                 <div className="seller-info">
                   <div className="seller-avatar">
                     {selectedTransaction.users?.profile_image ? (
-                      <img src={selectedTransaction.users.profile_image} alt={selectedTransaction.users.full_name} />
-                    ) : (
-                      <span>{selectedTransaction.users?.full_name?.charAt(0) || 'U'}</span>
-                    )}
+                      <img
+                        src={selectedTransaction.users.profile_image}
+                        alt=""
+                        onError={(e) => {
+                          e.target.style.display = 'none'
+                          if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                        }}
+                      />
+                    ) : null}
+                    <span style={{ display: selectedTransaction.users?.profile_image ? 'none' : 'flex' }}>
+                      {selectedTransaction.users?.full_name?.charAt(0) || 'U'}
+                    </span>
                   </div>
                   <div className="seller-details">
                     <div><strong>Name:</strong> {selectedTransaction.users?.full_name || 'Anonymous'}</div>
@@ -1081,10 +1097,10 @@ export default function BarterTransactions() {
                         {request.requester?.profile_image ? (
                           <img
                             src={request.requester.profile_image}
-                            alt={request.requester.full_name}
+                            alt=""
                             onError={(e) => {
                               e.target.style.display = 'none'
-                              e.target.nextSibling.style.display = 'flex'
+                              if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
                             }}
                           />
                         ) : null}

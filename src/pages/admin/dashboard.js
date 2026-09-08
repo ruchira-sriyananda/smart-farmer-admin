@@ -818,10 +818,18 @@ export default function AdminDashboard() {
                 <div key={idx} className="online-item">
                   <div className="online-avatar">
                     {user.user?.profile_image ? (
-                      <img src={user.user.profile_image} alt={user.user.full_name} />
-                    ) : (
-                      <span>{user.user?.full_name?.charAt(0) || 'U'}</span>
-                    )}
+                      <img
+                        src={user.user.profile_image}
+                        alt=""
+                        onError={(e) => {
+                          e.target.style.display = 'none'
+                          if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                        }}
+                      />
+                    ) : null}
+                    <span style={{ display: user.user?.profile_image ? 'none' : 'flex' }}>
+                      {user.user?.full_name?.charAt(0) || 'U'}
+                    </span>
                     <span className="online-status-dot"></span>
                   </div>
                   <div className="online-info">
@@ -854,10 +862,10 @@ export default function AdminDashboard() {
                           {user.profile_image ? (
                             <img
                               src={user.profile_image}
-                              alt={user.full_name}
+                              alt=""
                               onError={(e) => {
                                 e.target.style.display = 'none'
-                                e.target.nextSibling.style.display = 'flex'
+                                if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
                               }}
                             />
                           ) : null}

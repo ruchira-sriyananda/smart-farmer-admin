@@ -474,10 +474,18 @@ export default function ContentModeration() {
                 <div className="post-user">
                   <div className="user-avatar">
                     {post.user?.profile_image ? (
-                      <img src={getImageUrl(post.user.profile_image)} alt={post.user.full_name} />
-                    ) : (
-                      <span>{post.author_name?.charAt(0) || 'U'}</span>
-                    )}
+                      <img
+                        src={getImageUrl(post.user.profile_image)}
+                        alt=""
+                        onError={(e) => {
+                          e.target.style.display = 'none'
+                          if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                        }}
+                      />
+                    ) : null}
+                    <span style={{ display: post.user?.profile_image ? 'none' : 'flex' }}>
+                      {post.author_name?.charAt(0) || 'U'}
+                    </span>
                     <div className={`user-status ${post.moderation_status === 'PENDING' ? 'pending' : post.moderation_status === 'APPROVED' ? 'approved' : 'rejected'}`}></div>
                   </div>
                   <div className="user-info">
@@ -608,10 +616,18 @@ export default function ContentModeration() {
                     <div className="author-card">
                       <div className="author-avatar">
                         {postDetails.user?.profile_image ? (
-                          <img src={getImageUrl(postDetails.user.profile_image)} alt={postDetails.user.full_name} />
-                        ) : (
-                          <span>{postDetails.user?.full_name?.charAt(0) || postDetails.user?.name?.charAt(0) || 'U'}</span>
-                        )}
+                          <img
+                            src={getImageUrl(postDetails.user.profile_image)}
+                            alt=""
+                            onError={(e) => {
+                              e.target.style.display = 'none'
+                              if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                            }}
+                          />
+                        ) : null}
+                        <span style={{ display: postDetails.user?.profile_image ? 'none' : 'flex' }}>
+                          {postDetails.user?.full_name?.charAt(0) || postDetails.user?.name?.charAt(0) || 'U'}
+                        </span>
                       </div>
                       <div className="author-details">
                         <h5>{postDetails.user?.full_name || postDetails.user?.name || 'User'}</h5>

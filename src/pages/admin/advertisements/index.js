@@ -886,7 +886,18 @@ export default function Advertisements() {
 
                   {ad.image_url && (
                     <div className="ad-image-wrapper">
-                      <img src={ad.image_url} alt={ad.title} />
+                      <img
+                        src={ad.image_url}
+                        alt=""
+                        onError={(e) => {
+                          e.target.style.display = 'none'
+                          e.target.parentElement.classList.add('no-image-fallback')
+                          const container = document.createElement('div')
+                          container.className = 'd-flex flex-column align-items-center justify-content-center w-100 h-100 text-muted'
+                          container.innerHTML = '<i class="bi bi-image" style="font-size: 2rem;"></i><span>N/A</span>'
+                          e.target.parentElement.appendChild(container)
+                        }}
+                      />
                       <div className="ad-overlay">
                         <button className="quick-view" onClick={() => viewAdDetails(ad)}>
                           <i className="bi bi-eye"></i> Quick View
@@ -2083,6 +2094,13 @@ export default function Advertisements() {
           height: 100%;
           object-fit: cover;
           transition: transform 0.3s ease;
+        }
+
+        :global(.no-image-fallback) {
+          background: #f3f4f6 !important;
+          display: flex !important;
+          align-items: center;
+          justify-content: center;
         }
 
         .ad-card:hover .ad-image-wrapper img {

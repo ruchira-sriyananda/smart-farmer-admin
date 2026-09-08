@@ -478,10 +478,18 @@ export default function MobileUsers() {
                         <div className="user-cell">
                           <div className="user-avatar">
                             {user.profile_image ? (
-                              <img src={user.profile_image} alt={user.full_name} />
-                            ) : (
-                              <span>{user.full_name?.charAt(0) || 'U'}</span>
-                            )}
+                              <img
+                                src={user.profile_image}
+                                alt=""
+                                onError={(e) => {
+                                  e.target.style.display = 'none'
+                                  if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                                }}
+                              />
+                            ) : null}
+                            <span style={{ display: user.profile_image ? 'none' : 'flex' }}>
+                              {user.full_name?.charAt(0) || 'U'}
+                            </span>
                           </div>
                           <div>
                             <div className="user-name">{user.full_name}</div>
@@ -557,10 +565,18 @@ export default function MobileUsers() {
               <div className="user-profile-header">
                 <div className="user-avatar-large">
                   {selectedUser.profile_image ? (
-                    <img src={selectedUser.profile_image} alt={selectedUser.full_name} />
-                  ) : (
-                    <span>{selectedUser.full_name?.charAt(0) || 'U'}</span>
-                  )}
+                    <img
+                      src={selectedUser.profile_image}
+                      alt=""
+                      onError={(e) => {
+                        e.target.style.display = 'none'
+                        if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                      }}
+                    />
+                  ) : null}
+                  <span style={{ display: selectedUser.profile_image ? 'none' : 'flex' }}>
+                    {selectedUser.full_name?.charAt(0) || 'U'}
+                  </span>
                 </div>
                 <div className="user-profile-info">
                   <h3>{selectedUser.full_name}</h3>
@@ -620,7 +636,19 @@ export default function MobileUsers() {
             <div className="modal-body">
               <div className="ban-user-info">
                 <div className="user-avatar-small">
-                  {selectedUser.profile_image ? <img src={selectedUser.profile_image} alt={selectedUser.full_name} /> : <span>{selectedUser.full_name?.charAt(0)}</span>}
+                  {selectedUser.profile_image ? (
+                    <img
+                      src={selectedUser.profile_image}
+                      alt=""
+                      onError={(e) => {
+                        e.target.style.display = 'none'
+                        if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
+                      }}
+                    />
+                  ) : null}
+                  <span style={{ display: selectedUser.profile_image ? 'none' : 'flex' }}>
+                    {selectedUser.full_name?.charAt(0)}
+                  </span>
                 </div>
                 <div><strong>{selectedUser.full_name}</strong><br />{selectedUser.email}</div>
               </div>
