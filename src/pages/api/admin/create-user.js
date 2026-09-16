@@ -78,19 +78,29 @@ export default async function handler(req, res) {
       updated_at: new Date().toISOString()
     }
 
-    const { error: dbError } = await supabaseAdmin
-      .from('admin_users')
-      .insert(adminData)
+    try {
+      const { error: dbError } = await supabaseAdmin
+        .from('admin_users')
+        .insert(adminData)
 
-    if (dbError) {
-      console.error('Database insert error:', dbError)
-      // Attempt to rollback auth user creation if DB insert fails
+      if (dbError) {
+        console.error('Database insert error:', dbError)
+        // Attempt to rollback auth user creation if DB insert fails
+        try {
+          await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+        } catch (rollbackError) {
+          console.error('Failed to rollback auth user creation:', rollbackError)
+        }
+        return res.status(500).json({ error: `Database error creating new user profile: [${dbError.code || 'NO_CODE'}] ${dbError.message || JSON.stringify(dbError)}` })
+      }
+    } catch (catchDbError) {
+      console.error('Database insertion catch error:', catchDbError)
       try {
         await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
-      } catch (rollbackError) {
-        console.error('Failed to rollback auth user creation:', rollbackError)
+      } catch (rbErr) {
+        console.error('Failed rollback:', rbErr)
       }
-      return res.status(500).json({ error: `Database error creating new user profile: ${dbError.message}` })
+      return res.status(500).json({ error: `Database insertion unexpected crash: ${catchDbError.message}` })
     }
 
     return res.status(200).json({
