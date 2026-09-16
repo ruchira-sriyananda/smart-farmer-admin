@@ -51,7 +51,7 @@ export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
   if (cleanPath.startsWith('data:')) return cleanPath
 
   // Priority project URLs - ensure NO trailing slash
-  let supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://hdzzrfoztbfx8tsqrakr8w.supabase.co').trim()
+  let supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co').trim()
   if (supabaseUrl.endsWith('/')) {
     supabaseUrl = supabaseUrl.slice(0, -1)
   }

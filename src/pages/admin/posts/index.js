@@ -390,6 +390,17 @@ export default function ContentModeration() {
     setShowDetailsModal(true)
   }
 
+  const handleImageError = (e) => {
+    e.target.style.display = 'none'
+    const parent = e.target.parentElement
+    if (parent && !parent.querySelector('.no-image-placeholder')) {
+      const placeholder = document.createElement('div')
+      placeholder.className = 'no-image-placeholder'
+      placeholder.innerHTML = '<i class="bi bi-image"></i><span>Image unavailable</span>'
+      parent.appendChild(placeholder)
+    }
+  }
+
   const openFullImage = (imageUrl, index) => {
     setSelectedImage(imageUrl)
     setCurrentImageIndex(index)
@@ -558,7 +569,11 @@ export default function ContentModeration() {
                     <div className="images-grid">
                       {post.images.slice(0, 3).map((img, idx) => (
                         <div key={idx} className="image-item" onClick={() => openFullImage(img, idx)}>
-                          <img src={img} alt={`Image ${idx + 1}`} />
+                          <img
+                            src={img}
+                            alt={`Image ${idx + 1}`}
+                            onError={handleImageError}
+                          />
                           <div className="image-overlay">
                             <i className="bi bi-zoom-in"></i>
                           </div>
@@ -663,7 +678,11 @@ export default function ContentModeration() {
                       <div className="modal-images-grid">
                         {postDetails.images.map((img, idx) => (
                           <div key={idx} className="modal-image" onClick={() => openFullImage(img, idx)}>
-                            <img src={img} alt={`Image ${idx + 1}`} />
+                            <img
+                              src={img}
+                              alt={`Image ${idx + 1}`}
+                              onError={handleImageError}
+                            />
                             <div className="modal-image-overlay">
                               <i className="bi bi-zoom-in"></i>
                             </div>
@@ -824,7 +843,13 @@ export default function ContentModeration() {
               </>
             )}
             
-            <img src={selectedImage} alt="Full size" />
+            <img
+              src={selectedImage}
+              alt="Full size"
+              onError={(e) => {
+                e.target.src = 'https://placehold.co/600x400?text=Image+Not+Found'
+              }}
+            />
             
             <div className="lightbox-actions">
               <button onClick={() => window.open(selectedImage, '_blank')}>
@@ -1276,6 +1301,27 @@ export default function ContentModeration() {
 
         .more-images span {
           font-size: 11px;
+        }
+
+        :global(.no-image-placeholder) {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
+          background: #f1f5f9;
+          color: #94a3b8;
+          gap: 4px;
+        }
+
+        :global(.no-image-placeholder i) {
+          font-size: 24px;
+        }
+
+        :global(.no-image-placeholder span) {
+          font-size: 10px;
+          font-weight: 500;
         }
 
         .image-count {
