@@ -87,8 +87,8 @@ export default function CreateUser() {
   // Send welcome email to new admin
   const sendWelcomeEmail = async (email, fullName, password, roleName, siteName) => {
     if (!emailSettings.enable_notifications) {
-      console.log('Email notifications are disabled')
-      return false
+      console.log('Email notifications are disabled, skipping welcome email.')
+      return { success: true, simulated: true, message: 'Email notifications are disabled in settings.' }
     }
 
     try {
@@ -111,15 +111,15 @@ export default function CreateUser() {
 
       const result = await response.json()
       if (result.success) {
-        console.log('Welcome email sent successfully to', email)
-        return true
+        console.log('Welcome email handled successfully to', email)
+        return { success: true, simulated: result.simulated, message: result.message }
       } else {
         console.error('Failed to send welcome email:', result.error)
-        return false
+        return { success: false, error: result.error }
       }
     } catch (error) {
       console.error('Error sending welcome email:', error)
-      return false
+      return { success: false, error: error.message }
     }
   }
 
@@ -266,7 +266,7 @@ export default function CreateUser() {
 
       // 2. Send welcome email with credentials
       // Note: Admin is already created and confirmed at this point
-      const emailSent = await sendWelcomeEmail(
+      const emailResult = await sendWelcomeEmail(
         formData.email,
         formData.full_name,
         formData.password,
@@ -274,10 +274,14 @@ export default function CreateUser() {
         emailSettings.site_name
       )
 
-      if (emailSent) {
-        alert('✅ User created successfully! Welcome email has been sent to the new administrator.')
+      if (emailResult.success) {
+        if (emailResult.simulated) {
+          alert(`✅ User created successfully!\n\nNote: ${emailResult.message || 'Welcome email details were logged to the server console.'}`)
+        } else {
+          alert('✅ User created successfully! Welcome email has been sent to the new administrator.')
+        }
       } else {
-        alert('⚠️ User created successfully, but welcome email could not be sent. Please check email settings.')
+        alert(`⚠️ User created successfully, but welcome email could not be sent.\n\nError: ${emailResult.error || 'Check email settings'}`)
       }
 
       // Success - redirect

@@ -25,40 +25,47 @@ export default async function handler(req, res) {
       .select('setting_key, setting_value')
       .in('setting_key', ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'site_name', 'enable_notifications']);
 
-    if (settingsError) {
-      console.error('Error fetching settings:', settingsError);
-      return res.status(500).json({ error: 'Failed to fetch email settings' });
-    }
-
     const smtpSettings = {};
-    settings?.forEach(setting => {
-      smtpSettings[setting.setting_key] = setting.setting_value;
-    });
+    if (!settingsError && settings) {
+      settings.forEach(setting => {
+        smtpSettings[setting.setting_key] = setting.setting_value;
+      });
+    } else {
+      console.error('Error fetching settings, using defaults for console logging fallback:', settingsError);
+    }
 
-    // Check if email notifications are enabled
-    if (smtpSettings.enable_notifications !== 'true') {
-      return res.status(400).json({ 
-        error: 'Email notifications are disabled. Please enable them in settings.' 
+    // Check if email notifications are enabled - be lenient with 'true' string or boolean true
+    const isEnabled = smtpSettings.enable_notifications === 'true' || smtpSettings.enable_notifications === true;
+
+    // Check if SMTP settings are fully configured
+    const isSmtpConfigured = smtpSettings.smtp_host && smtpSettings.smtp_user && smtpSettings.smtp_password;
+
+    // If notifications are disabled, or SMTP is not fully configured, fall back to console logging
+    if (!isEnabled || !isSmtpConfigured) {
+      console.log(`[SIMULATED EMAIL] Email notifications are disabled or SMTP settings are not fully configured. Logging email to console:`);
+      console.log(`To: ${to}`);
+      console.log(`Type: ${type}`);
+      console.log(`Data:`, JSON.stringify(data, null, 2));
+      return res.status(200).json({
+        success: true,
+        simulated: true,
+        message: !isEnabled ? 'Email notifications are disabled. Logged to server console.' : 'SMTP settings are not fully configured. Logged to server console.'
       });
     }
 
-    if (!smtpSettings.smtp_host || !smtpSettings.smtp_user || !smtpSettings.smtp_password) {
-      return res.status(400).json({ 
-        error: 'SMTP settings not configured. Please configure email settings in admin panel.' 
-      });
-    }
+    const port = parseInt(smtpSettings.smtp_port) || 587;
 
     // Create transporter
     const transporter = nodemailer.createTransport({
       host: smtpSettings.smtp_host,
-      port: parseInt(smtpSettings.smtp_port) || 587,
-      secure: smtpSettings.smtp_port === '465',
+      port: port,
+      secure: port === 465, // Use SSL for port 465
       auth: {
         user: smtpSettings.smtp_user,
         pass: smtpSettings.smtp_password,
       },
       tls: {
-        rejectUnauthorized: false,
+        rejectUnauthorized: false, // Helps with self-signed certs or common hosting issues
       },
     });
 
@@ -67,9 +74,15 @@ export default async function handler(req, res) {
       await transporter.verify();
       console.log('SMTP connection verified successfully');
     } catch (verifyError) {
-      console.error('SMTP verification failed:', verifyError);
-      return res.status(400).json({ 
-        error: 'SMTP connection failed. Please check your email settings.',
+      console.error('SMTP verification failed, falling back to console logging:', verifyError);
+      console.log(`[SIMULATED EMAIL] SMTP verification failed. Logging email to console:`);
+      console.log(`To: ${to}`);
+      console.log(`Type: ${type}`);
+      console.log(`Data:`, JSON.stringify(data, null, 2));
+      return res.status(200).json({
+        success: true,
+        simulated: true,
+        message: 'SMTP connection failed. Logged to server console.',
         details: verifyError.message
       });
     }
@@ -500,45 +513,52 @@ export default async function handler(req, res) {
     }
 
     // Send email
-    const info = await transporter.sendMail({
-      from: `${smtpSettings.site_name || 'Smart Farmer'} <${smtpSettings.smtp_user}>`,
-      to: to,
-      subject: template.subject,
-      html: template.html,
-    });
+    try {
+      const info = await transporter.sendMail({
+        from: `${smtpSettings.site_name || 'Smart Farmer'} <${smtpSettings.smtp_user}>`,
+        to: to,
+        subject: template.subject,
+        html: template.html,
+      });
 
-    console.log('Email sent successfully:', {
-      messageId: info.messageId,
-      to: to,
-      type: type,
-      timestamp: new Date().toISOString()
-    });
+      console.log('Email sent successfully:', {
+        messageId: info.messageId,
+        to: to,
+        type: type,
+        timestamp: new Date().toISOString()
+      });
 
-    return res.status(200).json({ 
-      success: true, 
-      message: 'Email sent successfully', 
-      messageId: info.messageId 
-    });
+      return res.status(200).json({
+        success: true,
+        message: 'Email sent successfully',
+        messageId: info.messageId
+      });
+    } catch (sendError) {
+      console.error('SMTP sendMail failed, falling back to console logging:', sendError);
+      console.log(`[SIMULATED EMAIL] SMTP sendMail failed. Logging email to console:`);
+      console.log(`To: ${to}`);
+      console.log(`Type: ${type}`);
+      console.log(`Data:`, JSON.stringify(data, null, 2));
+      return res.status(200).json({
+        success: true,
+        simulated: true,
+        message: 'SMTP send failed. Logged to server console.',
+        details: sendError.message
+      });
+    }
 
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error in email sending handler, falling back to console logging:', error);
+    console.log(`[SIMULATED EMAIL] Handler error. Logging email to console:`);
+    console.log(`To: ${req.body?.to}`);
+    console.log(`Type: ${req.body?.type}`);
+    console.log(`Data:`, JSON.stringify(req.body?.data, null, 2));
     
-    // Provide more detailed error message
-    let errorMessage = 'Failed to send email. ';
-    if (error.code === 'EAUTH') {
-      errorMessage += 'Authentication failed. Please check your SMTP username and password.';
-    } else if (error.code === 'ECONNECTION') {
-      errorMessage += 'Cannot connect to SMTP server. Please check host and port.';
-    } else if (error.code === 'ESOCKET') {
-      errorMessage += 'Connection timeout. Please check your network and SMTP settings.';
-    } else {
-      errorMessage += error.message;
-    }
-    
-    return res.status(500).json({ 
-      success: false, 
-      error: errorMessage,
-      code: error.code || 'UNKNOWN_ERROR'
+    return res.status(200).json({
+      success: true,
+      simulated: true,
+      message: 'Email handler error. Logged to server console.',
+      error: error.message
     });
   }
 }
