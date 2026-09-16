@@ -85,8 +85,12 @@ export default async function handler(req, res) {
     if (dbError) {
       console.error('Database insert error:', dbError)
       // Attempt to rollback auth user creation if DB insert fails
-      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
-      return res.status(500).json({ error: `User account created but database record failed: ${dbError.message}` })
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      } catch (rollbackError) {
+        console.error('Failed to rollback auth user creation:', rollbackError)
+      }
+      return res.status(500).json({ error: `Database error creating new user profile: ${dbError.message}` })
     }
 
     return res.status(200).json({
