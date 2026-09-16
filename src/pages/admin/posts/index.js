@@ -8,7 +8,7 @@ export default function ContentModeration() {
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [filter, setFilter] = useState('PENDING')
+  const [filter, setFilter] = useState('ALL')
   const [selectedPost, setSelectedPost] = useState(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showRejectModal, setShowRejectModal] = useState(false)
@@ -478,14 +478,6 @@ export default function ContentModeration() {
               <span className="stat-trend">All content</span>
             </div>
           </div>
-          <div className="stat-card pending">
-            <div className="stat-icon"><i className="bi bi-hourglass-split"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Pending</span>
-              <h2 className="text-warning">{stats.pending}</h2>
-              <span className="stat-trend">Awaiting review</span>
-            </div>
-          </div>
           <div className="stat-card approved">
             <div className="stat-icon"><i className="bi bi-check-circle"></i></div>
             <div className="stat-info">
@@ -511,11 +503,6 @@ export default function ContentModeration() {
               <i className="bi bi-grid"></i>
               <span>All Content</span>
               <span className="filter-count">{stats.total}</span>
-            </button>
-            <button className={`filter-btn ${filter === 'PENDING' ? 'active' : ''}`} onClick={() => setFilter('PENDING')}>
-              <i className="bi bi-hourglass-split"></i>
-              <span>Pending</span>
-              <span className="filter-count warning">{stats.pending}</span>
             </button>
             <button className={`filter-btn ${filter === 'APPROVED' ? 'active' : ''}`} onClick={() => setFilter('APPROVED')}>
               <i className="bi bi-check-circle"></i>
@@ -1023,7 +1010,7 @@ export default function ContentModeration() {
 
         .stats-grid {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(3, 1fr);
           gap: 20px;
           margin-bottom: 32px;
         }
