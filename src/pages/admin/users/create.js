@@ -225,50 +225,6 @@ export default function CreateUser() {
     return role ? role.role_name : 'No Role Assigned'
   }
 
-  // Create user with proper error handling
-  const createUser = async () => {
-    try {
-      // First, check if user already exists in auth
-      const { data: existingUser, error: searchError } = await supabase
-        .from('admin_users')
-        .select('email')
-        .eq('email', formData.email)
-        .maybeSingle()
-
-      if (existingUser) {
-        throw new Error('A user with this email already exists')
-      }
-
-      // Create auth user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: { full_name: formData.full_name },
-          emailRedirectTo: undefined,
-        }
-      })
-
-      if (authError) {
-        if (authError.message.includes('rate limit') || authError.status === 429) {
-          throw new Error('Too many signup attempts. Please wait a minute before trying again.')
-        }
-        if (authError.message.includes('already registered')) {
-          throw new Error('This email is already registered. Please use a different email.')
-        }
-        throw authError
-      }
-
-      if (!authData.user) {
-        throw new Error('Failed to create user account')
-      }
-
-      return authData
-    } catch (err) {
-      throw err
-    }
-  }
-
   const handleSubmit = async (e) => {
     e.preventDefault()
     
@@ -283,45 +239,33 @@ export default function CreateUser() {
     setErrors({})
 
     try {
-      // Create auth user
-      const authData = await createUser()
-
       // Get role name for email
       const roleName = getRoleName(formData.role_id)
 
-      // Prepare admin data
-      const adminData = {
-        admin_id: authData.user.id,
-        full_name: formData.full_name,
-        email: formData.email,
-        password_hash: 'managed_by_auth',
-        is_active: formData.is_active,
-        is_super_admin: formData.is_super_admin,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+      // 1. Create administrator via secure API route
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          full_name: formData.full_name,
+          email: formData.email,
+          password: formData.password,
+          role_id: formData.role_id,
+          is_active: formData.is_active,
+          is_super_admin: formData.is_super_admin
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create administrator')
       }
 
-      // Add role if selected
-      if (formData.role_id && formData.role_id !== '') {
-        adminData.role_id = formData.role_id
-      }
-
-      // Insert into admin_users
-      const { error: adminError } = await supabase
-        .from('admin_users')
-        .insert(adminData)
-        .select()
-
-      if (adminError) {
-        console.error('Admin insert error:', adminError)
-        
-        if (adminError.message.includes('row-level security')) {
-          throw new Error('Permission denied: Unable to create admin user due to security policies. Please contact your system administrator.')
-        }
-        throw adminError
-      }
-
-      // Send welcome email with credentials
+      // 2. Send welcome email with credentials
+      // Note: Admin is already created and confirmed at this point
       const emailSent = await sendWelcomeEmail(
         formData.email,
         formData.full_name,
@@ -344,7 +288,7 @@ export default function CreateUser() {
       
       if (err.message.includes('rate limit')) {
         setErrors({ submit: 'Too many attempts. Please wait a few minutes before trying again.' })
-      } else if (err.message.includes('already registered')) {
+      } else if (err.message.includes('already registered') || err.message.includes('already exists')) {
         setErrors({ submit: 'This email is already registered. Please use a different email address.' })
       } else if (err.message.includes('row-level security')) {
         setErrors({ submit: 'Unable to create admin user. Please ensure you have proper permissions.' })
