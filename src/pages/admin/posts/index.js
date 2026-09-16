@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { supabase, resolveImageUrl } from '@/lib/supabaseClient'
+import { supabase, resolveImageUrl, safeLogActivity } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
 
 export default function ContentModeration() {
@@ -48,7 +48,16 @@ export default function ContentModeration() {
       setLoading(true)
       setError(null)
       
-      let query = supabase
+      // 1. Fetch all posts from the posts table to ensure we see "all new posts"
+      const { data: postsData, error: postsError } = await supabase
+        .from('posts')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (postsError) throw postsError
+
+      // 2. Fetch all moderation records to match with posts
+      const { data: modData, error: modError } = await supabase
         .from('content_moderation')
         .select(`
           *,
@@ -58,103 +67,85 @@ export default function ContentModeration() {
             email
           )
         `)
-        .order('created_at', { ascending: false })
 
-      if (filter !== 'ALL') {
-        query = query.eq('moderation_status', filter)
-      }
+      if (modError) throw modError
 
-      const { data, error } = await query
+      // 3. Filter and process
+      const processedPosts = []
 
-      if (error) throw error
+      for (const post of (postsData || [])) {
+        // Find matching moderation record
+        const mod = modData?.find(m => m.content_id === post.post_id && m.content_type === 'POST') || {
+          moderation_status: 'PENDING',
+          moderation_id: `new-${post.post_id}`,
+          content_id: post.post_id,
+          content_type: 'POST',
+          created_at: post.created_at
+        }
 
-      const postsWithDetails = await Promise.all((data || []).map(async (post) => {
-        let postData = null
+        // Apply filter
+        if (filter !== 'ALL' && mod.moderation_status !== filter) continue
+
+        // Fetch user data (this is still N+1 but we can optimize later if needed)
+        // For now let's keep it similar to original to minimize risk
         let userData = null
-        let images = []
-        let postExists = true
-        
-        if (post.content_type === 'POST' && post.content_id) {
-          const { data: postDataResult, error: postError } = await supabase
-            .from('posts')
+        if (post.user_id) {
+          const { data: userResult } = await supabase
+            .from('users')
             .select('*')
-            .eq('post_id', post.content_id)
+            .eq('user_id', post.user_id)
             .maybeSingle()
-          
-          if (postError) {
-            console.error(`Error fetching post ${post.content_id}:`, postError)
-            postExists = false
-          }
-          
-          if (postDataResult) {
-            postData = postDataResult
-            
-            const { data: imagesData, error: imagesError } = await supabase
-              .from('post_images')
-              .select('image_url, image_order')
-              .eq('post_id', post.content_id)
-              .order('image_order', { ascending: true })
-            
-            if (!imagesError && imagesData && imagesData.length > 0) {
-              images = imagesData.map(img => getImageUrl(img.image_url))
-            } else if (postDataResult.image_url) {
-              images = [getImageUrl(postDataResult.image_url)]
-            }
-            
-            const userId = postDataResult.user_id || post.user_id
-            
-            if (userId) {
-              // Try to get user from users table
-              const { data: userResult, error: userError } = await supabase
-                .from('users')
-                .select('*')
-                .eq('user_id', userId)
-                .maybeSingle()
-              
-              if (userError) {
-                console.error(`Error fetching user ${userId}:`, userError)
-              }
-              
-              if (userResult) {
-                userData = userResult
-              } else {
-                // Try admin_users table
-                const { data: adminResult } = await supabase
-                  .from('admin_users')
-                  .select('*')
-                  .eq('admin_id', userId)
-                  .maybeSingle()
-                
-                if (adminResult) {
-                  userData = adminResult
-                }
-              }
-            }
+
+          if (userResult) {
+            userData = userResult
           } else {
-            postExists = false
+            const { data: adminResult } = await supabase
+              .from('admin_users')
+              .select('*')
+              .eq('admin_id', post.user_id)
+              .maybeSingle()
+            userData = adminResult
           }
         }
-        
-        return { 
-          ...post, 
-          title: postData?.title || (postExists ? 'Untitled Post' : 'Post Deleted'),
-          content: postData?.content || (postExists ? 'No content available' : 'This post has been deleted'),
+
+        // Fetch images
+        let images = []
+        const { data: imagesData } = await supabase
+          .from('post_images')
+          .select('image_url, image_order')
+          .eq('post_id', post.post_id)
+          .order('image_order', { ascending: true })
+
+        if (imagesData && imagesData.length > 0) {
+          images = imagesData.map(img => resolveImageUrl(img.image_url, 'post-images'))
+        } else if (post.image_url) {
+          images = [resolveImageUrl(post.image_url, 'post-images')]
+        }
+
+        processedPosts.push({
+          ...mod,
+          title: post.title || 'Untitled Post',
+          content: post.content || 'No content available',
           images: images,
           image_count: images.length,
           cover_image: images[0] || null,
-          post_created_at: postData?.created_at || post.created_at,
+          post_created_at: post.created_at,
           user: userData,
           author_name: userData?.full_name || userData?.name || 'User',
           author_email: userData?.email || 'Email not available',
           author_phone: userData?.phone || null,
           author_location: userData?.location || userData?.district || null,
           author_joined: userData?.created_at || null,
+          user_status: userData?.status || 'N/A',
+          user_bio: userData?.bio || null,
+          user_last_login: userData?.last_login || null,
+          user_verified: userData?.is_verified || false,
           user_id: userData?.user_id || post.user_id,
-          post_exists: postExists
-        }
-      }))
+          post_exists: true
+        })
+      }
 
-      setPosts(postsWithDetails || [])
+      setPosts(processedPosts)
     } catch (err) {
       console.error('Error fetching posts:', err)
       setError(err.message)
@@ -165,18 +156,20 @@ export default function ContentModeration() {
 
   const fetchStats = async () => {
     try {
-      const { data, error } = await supabase
-        .from('content_moderation')
-        .select('moderation_status')
+      // Fetch all posts and all moderation records to calculate accurate stats
+      const { count: totalPosts } = await supabase.from('posts').select('*', { count: 'exact', head: true })
+      const { data: mods } = await supabase.from('content_moderation').select('content_id, moderation_status')
 
-      if (!error && data) {
-        setStats({
-          total: data.length,
-          pending: data.filter(p => p.moderation_status === 'PENDING').length,
-          approved: data.filter(p => p.moderation_status === 'APPROVED').length,
-          rejected: data.filter(p => p.moderation_status === 'REJECTED').length
-        })
-      }
+      const approvedCount = mods?.filter(m => m.moderation_status === 'APPROVED').length || 0
+      const rejectedCount = mods?.filter(m => m.moderation_status === 'REJECTED').length || 0
+      const pendingCount = (totalPosts || 0) - rejectedCount - approvedCount
+
+      setStats({
+        total: totalPosts || 0,
+        pending: pendingCount > 0 ? pendingCount : 0,
+        approved: approvedCount,
+        rejected: rejectedCount
+      })
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
@@ -205,9 +198,9 @@ export default function ContentModeration() {
           
           let images = []
           if (!imagesError && imagesData && imagesData.length > 0) {
-            images = imagesData.map(img => getImageUrl(img.image_url))
+            images = imagesData.map(img => resolveImageUrl(img.image_url, 'post-images'))
           } else if (postData.image_url) {
-            images = [getImageUrl(postData.image_url)]
+            images = [resolveImageUrl(postData.image_url, 'post-images')]
           }
           
           let userData = null
@@ -273,28 +266,36 @@ export default function ContentModeration() {
     }
   }
 
-  const updateStatus = async (postId, status, reason = null) => {
+  const updateStatus = async (post, status, reason = null) => {
     setActionLoading(true)
     const session = JSON.parse(localStorage.getItem('adminSession'))
     
-    const updateData = {
+    const moderationData = {
+      content_id: post.content_id,
+      content_type: 'POST',
       moderation_status: status,
       reviewed_by: session?.admin?.admin_id,
-      reviewed_at: new Date().toISOString()
+      reviewed_at: new Date().toISOString(),
+      moderation_reason: reason || post.moderation_reason
     }
 
-    if (reason) {
-      updateData.moderation_reason = reason
+    let resultError
+    if (post.moderation_id && !post.moderation_id.toString().startsWith('new-')) {
+      const { error } = await supabase
+        .from('content_moderation')
+        .update(moderationData)
+        .eq('moderation_id', post.moderation_id)
+      resultError = error
+    } else {
+      const { error } = await supabase
+        .from('content_moderation')
+        .insert(moderationData)
+      resultError = error
     }
-
-    const { error } = await supabase
-      .from('content_moderation')
-      .update(updateData)
-      .eq('moderation_id', postId)
 
     setActionLoading(false)
 
-    if (!error) {
+    if (!resultError) {
       await fetchPosts()
       await fetchStats()
       setShowRejectModal(false)
@@ -304,13 +305,73 @@ export default function ContentModeration() {
       if (showDetailsModal) setShowDetailsModal(false)
       alert(`Content ${status.toLowerCase()} successfully!`)
     } else {
-      alert(`Error updating status: ${error.message}`)
+      alert(`Error updating status: ${resultError.message}`)
     }
   }
 
   const handleApprove = async (post) => {
     if (confirm(`Are you sure you want to approve this content?`)) {
-      await updateStatus(post.moderation_id, 'APPROVED')
+      await updateStatus(post, 'APPROVED')
+    }
+  }
+
+  const handleRemovePost = async (post) => {
+    if (!confirm('Are you sure you want to PERMANENTLY remove this post from the platform? This action cannot be undone.')) {
+      return
+    }
+
+    setActionLoading(true)
+    try {
+      // Get the content ID (post_id)
+      const contentId = post.content_id
+
+      // 1. Delete from post_images first (if any)
+      await supabase
+        .from('post_images')
+        .delete()
+        .eq('post_id', contentId)
+
+      // 2. Delete from posts table
+      const { error: postError } = await supabase
+        .from('posts')
+        .delete()
+        .eq('post_id', contentId)
+
+      if (postError) throw postError
+
+      // 3. Delete from content_moderation table if it exists
+      if (post.moderation_id && !post.moderation_id.toString().startsWith('new-')) {
+        const { error: modError } = await supabase
+          .from('content_moderation')
+          .delete()
+          .eq('moderation_id', post.moderation_id)
+
+        if (modError) {
+          console.warn('Moderation record might have been deleted by trigger or missing:', modError.message)
+        }
+      }
+
+      // Log the activity
+      const session = JSON.parse(localStorage.getItem('adminSession'))
+      if (session?.admin?.admin_id) {
+        await safeLogActivity(
+          session.admin.admin_id,
+          'CONTENT_REMOVAL',
+          `Removed post: ${post.title} (ID: ${contentId})`,
+          'internal'
+        )
+      }
+
+      alert('Post has been permanently removed.')
+      await fetchPosts()
+      await fetchStats()
+      setShowDetailsModal(false)
+      setSelectedPost(null)
+    } catch (err) {
+      console.error('Error removing post:', err)
+      alert(`Error removing post: ${err.message}`)
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -320,7 +381,7 @@ export default function ContentModeration() {
       alert('Please provide a reason for rejection')
       return
     }
-    await updateStatus(selectedPost.moderation_id, 'REJECTED', finalReason)
+    await updateStatus(selectedPost, 'REJECTED', finalReason)
   }
 
   const viewDetails = async (post) => {
@@ -531,17 +592,26 @@ export default function ContentModeration() {
                   <button className="btn-view" onClick={() => viewDetails(post)}>
                     <i className="bi bi-eye"></i> View Details
                   </button>
-                  {post.moderation_status === 'PENDING' && post.post_exists !== false && (
+                  {post.post_exists !== false && (
                     <div className="action-group">
-                      <button className="btn-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
-                        <i className="bi bi-check-lg"></i> Approve
-                      </button>
-                      <button className="btn-reject" onClick={() => {
-                        setSelectedPost(post)
-                        setShowRejectModal(true)
-                      }} disabled={actionLoading}>
-                        <i className="bi bi-x-lg"></i> Reject
-                      </button>
+                      {post.moderation_status !== 'APPROVED' && (
+                        <button className="btn-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
+                          <i className="bi bi-check-lg"></i> {post.moderation_status === 'REJECTED' ? 'Re-approve' : 'Approve'}
+                        </button>
+                      )}
+                      {post.moderation_status !== 'REJECTED' && (
+                        <button className="btn-reject" onClick={() => {
+                          setSelectedPost(post)
+                          setShowRejectModal(true)
+                        }} disabled={actionLoading}>
+                          <i className="bi bi-x-lg"></i> Reject
+                        </button>
+                      )}
+                      {post.moderation_status === 'REJECTED' && (
+                        <button className="btn-remove-danger" onClick={() => handleRemovePost(post)} disabled={actionLoading}>
+                          <i className="bi bi-trash"></i> Remove
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -623,11 +693,24 @@ export default function ContentModeration() {
                         </span>
                       </div>
                       <div className="author-details">
-                        <h5>{postDetails.user?.full_name || postDetails.user?.name || 'User'}</h5>
+                        <h5>
+                          {postDetails.user?.full_name || postDetails.user?.name || 'User'}
+                          {postDetails.user?.is_verified && <span className="ms-2 badge bg-success-subtle text-success border border-success-subtle rounded-pill" style={{fontSize: '10px'}}><i className="bi bi-patch-check-fill"></i> Verified</span>}
+                        </h5>
                         <p><i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}</p>
-                        {postDetails.user?.phone && <p><i className="bi bi-telephone"></i> {postDetails.user.phone}</p>}
-                        {postDetails.user?.location && <p><i className="bi bi-geo-alt"></i> {postDetails.user.location}</p>}
-                        <p><i className="bi bi-calendar-check"></i> Joined: {formatDate(postDetails.user?.created_at)}</p>
+                        <div className="author-meta-grid">
+                          {postDetails.user?.phone && <p><i className="bi bi-telephone"></i> {postDetails.user.phone}</p>}
+                          {postDetails.user?.location && <p><i className="bi bi-geo-alt"></i> {postDetails.user.location}</p>}
+                          <p><i className="bi bi-calendar-check"></i> Joined: {formatDate(postDetails.user?.created_at)}</p>
+                          <p><i className="bi bi-activity"></i> Status: <span className={`text-${postDetails.user?.status === 'active' ? 'success' : 'danger'}`}>{postDetails.user?.status || 'active'}</span></p>
+                          <p><i className="bi bi-clock-history"></i> Last Active: {postDetails.user?.last_login ? formatDate(postDetails.user.last_login) : 'Never'}</p>
+                        </div>
+                        {postDetails.user?.bio && (
+                          <div className="author-bio mt-2">
+                            <label className="text-muted small fw-bold uppercase">Bio</label>
+                            <p className="small mb-0">{postDetails.user.bio}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -695,19 +778,24 @@ export default function ContentModeration() {
             </div>
             
             <div className="modal-footer">
-              {selectedPost.moderation_status === 'PENDING' && (
-                <div className="footer-actions">
+              <div className="footer-actions">
+                {selectedPost.moderation_status !== 'APPROVED' && (
                   <button className="btn-approve-modal" onClick={() => handleApprove(selectedPost)}>
-                    <i className="bi bi-check-lg"></i> Approve
+                    <i className="bi bi-check-lg"></i> {selectedPost.moderation_status === 'REJECTED' ? 'Re-approve' : 'Approve'}
                   </button>
+                )}
+                {selectedPost.moderation_status !== 'REJECTED' && (
                   <button className="btn-reject-modal" onClick={() => {
                     setShowDetailsModal(false)
                     setShowRejectModal(true)
                   }}>
                     <i className="bi bi-x-lg"></i> Reject
                   </button>
-                </div>
-              )}
+                )}
+                <button className="btn-remove-modal" onClick={() => handleRemovePost(selectedPost)}>
+                  <i className="bi bi-trash"></i> Remove Post
+                </button>
+              </div>
               <button className="btn-close" onClick={() => setShowDetailsModal(false)}>Close</button>
             </div>
           </div>
@@ -1297,6 +1385,29 @@ export default function ContentModeration() {
           color: white;
         }
 
+        .btn-remove-danger {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 10px;
+          border: 1px solid #fee2e2;
+          border-radius: 12px;
+          font-size: 13px;
+          font-weight: 500;
+          background: #fff;
+          color: #ef4444;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-remove-danger:hover {
+          background: #ef4444;
+          color: white;
+          border-color: #ef4444;
+        }
+
         .status-badge {
           display: inline-flex;
           align-items: center;
@@ -1578,6 +1689,20 @@ export default function ContentModeration() {
         .author-details p i {
           font-size: 12px;
           color: #9ca3af;
+        }
+
+        .author-meta-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 4px 16px;
+          margin-top: 8px;
+        }
+
+        .author-bio {
+          background: rgba(0,0,0,0.03);
+          padding: 8px 12px;
+          border-radius: 8px;
+          border-left: 3px solid #667eea;
         }
 
         .info-grid {
@@ -1885,6 +2010,23 @@ export default function ContentModeration() {
 
         .btn-reject-modal:hover {
           background: #dc2626;
+          transform: translateY(-2px);
+        }
+
+        .btn-remove-modal {
+          padding: 10px 24px;
+          background: #fff;
+          border: 2px solid #ef4444;
+          border-radius: 10px;
+          color: #ef4444;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-remove-modal:hover {
+          background: #ef4444;
+          color: white;
           transform: translateY(-2px);
         }
 
