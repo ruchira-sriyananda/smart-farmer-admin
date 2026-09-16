@@ -1,9 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Use service role key to bypass RLS and trigger restrictions
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+if (!supabaseUrl || !serviceRoleKey) {
+  console.error('CRITICAL: Supabase environment variables missing in API route')
+}
+
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  supabaseUrl || 'https://uhrolwwkxenvcefnessp.supabase.co',
+  serviceRoleKey || '',
   {
     auth: {
       autoRefreshToken: false,
@@ -16,6 +23,10 @@ export default async function handler(req, res) {
   // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  if (!serviceRoleKey) {
+    return res.status(500).json({ error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is missing' })
   }
 
   const { full_name, email, password, role_id, is_active, is_super_admin } = req.body

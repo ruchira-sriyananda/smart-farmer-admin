@@ -24,7 +24,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
     })
   : new Proxy({}, {
       get: (target, prop) => {
-        if (prop === 'supabaseUrl') return supabaseUrl || 'https://vclmowfkmrshlqswhffv.supabase.co'
+        if (prop === 'supabaseUrl') return supabaseUrl || 'https://uhrolwwkxenvcefnessp.supabase.co'
         if (prop === 'from') {
           return () => ({
             select: () => ({ order: () => ({ limit: () => ({}) }), eq: () => ({ maybeSingle: () => ({}) }) }),
