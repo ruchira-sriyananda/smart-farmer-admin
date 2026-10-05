@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/router'
 import { supabase, resolveImageUrl, safeLogActivity } from '@/lib/supabaseClient'
 import AdminLayout from '@/components/AdminLayout'
@@ -8,47 +8,73 @@ export default function ContentModeration() {
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [filter, setFilter] = useState('ALL')
+
+  // Filters and search
+  const [filter, setFilter] = useState('ALL') // ALL, PENDING, APPROVED, REJECTED, HAS_IMAGES
+  const [searchTerm, setSearchTerm] = useState('')
+  const [sortBy, setSortBy] = useState('newest') // newest, oldest, images_desc
+
+  // Modals state
   const [selectedPost, setSelectedPost] = useState(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [customReason, setCustomReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
-  const [postDetails, setPostDetails] = useState(null)
-  const [loadingDetails, setLoadingDetails] = useState(false)
-  const [showFullImage, setShowFullImage] = useState(false)
-  const [selectedImage, setSelectedImage] = useState(null)
-  const [currentImageIndex, setCurrentImageIndex] = useState(0)
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    approved: 0,
-    rejected: 0
-  })
+
+  // Details Modal image state
+  const [modalActiveImageIndex, setModalActiveImageIndex] = useState(0)
+
+  // Lightbox state
+  const [showLightbox, setShowLightbox] = useState(false)
+  const [lightboxImages, setLightboxImages] = useState([])
+  const [lightboxIndex, setLightboxIndex] = useState(0)
+
+  // Toast notification
+  const [toastMessage, setToastMessage] = useState(null)
+
+  const showToast = (message, type = 'success') => {
+    setToastMessage({ message, type })
+    setTimeout(() => setToastMessage(null), 4000)
+  }
 
   const quickReasons = [
-    { id: 1, reason: 'Inappropriate content', icon: 'bi-emoji-frown', color: '#ef4444' },
-    { id: 2, reason: 'Spam or promotional', icon: 'bi-megaphone', color: '#f59e0b' },
-    { id: 3, reason: 'Misleading information', icon: 'bi-info-circle', color: '#f59e0b' },
-    { id: 4, reason: 'Copyright violation', icon: 'bi-c-circle', color: '#ef4444' },
-    { id: 5, reason: 'Offensive language', icon: 'bi-chat-dots', color: '#ef4444' },
-    { id: 6, reason: 'Duplicate content', icon: 'bi-files', color: '#6c757d' },
-    { id: 7, reason: 'Irrelevant to community', icon: 'bi-x-octagon', color: '#6c757d' },
-    { id: 8, reason: 'Harassment or bullying', icon: 'bi-shield-exclamation', color: '#dc2626' }
+    { id: 1, reason: 'Inappropriate or explicit content', icon: 'bi-shield-slash-fill', color: '#ef4444' },
+    { id: 2, reason: 'Spam, advertising, or promotional link', icon: 'bi-megaphone-fill', color: '#f59e0b' },
+    { id: 3, reason: 'Misleading or false information', icon: 'bi-exclamation-triangle-fill', color: '#f59e0b' },
+    { id: 4, reason: 'Copyright or trademark violation', icon: 'bi-c-circle-fill', color: '#ef4444' },
+    { id: 5, reason: 'Offensive language or hate speech', icon: 'bi-chat-left-dots-fill', color: '#dc2626' },
+    { id: 6, reason: 'Duplicate or redundant post', icon: 'bi-files', color: '#6b7280' },
+    { id: 7, reason: 'Irrelevant to agriculture community', icon: 'bi-x-octagon-fill', color: '#6b7280' },
+    { id: 8, reason: 'Harassment, bullying, or safety concern', icon: 'bi-shield-exclamation', color: '#dc2626' }
   ]
 
   useEffect(() => {
     fetchPosts()
-    fetchStats()
-  }, [filter])
+  }, [])
+
+  // Keyboard navigation for Lightbox
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!showLightbox) return
+      if (e.key === 'Escape') setShowLightbox(false)
+      if (e.key === 'ArrowRight') {
+        setLightboxIndex((prev) => (prev + 1) % lightboxImages.length)
+      }
+      if (e.key === 'ArrowLeft') {
+        setLightboxIndex((prev) => (prev - 1 + lightboxImages.length) % lightboxImages.length)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showLightbox, lightboxImages])
 
   const fetchPosts = async () => {
     try {
       setLoading(true)
       setError(null)
-      
-      // 1. Fetch all posts from the posts table to ensure we see "all new posts"
+
+      // 1. Fetch all posts
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
         .select('*')
@@ -56,8 +82,8 @@ export default function ContentModeration() {
 
       if (postsError) throw postsError
 
-      // 2. Fetch all moderation records to match with posts
-      const { data: modData, error: modError } = await supabase
+      // 2. Fetch content moderation table
+      const { data: modData } = await supabase
         .from('content_moderation')
         .select(`
           *,
@@ -68,13 +94,78 @@ export default function ContentModeration() {
           )
         `)
 
-      if (modError) throw modError
+      // 3. Batch fetch users
+      const userIds = [...new Set((postsData || []).map(p => p.user_id).filter(Boolean))]
+      let usersMap = {}
+      if (userIds.length > 0) {
+        const { data: usersData } = await supabase
+          .from('users')
+          .select('*')
+          .in('user_id', userIds)
 
-      // 3. Filter and process
-      const processedPosts = []
+        if (usersData) {
+          usersData.forEach(u => {
+            usersMap[u.user_id] = u
+          })
+        }
 
-      for (const post of (postsData || [])) {
-        // Find matching moderation record
+        const missingUserIds = userIds.filter(id => !usersMap[id])
+        if (missingUserIds.length > 0) {
+          const { data: adminsData } = await supabase
+            .from('admin_users')
+            .select('*')
+            .in('admin_id', missingUserIds)
+
+          if (adminsData) {
+            adminsData.forEach(a => {
+              usersMap[a.admin_id] = { ...a, user_id: a.admin_id, full_name: a.full_name || a.name }
+            })
+          }
+        }
+      }
+
+      // 4. Batch fetch categories
+      const categoryIds = [...new Set((postsData || []).map(p => p.category_id).filter(Boolean))]
+      let categoriesMap = {}
+      if (categoryIds.length > 0) {
+        const { data: catData } = await supabase
+          .from('post_categories')
+          .select('*')
+          .in('category_id', categoryIds)
+
+        if (catData) {
+          catData.forEach(c => {
+            categoriesMap[c.category_id] = c
+          })
+        }
+      }
+
+      // 5. Batch fetch post_images
+      const postIds = (postsData || []).map(p => p.post_id).filter(Boolean)
+      let postImagesMap = {}
+      if (postIds.length > 0) {
+        const { data: imagesData } = await supabase
+          .from('post_images')
+          .select('*')
+          .in('post_id', postIds)
+          .order('image_order', { ascending: true })
+
+        if (imagesData) {
+          imagesData.forEach(img => {
+            if (!postImagesMap[img.post_id]) postImagesMap[img.post_id] = []
+            const rawUrl = img.image_url || img.url || img.path || img.photo_url
+            if (rawUrl) {
+              const url = resolveImageUrl(rawUrl, 'post-images')
+              if (url && !postImagesMap[img.post_id].includes(url)) {
+                postImagesMap[img.post_id].push(url)
+              }
+            }
+          })
+        }
+      }
+
+      // 6. Process and compile final posts list
+      const processedPosts = (postsData || []).map(post => {
         const mod = modData?.find(m => m.content_id === post.post_id && m.content_type === 'POST') || {
           moderation_status: 'PENDING',
           moderation_id: `new-${post.post_id}`,
@@ -83,448 +174,499 @@ export default function ContentModeration() {
           created_at: post.created_at
         }
 
-        // Apply filter
-        if (filter !== 'ALL' && mod.moderation_status !== filter) continue
+        const userData = usersMap[post.user_id] || null
+        const categoryData = categoriesMap[post.category_id] || null
 
-        // Fetch user data (this is still N+1 but we can optimize later if needed)
-        // For now let's keep it similar to original to minimize risk
-        let userData = null
-        if (post.user_id) {
-          const { data: userResult } = await supabase
-            .from('users')
-            .select('*')
-            .eq('user_id', post.user_id)
-            .maybeSingle()
+        // Gather all image sources
+        let imagesList = postImagesMap[post.post_id] ? [...postImagesMap[post.post_id]] : []
 
-          if (userResult) {
-            userData = userResult
-          } else {
-            const { data: adminResult } = await supabase
-              .from('admin_users')
-              .select('*')
-              .eq('admin_id', post.user_id)
-              .maybeSingle()
-            userData = adminResult
+        if (post.image_url) {
+          const url = resolveImageUrl(post.image_url, 'post-images')
+          if (url && !imagesList.includes(url)) imagesList.push(url)
+        }
+        if (post.image) {
+          const url = resolveImageUrl(post.image, 'post-images')
+          if (url && !imagesList.includes(url)) imagesList.push(url)
+        }
+        if (post.photo_url) {
+          const url = resolveImageUrl(post.photo_url, 'post-images')
+          if (url && !imagesList.includes(url)) imagesList.push(url)
+        }
+
+        if (post.images) {
+          let parsedImages = []
+          if (Array.isArray(post.images)) {
+            parsedImages = post.images
+          } else if (typeof post.images === 'string') {
+            try {
+              const parsed = JSON.parse(post.images)
+              if (Array.isArray(parsed)) parsedImages = parsed
+              else if (typeof parsed === 'string') parsedImages = [parsed]
+            } catch (e) {
+              parsedImages = post.images.split(',').map(s => s.trim())
+            }
           }
+          parsedImages.forEach(img => {
+            if (img) {
+              const url = resolveImageUrl(typeof img === 'string' ? img : img.image_url || img.url, 'post-images')
+              if (url && !imagesList.includes(url)) imagesList.push(url)
+            }
+          })
         }
 
-        // Fetch images
-        let images = []
-        const { data: imagesData } = await supabase
-          .from('post_images')
-          .select('image_url, image_order')
-          .eq('post_id', post.post_id)
-          .order('image_order', { ascending: true })
-
-        if (imagesData && imagesData.length > 0) {
-          images = imagesData.map(img => resolveImageUrl(img.image_url, 'post-images'))
-        } else if (post.image_url) {
-          images = [resolveImageUrl(post.image_url, 'post-images')]
-        }
-
-        processedPosts.push({
+        return {
           ...mod,
+          post_id: post.post_id,
           title: post.title || 'Untitled Post',
-          content: post.content || 'No content available',
-          images: images,
-          image_count: images.length,
-          cover_image: images[0] || null,
+          content: post.content || 'No content provided',
+          category: categoryData,
+          images: imagesList,
+          image_count: imagesList.length,
+          cover_image: imagesList[0] || null,
           post_created_at: post.created_at,
           user: userData,
-          author_name: userData?.full_name || userData?.name || 'User',
-          author_email: userData?.email || 'Email not available',
+          author_name: userData?.full_name || userData?.name || 'Unknown User',
+          author_email: userData?.email || 'No email',
           author_phone: userData?.phone || null,
           author_location: userData?.location || userData?.district || null,
           author_joined: userData?.created_at || null,
-          user_status: userData?.status || 'N/A',
+          user_status: userData?.status || 'Active',
           user_bio: userData?.bio || null,
           user_last_login: userData?.last_login || null,
           user_verified: userData?.is_verified || false,
           user_id: userData?.user_id || post.user_id,
           post_exists: true
-        })
-      }
+        }
+      })
 
       setPosts(processedPosts)
     } catch (err) {
-      console.error('Error fetching posts:', err)
+      console.error('Error fetching posts for moderation:', err)
       setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchStats = async () => {
-    try {
-      // Fetch all posts and all moderation records to calculate accurate stats
-      const { count: totalPosts } = await supabase.from('posts').select('*', { count: 'exact', head: true })
-      const { data: mods } = await supabase.from('content_moderation').select('content_id, moderation_status')
+  // Calculate statistics dynamically
+  const stats = useMemo(() => {
+    const total = posts.length
+    const pending = posts.filter(p => p.moderation_status === 'PENDING').length
+    const approved = posts.filter(p => p.moderation_status === 'APPROVED').length
+    const rejected = posts.filter(p => p.moderation_status === 'REJECTED').length
+    const withImages = posts.filter(p => p.images && p.images.length > 0).length
+    return { total, pending, approved, rejected, withImages }
+  }, [posts])
 
-      const approvedCount = mods?.filter(m => m.moderation_status === 'APPROVED').length || 0
-      const rejectedCount = mods?.filter(m => m.moderation_status === 'REJECTED').length || 0
-      const pendingCount = (totalPosts || 0) - rejectedCount - approvedCount
+  // Filter & Sort Posts
+  const filteredPosts = useMemo(() => {
+    return posts.filter(post => {
+      // Filter by status tab
+      if (filter === 'PENDING' && post.moderation_status !== 'PENDING') return false
+      if (filter === 'APPROVED' && post.moderation_status !== 'APPROVED') return false
+      if (filter === 'REJECTED' && post.moderation_status !== 'REJECTED') return false
+      if (filter === 'HAS_IMAGES' && (!post.images || post.images.length === 0)) return false
 
-      setStats({
-        total: totalPosts || 0,
-        pending: pendingCount > 0 ? pendingCount : 0,
-        approved: approvedCount,
-        rejected: rejectedCount
-      })
-    } catch (err) {
-      console.error('Error fetching stats:', err)
-    }
-  }
-
-  const fetchPostDetails = async (contentId, contentType) => {
-    setLoadingDetails(true)
-    setPostDetails(null)
-    
-    try {
-      let details = null
-      
-      if (contentType === 'POST' && contentId) {
-        const { data: postData, error: postError } = await supabase
-          .from('posts')
-          .select('*')
-          .eq('post_id', contentId)
-          .maybeSingle()
-        
-        if (postData) {
-          const { data: imagesData, error: imagesError } = await supabase
-            .from('post_images')
-            .select('image_url, image_order')
-            .eq('post_id', contentId)
-            .order('image_order', { ascending: true })
-          
-          let images = []
-          if (!imagesError && imagesData && imagesData.length > 0) {
-            images = imagesData.map(img => resolveImageUrl(img.image_url, 'post-images'))
-          } else if (postData.image_url) {
-            images = [resolveImageUrl(postData.image_url, 'post-images')]
-          }
-          
-          let userData = null
-          const userId = postData.user_id
-          
-          if (userId) {
-            // First try users table
-            const { data: userResult, error: userError } = await supabase
-              .from('users')
-              .select('*')
-              .eq('user_id', userId)
-              .maybeSingle()
-            
-            if (userError) {
-              console.error('Error fetching user:', userError)
-            }
-            
-            if (userResult) {
-              userData = userResult
-            } else {
-              // Try admin_users table
-              const { data: adminResult } = await supabase
-                .from('admin_users')
-                .select('*')
-                .eq('admin_id', userId)
-                .maybeSingle()
-              
-              if (adminResult) {
-                userData = adminResult
-              }
-            }
-          }
-          
-          let categoryData = null
-          if (postData.category_id) {
-            const { data: catResult } = await supabase
-              .from('post_categories')
-              .select('category_name, description')
-              .eq('category_id', postData.category_id)
-              .maybeSingle()
-            
-            if (catResult) {
-              categoryData = catResult
-            }
-          }
-          
-          details = { 
-            ...postData, 
-            images: images,
-            image_count: images.length,
-            user: userData,
-            category: categoryData
-          }
+      // Search term
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase().trim()
+        const titleMatch = post.title?.toLowerCase().includes(q)
+        const contentMatch = post.content?.toLowerCase().includes(q)
+        const authorMatch = post.author_name?.toLowerCase().includes(q)
+        const emailMatch = post.author_email?.toLowerCase().includes(q)
+        const idMatch = post.content_id?.toString().toLowerCase().includes(q)
+        const categoryMatch = post.category?.category_name?.toLowerCase().includes(q)
+        if (!titleMatch && !contentMatch && !authorMatch && !emailMatch && !idMatch && !categoryMatch) {
+          return false
         }
       }
-      
-      setPostDetails(details)
-    } catch (err) {
-      console.error('Error fetching post details:', err)
-      setPostDetails(null)
-    } finally {
-      setLoadingDetails(false)
-    }
-  }
+      return true
+    }).sort((a, b) => {
+      if (sortBy === 'oldest') {
+        return new Date(a.post_created_at) - new Date(b.post_created_at)
+      }
+      if (sortBy === 'images_desc') {
+        return (b.images?.length || 0) - (a.images?.length || 0)
+      }
+      // Default: newest
+      return new Date(b.post_created_at) - new Date(a.post_created_at)
+    })
+  }, [posts, filter, searchTerm, sortBy])
 
+  // Moderation status update
   const updateStatus = async (post, status, reason = null) => {
     setActionLoading(true)
-    const session = JSON.parse(localStorage.getItem('adminSession'))
-    
-    const moderationData = {
-      content_id: post.content_id,
-      content_type: 'POST',
-      moderation_status: status,
-      reviewed_by: session?.admin?.admin_id,
-      reviewed_at: new Date().toISOString(),
-      moderation_reason: reason || post.moderation_reason
-    }
-
-    let resultError
-    if (post.moderation_id && !post.moderation_id.toString().startsWith('new-')) {
-      const { error } = await supabase
-        .from('content_moderation')
-        .update(moderationData)
-        .eq('moderation_id', post.moderation_id)
-      resultError = error
-    } else {
-      const { error } = await supabase
-        .from('content_moderation')
-        .insert(moderationData)
-      resultError = error
-    }
-
-    setActionLoading(false)
-
-    if (!resultError) {
-      await fetchPosts()
-      await fetchStats()
-      setShowRejectModal(false)
-      setRejectReason('')
-      setCustomReason('')
-      setSelectedPost(null)
-      if (showDetailsModal) setShowDetailsModal(false)
-      alert(`Content ${status.toLowerCase()} successfully!`)
-    } else {
-      alert(`Error updating status: ${resultError.message}`)
-    }
-  }
-
-  const handleApprove = async (post) => {
-    if (confirm(`Are you sure you want to approve this content?`)) {
-      await updateStatus(post, 'APPROVED')
-    }
-  }
-
-  const handleRemovePost = async (post) => {
-    if (!confirm('Are you sure you want to PERMANENTLY remove this post from the platform? This action cannot be undone.')) {
-      return
-    }
-
-    setActionLoading(true)
     try {
-      // Get the content ID (post_id)
-      const contentId = post.content_id
+      const sessionStr = localStorage.getItem('adminSession')
+      const session = sessionStr ? JSON.parse(sessionStr) : null
 
-      // 1. Delete from post_images first (if any)
-      await supabase
-        .from('post_images')
-        .delete()
-        .eq('post_id', contentId)
-
-      // 2. Delete from posts table
-      const { error: postError } = await supabase
-        .from('posts')
-        .delete()
-        .eq('post_id', contentId)
-
-      if (postError) throw postError
-
-      // 3. Delete from content_moderation table if it exists
-      if (post.moderation_id && !post.moderation_id.toString().startsWith('new-')) {
-        const { error: modError } = await supabase
-          .from('content_moderation')
-          .delete()
-          .eq('moderation_id', post.moderation_id)
-
-        if (modError) {
-          console.warn('Moderation record might have been deleted by trigger or missing:', modError.message)
-        }
+      const moderationData = {
+        content_id: post.content_id,
+        content_type: 'POST',
+        moderation_status: status,
+        reviewed_by: session?.admin?.admin_id || null,
+        reviewed_at: new Date().toISOString(),
+        moderation_reason: reason || (status === 'APPROVED' ? null : post.moderation_reason)
       }
 
-      // Log the activity
-      const session = JSON.parse(localStorage.getItem('adminSession'))
+      let resultError
+      if (post.moderation_id && !post.moderation_id.toString().startsWith('new-')) {
+        const { error } = await supabase
+          .from('content_moderation')
+          .update(moderationData)
+          .eq('moderation_id', post.moderation_id)
+        resultError = error
+      } else {
+        const { error } = await supabase
+          .from('content_moderation')
+          .insert(moderationData)
+        resultError = error
+      }
+
+      if (resultError) throw resultError
+
+      // Log activity
       if (session?.admin?.admin_id) {
         await safeLogActivity(
           session.admin.admin_id,
-          'CONTENT_REMOVAL',
-          `Removed post: ${post.title} (ID: ${contentId})`,
+          'CONTENT_MODERATION',
+          `Set status of post "${post.title}" (ID: ${post.content_id}) to ${status}`,
           'internal'
         )
       }
 
-      alert('Post has been permanently removed.')
-      await fetchPosts()
-      await fetchStats()
-      setShowDetailsModal(false)
+      showToast(`Content ${status.toLowerCase()} successfully!`, status === 'APPROVED' ? 'success' : 'warning')
+
+      // Update local state smoothly
+      setPosts(prev => prev.map(p => {
+        if (p.content_id === post.content_id) {
+          return {
+            ...p,
+            moderation_status: status,
+            moderation_reason: reason || (status === 'APPROVED' ? null : p.moderation_reason),
+            reviewed_at: new Date().toISOString(),
+            reviewed_by_admin: session?.admin ? {
+              admin_id: session.admin.admin_id,
+              full_name: session.admin.full_name || 'Admin',
+              email: session.admin.email
+            } : p.reviewed_by_admin
+          }
+        }
+        return p
+      }))
+
+      setShowRejectModal(false)
+      setRejectReason('')
+      setCustomReason('')
       setSelectedPost(null)
+      setShowDetailsModal(false)
     } catch (err) {
-      console.error('Error removing post:', err)
-      alert(`Error removing post: ${err.message}`)
+      console.error('Error updating status:', err)
+      showToast(`Failed to update status: ${err.message}`, 'error')
     } finally {
       setActionLoading(false)
     }
   }
 
-  const handleReject = async () => {
-    const finalReason = customReason || rejectReason
-    if (!finalReason.trim()) {
-      alert('Please provide a reason for rejection')
+  const handleApprove = async (post) => {
+    await updateStatus(post, 'APPROVED')
+  }
+
+  const handleRejectSubmit = async () => {
+    const finalReason = customReason.trim() || rejectReason
+    if (!finalReason) {
+      showToast('Please select or enter a rejection reason', 'error')
       return
     }
     await updateStatus(selectedPost, 'REJECTED', finalReason)
   }
 
-  const viewDetails = async (post) => {
+  const handleRemovePost = async (post) => {
+    if (!confirm(`Are you sure you want to PERMANENTLY remove post "${post.title}"? This cannot be undone.`)) {
+      return
+    }
+
+    setActionLoading(true)
+    try {
+      const contentId = post.content_id
+
+      // 1. Delete post images
+      await supabase.from('post_images').delete().eq('post_id', contentId)
+
+      // 2. Delete post
+      const { error: postErr } = await supabase.from('posts').delete().eq('post_id', contentId)
+      if (postErr) throw postErr
+
+      // 3. Delete moderation record
+      if (post.moderation_id && !post.moderation_id.toString().startsWith('new-')) {
+        await supabase.from('content_moderation').delete().eq('moderation_id', post.moderation_id)
+      }
+
+      const sessionStr = localStorage.getItem('adminSession')
+      const session = sessionStr ? JSON.parse(sessionStr) : null
+      if (session?.admin?.admin_id) {
+        await safeLogActivity(
+          session.admin.admin_id,
+          'CONTENT_REMOVAL',
+          `Permanently deleted post "${post.title}" (ID: ${contentId})`,
+          'internal'
+        )
+      }
+
+      showToast('Post removed permanently', 'info')
+      setPosts(prev => prev.filter(p => p.content_id !== contentId))
+      setShowDetailsModal(false)
+      setSelectedPost(null)
+    } catch (err) {
+      console.error('Error removing post:', err)
+      showToast(`Error removing post: ${err.message}`, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const openDetails = (post) => {
     setSelectedPost(post)
-    await fetchPostDetails(post.content_id, post.content_type)
+    setModalActiveImageIndex(0)
     setShowDetailsModal(true)
   }
 
-  const handleImageError = (e) => {
-    e.target.style.display = 'none'
-    const parent = e.target.parentElement
-    if (parent && !parent.querySelector('.no-image-placeholder')) {
-      const placeholder = document.createElement('div')
-      placeholder.className = 'no-image-placeholder'
-      placeholder.innerHTML = '<i class="bi bi-image"></i><span>Image unavailable</span>'
-      parent.appendChild(placeholder)
-    }
-  }
-
-  const openFullImage = (imageUrl, index) => {
-    setSelectedImage(imageUrl)
-    setCurrentImageIndex(index)
-    setShowFullImage(true)
-  }
-
-  const nextImage = () => {
-    if (postDetails && postDetails.images && currentImageIndex < postDetails.images.length - 1) {
-      setCurrentImageIndex(currentImageIndex + 1)
-      setSelectedImage(postDetails.images[currentImageIndex + 1])
-    }
-  }
-
-  const prevImage = () => {
-    if (postDetails && postDetails.images && currentImageIndex > 0) {
-      setCurrentImageIndex(currentImageIndex - 1)
-      setSelectedImage(postDetails.images[currentImageIndex - 1])
-    }
+  const openLightbox = (imagesList, startIndex = 0) => {
+    if (!imagesList || imagesList.length === 0) return
+    setLightboxImages(imagesList)
+    setLightboxIndex(startIndex)
+    setShowLightbox(true)
   }
 
   const formatDate = (dateString) => {
-    if (!dateString) return 'Date not available'
+    if (!dateString) return 'N/A'
     try {
-      const date = new Date(dateString)
-      if (isNaN(date.getTime())) return 'Date not available'
-      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-    } catch (e) {
-      return 'Date not available'
+      const d = new Date(dateString)
+      if (isNaN(d.getTime())) return 'N/A'
+      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return 'N/A'
     }
   }
 
   const getStatusBadge = (status) => {
-    const badges = {
-      'PENDING': <span className="status-badge pending"><i className="bi bi-clock-history"></i> Pending Review</span>,
-      'APPROVED': <span className="status-badge approved"><i className="bi bi-check-circle-fill"></i> Approved</span>,
-      'REJECTED': <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>
+    switch (status) {
+      case 'APPROVED':
+        return <span className="status-badge approved"><i className="bi bi-check-circle-fill"></i> Approved</span>
+      case 'REJECTED':
+        return <span className="status-badge rejected"><i className="bi bi-x-circle-fill"></i> Rejected</span>
+      case 'PENDING':
+      default:
+        return <span className="status-badge pending"><i className="bi bi-clock-history"></i> Pending Review</span>
     }
-    return badges[status] || <span className="status-badge default">{status}</span>
   }
 
   if (loading) {
     return (
       <AdminLayout title="Content Moderation">
-        <div className="loading-screen">
-          <div className="loading-spinner"></div>
-          <p>Loading content...</p>
+        <div className="moderation-loading">
+          <div className="spinner-glow"></div>
+          <p>Loading user content & moderation database...</p>
         </div>
+        <style jsx>{`
+          .moderation-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 480px;
+            color: #64748b;
+          }
+          .spinner-glow {
+            width: 54px;
+            height: 54px;
+            border: 4px solid #e2e8f0;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 0.9s cubic-bezier(0.6, 0.2, 0.4, 0.8) infinite;
+            margin-bottom: 20px;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </AdminLayout>
     )
   }
 
   return (
     <AdminLayout title="Content Moderation">
-      <div className="moderation-container">
-        {/* Hero Section */}
-        <div className="hero-section">
-          <div className="hero-content">
-            <div className="hero-icon">
+      <div className="moderation-page">
+        {/* Toast Notification */}
+        {toastMessage && (
+          <div className={`toast-popup ${toastMessage.type}`}>
+            <i className={`bi ${toastMessage.type === 'success' ? 'bi-check-circle-fill' : toastMessage.type === 'error' ? 'bi-exclamation-triangle-fill' : 'bi-info-circle-fill'}`}></i>
+            <span>{toastMessage.message}</span>
+          </div>
+        )}
+
+        {/* Hero Header */}
+        <div className="hero-banner">
+          <div className="hero-left">
+            <div className="hero-badge">
               <i className="bi bi-shield-check"></i>
+              <span>Safety & Quality Control</span>
             </div>
-            <div>
-              <h1 className="hero-title">Content Moderation</h1>
-              <p className="hero-subtitle">Review and manage user-generated content</p>
-            </div>
+            <h1>Content Moderation Hub</h1>
+            <p>Review user posts, inspect uploaded images, and maintain platform standards.</p>
+          </div>
+          <div className="hero-right">
+            <button className="btn-refresh" onClick={fetchPosts} title="Refresh content list">
+              <i className="bi bi-arrow-clockwise"></i>
+              <span>Refresh Data</span>
+            </button>
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="stats-grid">
-          <div className="stat-card total">
-            <div className="stat-icon"><i className="bi bi-files"></i></div>
-            <div className="stat-info">
-              <span className="stat-label">Total</span>
-              <h2>{stats.total}</h2>
-              <span className="stat-trend">All content</span>
+        {/* Interactive Stats Cards */}
+        <div className="stats-row">
+          <div
+            className={`stat-card ${filter === 'ALL' ? 'active' : ''}`}
+            onClick={() => setFilter('ALL')}
+          >
+            <div className="stat-icon total"><i className="bi bi-layers-fill"></i></div>
+            <div className="stat-content">
+              <span className="stat-label">Total Posts</span>
+              <h2 className="stat-number">{stats.total}</h2>
+              <span className="stat-sub">All platform items</span>
             </div>
           </div>
-          <div className="stat-card approved">
-            <div className="stat-icon"><i className="bi bi-check-circle"></i></div>
-            <div className="stat-info">
+
+          <div
+            className={`stat-card pending ${filter === 'PENDING' ? 'active' : ''}`}
+            onClick={() => setFilter('PENDING')}
+          >
+            <div className="stat-icon pending"><i className="bi bi-hourglass-split"></i></div>
+            <div className="stat-content">
+              <span className="stat-label">Pending Review</span>
+              <h2 className="stat-number text-amber">{stats.pending}</h2>
+              <span className="stat-sub">Awaiting decision</span>
+            </div>
+            {stats.pending > 0 && <span className="pulse-dot"></span>}
+          </div>
+
+          <div
+            className={`stat-card approved ${filter === 'APPROVED' ? 'active' : ''}`}
+            onClick={() => setFilter('APPROVED')}
+          >
+            <div className="stat-icon approved"><i className="bi bi-check-lg"></i></div>
+            <div className="stat-content">
               <span className="stat-label">Approved</span>
-              <h2 className="text-success">{stats.approved}</h2>
-              <span className="stat-trend">Published</span>
+              <h2 className="stat-number text-emerald">{stats.approved}</h2>
+              <span className="stat-sub">Live on platform</span>
             </div>
           </div>
-          <div className="stat-card rejected">
-            <div className="stat-icon"><i className="bi bi-x-circle"></i></div>
-            <div className="stat-info">
+
+          <div
+            className={`stat-card rejected ${filter === 'REJECTED' ? 'active' : ''}`}
+            onClick={() => setFilter('REJECTED')}
+          >
+            <div className="stat-icon rejected"><i className="bi bi-x-lg"></i></div>
+            <div className="stat-content">
               <span className="stat-label">Rejected</span>
-              <h2 className="text-danger">{stats.rejected}</h2>
-              <span className="stat-trend">Not approved</span>
+              <h2 className="stat-number text-rose">{stats.rejected}</h2>
+              <span className="stat-sub">Declined items</span>
             </div>
           </div>
         </div>
 
-        {/* Filter Tabs */}
-        <div className="filter-section">
-          <div className="filter-buttons">
-            <button className={`filter-btn ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>
-              <i className="bi bi-grid"></i>
-              <span>All Content</span>
-              <span className="filter-count">{stats.total}</span>
+        {/* Toolbar: Search, Filters & Sorting */}
+        <div className="toolbar-card">
+          <div className="search-box">
+            <i className="bi bi-search search-icon"></i>
+            <input
+              type="text"
+              placeholder="Search by title, content, user, category or ID..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            {searchTerm && (
+              <button className="clear-search" onClick={() => setSearchTerm('')}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            )}
+          </div>
+
+          <div className="filter-tabs">
+            <button
+              className={`filter-chip ${filter === 'ALL' ? 'active' : ''}`}
+              onClick={() => setFilter('ALL')}
+            >
+              <i className="bi bi-grid-fill"></i>
+              <span>All</span>
+              <span className="count-pill">{stats.total}</span>
             </button>
-            <button className={`filter-btn ${filter === 'APPROVED' ? 'active' : ''}`} onClick={() => setFilter('APPROVED')}>
-              <i className="bi bi-check-circle"></i>
+
+            <button
+              className={`filter-chip warning ${filter === 'PENDING' ? 'active' : ''}`}
+              onClick={() => setFilter('PENDING')}
+            >
+              <i className="bi bi-clock-history"></i>
+              <span>Pending</span>
+              <span className="count-pill warning">{stats.pending}</span>
+            </button>
+
+            <button
+              className={`filter-chip success ${filter === 'APPROVED' ? 'active' : ''}`}
+              onClick={() => setFilter('APPROVED')}
+            >
+              <i className="bi bi-check-circle-fill"></i>
               <span>Approved</span>
-              <span className="filter-count success">{stats.approved}</span>
+              <span className="count-pill success">{stats.approved}</span>
             </button>
-            <button className={`filter-btn ${filter === 'REJECTED' ? 'active' : ''}`} onClick={() => setFilter('REJECTED')}>
-              <i className="bi bi-x-circle"></i>
+
+            <button
+              className={`filter-chip danger ${filter === 'REJECTED' ? 'active' : ''}`}
+              onClick={() => setFilter('REJECTED')}
+            >
+              <i className="bi bi-x-circle-fill"></i>
               <span>Rejected</span>
-              <span className="filter-count danger">{stats.rejected}</span>
+              <span className="count-pill danger">{stats.rejected}</span>
+            </button>
+
+            <button
+              className={`filter-chip info ${filter === 'HAS_IMAGES' ? 'active' : ''}`}
+              onClick={() => setFilter('HAS_IMAGES')}
+            >
+              <i className="bi bi-images"></i>
+              <span>With Images</span>
+              <span className="count-pill info">{stats.withImages}</span>
             </button>
           </div>
+
+          <div className="sort-box">
+            <label><i className="bi bi-sort-down"></i> Sort:</label>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="images_desc">Most Images</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Results Counter Bar */}
+        <div className="results-bar">
+          <span>Showing <strong>{filteredPosts.length}</strong> of <strong>{posts.length}</strong> posts</span>
+          {(filter !== 'ALL' || searchTerm) && (
+            <button className="reset-filters-btn" onClick={() => { setFilter('ALL'); setSearchTerm('') }}>
+              <i className="bi bi-x-circle"></i> Reset Filters
+            </button>
+          )}
         </div>
 
         {/* Posts Grid */}
-        <div className="posts-grid">
-          {posts.length > 0 ? (
-            posts.map((post, index) => (
-              <div key={post.moderation_id} className="post-card" style={{ animationDelay: `${index * 0.05}s` }}>
-                {/* User Info */}
-                <div className="post-user">
-                  <div className="user-avatar">
+        {filteredPosts.length > 0 ? (
+          <div className="posts-grid">
+            {filteredPosts.map((post) => (
+              <div key={post.content_id} className={`post-card ${post.moderation_status.toLowerCase()}`}>
+                {/* User Header */}
+                <div className="card-user-header">
+                  <div className="avatar-wrapper">
                     {post.user?.profile_image ? (
                       <img
                         src={resolveImageUrl(post.user.profile_image, 'profile-images')}
@@ -535,313 +677,401 @@ export default function ContentModeration() {
                         }}
                       />
                     ) : null}
-                    <span style={{ display: post.user?.profile_image ? 'none' : 'flex' }}>
-                      {post.author_name?.charAt(0) || 'U'}
-                    </span>
-                    <div className={`user-status ${post.moderation_status === 'PENDING' ? 'pending' : post.moderation_status === 'APPROVED' ? 'approved' : 'rejected'}`}></div>
+                    <div className="avatar-fallback" style={{ display: post.user?.profile_image ? 'none' : 'flex' }}>
+                      {post.author_name?.charAt(0)?.toUpperCase() || 'U'}
+                    </div>
                   </div>
-                  <div className="user-info">
-                    <h4>{post.author_name}</h4>
-                    <p>{post.author_email}</p>
-                    {post.author_location && (
-                      <span className="user-location"><i className="bi bi-geo-alt"></i> {post.author_location}</span>
-                    )}
+
+                  <div className="user-meta">
+                    <h4 className="author-name">
+                      {post.author_name}
+                      {post.user_verified && <i className="bi bi-patch-check-fill verified-badge" title="Verified User"></i>}
+                    </h4>
+                    <p className="author-email">{post.author_email}</p>
+                    <div className="time-location">
+                      <span><i className="bi bi-clock"></i> {formatDate(post.post_created_at)}</span>
+                      {post.author_location && (
+                        <span><i className="bi bi-geo-alt"></i> {post.author_location}</span>
+                      )}
+                    </div>
                   </div>
-                  {getStatusBadge(post.moderation_status)}
+
+                  <div className="status-pill-box">
+                    {getStatusBadge(post.moderation_status)}
+                  </div>
                 </div>
 
-                {/* Images */}
-                {post.images && post.images.length > 0 && (
-                  <div className="post-images">
-                    <div className="images-grid">
-                      {post.images.slice(0, 3).map((img, idx) => (
-                        <div key={idx} className="image-item" onClick={() => openFullImage(img, idx)}>
+                {/* Images Display Area */}
+                <div className="card-media-section">
+                  {post.images && post.images.length > 0 ? (
+                    <div className="image-display-container">
+                      {/* Image Layouts based on Count */}
+                      {post.images.length === 1 && (
+                        <div className="single-image-wrapper" onClick={() => openLightbox(post.images, 0)}>
                           <img
-                            src={img}
-                            alt={`Image ${idx + 1}`}
-                            onError={handleImageError}
+                            src={post.images[0]}
+                            alt={post.title}
+                            onError={(e) => {
+                              e.target.src = 'https://placehold.co/600x400/f1f5f9/94a3b8?text=Image+Unavailable'
+                            }}
                           />
-                          <div className="image-overlay">
+                          <div className="image-zoom-overlay">
                             <i className="bi bi-zoom-in"></i>
+                            <span>View Photo</span>
                           </div>
                         </div>
-                      ))}
-                      {post.images.length > 3 && (
-                        <div className="more-images" onClick={() => viewDetails(post)}>
-                          <i className="bi bi-images"></i>
-                          <span>+{post.images.length - 3}</span>
+                      )}
+
+                      {post.images.length === 2 && (
+                        <div className="dual-image-grid">
+                          {post.images.map((img, idx) => (
+                            <div key={idx} className="grid-image-item" onClick={() => openLightbox(post.images, idx)}>
+                              <img
+                                src={img}
+                                alt=""
+                                onError={(e) => {
+                                  e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
+                                }}
+                              />
+                              <div className="image-zoom-overlay">
+                                <i className="bi bi-zoom-in"></i>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
-                    </div>
-                    <div className="image-count">
-                      <i className="bi bi-images"></i> {post.images.length} image{post.images.length > 1 ? 's' : ''}
-                    </div>
-                  </div>
-                )}
 
-                {/* Content */}
-                <div className="post-content">
-                  <h3>{post.title}</h3>
-                  <p>{post.content?.substring(0, 100)}...</p>
-                  <div className="post-meta">
-                    <span><i className="bi bi-calendar3"></i> {new Date(post.post_created_at).toLocaleDateString()}</span>
-                    <span><i className="bi bi-clock"></i> {new Date(post.post_created_at).toLocaleTimeString()}</span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="post-actions">
-                  <button className="btn-view" onClick={() => viewDetails(post)}>
-                    <i className="bi bi-eye"></i> View Details
-                  </button>
-                  {post.post_exists !== false && (
-                    <div className="action-group">
-                      {post.moderation_status !== 'APPROVED' && (
-                        <button className="btn-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
-                          <i className="bi bi-check-lg"></i> {post.moderation_status === 'REJECTED' ? 'Re-approve' : 'Approve'}
-                        </button>
-                      )}
-                      {post.moderation_status !== 'REJECTED' && (
-                        <button className="btn-reject" onClick={() => {
-                          setSelectedPost(post)
-                          setShowRejectModal(true)
-                        }} disabled={actionLoading}>
-                          <i className="bi bi-x-lg"></i> Reject
-                        </button>
-                      )}
-                      {post.moderation_status === 'REJECTED' && (
-                        <button className="btn-remove-danger" onClick={() => handleRemovePost(post)} disabled={actionLoading}>
-                          <i className="bi bi-trash"></i> Remove
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="empty-state">
-              <div className="empty-icon">
-                <i className="bi bi-inbox"></i>
-              </div>
-              <h3>No content found</h3>
-              <p>There are no {filter.toLowerCase()} content items to display.</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Details Modal with Proper User Data */}
-      {showDetailsModal && selectedPost && postDetails && (
-        <div className="modal-overlay" onClick={() => setShowDetailsModal(false)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-content">
-                <div className="modal-icon">
-                  <i className="bi bi-file-text-fill"></i>
-                </div>
-                <div>
-                  <h2>Content Details</h2>
-                  <p>Complete information about this content</p>
-                </div>
-              </div>
-              <button className="modal-close" onClick={() => setShowDetailsModal(false)}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-            
-            <div className="modal-body">
-              {loadingDetails ? (
-                <div className="loading-details">
-                  <div className="spinner-border text-primary"></div>
-                  <p>Loading content details...</p>
-                </div>
-              ) : (
-                <>
-                  {/* Images Gallery */}
-                  {postDetails.images && postDetails.images.length > 0 && (
-                    <div className="modal-images">
-                      <h4><i className="bi bi-images"></i> Images ({postDetails.images.length})</h4>
-                      <div className="modal-images-grid">
-                        {postDetails.images.map((img, idx) => (
-                          <div key={idx} className="modal-image" onClick={() => openFullImage(img, idx)}>
+                      {post.images.length >= 3 && (
+                        <div className="multi-image-grid">
+                          <div className="grid-main-image" onClick={() => openLightbox(post.images, 0)}>
                             <img
-                              src={img}
-                              alt={`Image ${idx + 1}`}
-                              onError={handleImageError}
+                              src={post.images[0]}
+                              alt=""
+                              onError={(e) => {
+                                e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
+                              }}
                             />
-                            <div className="modal-image-overlay">
+                            <div className="image-zoom-overlay">
                               <i className="bi bi-zoom-in"></i>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Author Info - Now with proper data from Supabase */}
-                  <div className="modal-section">
-                    <h4><i className="bi bi-person-badge"></i> Author Information</h4>
-                    <div className="author-card">
-                      <div className="author-avatar">
-                        {postDetails.user?.profile_image ? (
-                          <img
-                            src={resolveImageUrl(postDetails.user.profile_image, 'profile-images')}
-                            alt=""
-                            onError={(e) => {
-                              e.target.style.display = 'none'
-                              if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
-                            }}
-                          />
-                        ) : null}
-                        <span style={{ display: postDetails.user?.profile_image ? 'none' : 'flex' }}>
-                          {postDetails.user?.full_name?.charAt(0) || postDetails.user?.name?.charAt(0) || 'U'}
-                        </span>
-                      </div>
-                      <div className="author-details">
-                        <h5>
-                          {postDetails.user?.full_name || postDetails.user?.name || 'User'}
-                          {postDetails.user?.is_verified && <span className="ms-2 badge bg-success-subtle text-success border border-success-subtle rounded-pill" style={{fontSize: '10px'}}><i className="bi bi-patch-check-fill"></i> Verified</span>}
-                        </h5>
-                        <p><i className="bi bi-envelope"></i> {postDetails.user?.email || 'Email not available'}</p>
-                        <div className="author-meta-grid">
-                          {postDetails.user?.phone && <p><i className="bi bi-telephone"></i> {postDetails.user.phone}</p>}
-                          {postDetails.user?.location && <p><i className="bi bi-geo-alt"></i> {postDetails.user.location}</p>}
-                          <p><i className="bi bi-calendar-check"></i> Joined: {formatDate(postDetails.user?.created_at)}</p>
-                          <p><i className="bi bi-activity"></i> Status: <span className={`text-${postDetails.user?.status === 'active' ? 'success' : 'danger'}`}>{postDetails.user?.status || 'active'}</span></p>
-                          <p><i className="bi bi-clock-history"></i> Last Active: {postDetails.user?.last_login ? formatDate(postDetails.user.last_login) : 'Never'}</p>
-                        </div>
-                        {postDetails.user?.bio && (
-                          <div className="author-bio mt-2">
-                            <label className="text-muted small fw-bold uppercase">Bio</label>
-                            <p className="small mb-0">{postDetails.user.bio}</p>
+                          <div className="grid-side-stack">
+                            <div className="grid-image-item" onClick={() => openLightbox(post.images, 1)}>
+                              <img
+                                src={post.images[1]}
+                                alt=""
+                                onError={(e) => {
+                                  e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
+                                }}
+                              />
+                              <div className="image-zoom-overlay">
+                                <i className="bi bi-zoom-in"></i>
+                              </div>
+                            </div>
+                            <div className="grid-image-item" onClick={() => openLightbox(post.images, post.images.length > 3 ? 2 : 2)}>
+                              <img
+                                src={post.images[2]}
+                                alt=""
+                                onError={(e) => {
+                                  e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
+                                }}
+                              />
+                              {post.images.length > 3 && (
+                                <div className="more-images-overlay" onClick={(e) => { e.stopPropagation(); openDetails(post) }}>
+                                  <span>+{post.images.length - 2}</span>
+                                  <small>more</small>
+                                </div>
+                              )}
+                              {post.images.length <= 3 && (
+                                <div className="image-zoom-overlay">
+                                  <i className="bi bi-zoom-in"></i>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Content Info */}
-                  <div className="modal-section">
-                    <h4><i className="bi bi-info-circle"></i> Content Information</h4>
-                    <div className="info-grid">
-                      <div className="info-item">
-                        <label>Content ID</label>
-                        <code>{selectedPost.content_id}</code>
-                      </div>
-                      <div className="info-item">
-                        <label>Status</label>
-                        {getStatusBadge(selectedPost.moderation_status)}
-                      </div>
-                      <div className="info-item">
-                        <label>Created</label>
-                        <span>{new Date(selectedPost.created_at).toLocaleString()}</span>
-                      </div>
-                      {selectedPost.reviewed_at && (
-                        <div className="info-item">
-                          <label>Reviewed</label>
-                          <span>{new Date(selectedPost.reviewed_at).toLocaleString()}</span>
                         </div>
                       )}
+
+                      <div className="media-badge-bar">
+                        <span className="photos-count-tag">
+                          <i className="bi bi-images"></i> {post.images.length} Image{post.images.length > 1 ? 's' : ''} Attached
+                        </span>
+                        <button className="preview-all-btn" onClick={() => openLightbox(post.images, 0)}>
+                          <i className="bi bi-arrows-angle-expand"></i> Fullscreen
+                        </button>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Post Content */}
-                  <div className="modal-section">
-                    <h4><i className="bi bi-file-text"></i> Post Content</h4>
-                    <div className="post-title">{postDetails.title}</div>
-                    <div className="post-body">{postDetails.content}</div>
-                  </div>
-
-                  {/* Category */}
-                  {postDetails.category?.category_name && (
-                    <div className="modal-section">
-                      <h4><i className="bi bi-tag"></i> Category</h4>
-                      <div className="category-badge">{postDetails.category.category_name}</div>
-                    </div>
-                  )}
-
-                  {/* Rejection Reason */}
-                  {selectedPost.moderation_reason && (
-                    <div className="modal-section rejection">
-                      <h4><i className="bi bi-exclamation-triangle"></i> Rejection Reason</h4>
-                      <div className="rejection-box">{selectedPost.moderation_reason}</div>
-                    </div>
-                  )}
-
-                  {/* Moderation Info */}
-                  {selectedPost.reviewed_by_admin && (
-                    <div className="modal-section">
-                      <h4><i className="bi bi-person-check"></i> Moderation Information</h4>
-                      <div className="moderation-box">
-                        <p>Reviewed by: <strong>{selectedPost.reviewed_by_admin?.full_name}</strong></p>
-                        <p>Reviewed at: {new Date(selectedPost.reviewed_at).toLocaleString()}</p>
+                  ) : (
+                    <div className="no-image-banner">
+                      <div className="no-image-icon"><i className="bi bi-file-earmark-text"></i></div>
+                      <div className="no-image-text">
+                        <span>Text Post</span>
+                        <small>No images attached to this post</small>
                       </div>
                     </div>
                   )}
-                </>
+                </div>
+
+                {/* Card Main Body */}
+                <div className="card-body-section">
+                  {post.category?.category_name && (
+                    <div className="category-pill">
+                      <i className="bi bi-tag-fill"></i> {post.category.category_name}
+                    </div>
+                  )}
+                  <h3 className="post-title-text">{post.title}</h3>
+                  <p className="post-excerpt">
+                    {post.content.length > 140 ? `${post.content.substring(0, 140)}...` : post.content}
+                  </p>
+
+                  {/* Rejection reason banner if rejected */}
+                  {post.moderation_status === 'REJECTED' && post.moderation_reason && (
+                    <div className="rejection-reason-strip">
+                      <i className="bi bi-exclamation-triangle-fill"></i>
+                      <div>
+                        <strong>Reason for Rejection:</strong> {post.moderation_reason}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Card Actions */}
+                <div className="card-actions-section">
+                  <button className="btn-action-view" onClick={() => openDetails(post)}>
+                    <i className="bi bi-eye-fill"></i> Details
+                  </button>
+
+                  <div className="action-buttons-group">
+                    {post.moderation_status !== 'APPROVED' && (
+                      <button
+                        className="btn-action-approve"
+                        onClick={() => handleApprove(post)}
+                        disabled={actionLoading}
+                      >
+                        <i className="bi bi-check-lg"></i>
+                        <span>{post.moderation_status === 'REJECTED' ? 'Re-Approve' : 'Approve'}</span>
+                      </button>
+                    )}
+
+                    {post.moderation_status !== 'REJECTED' && (
+                      <button
+                        className="btn-action-reject"
+                        onClick={() => { setSelectedPost(post); setShowRejectModal(true) }}
+                        disabled={actionLoading}
+                      >
+                        <i className="bi bi-x-lg"></i>
+                        <span>Reject</span>
+                      </button>
+                    )}
+
+                    <button
+                      className="btn-action-delete"
+                      onClick={() => handleRemovePost(post)}
+                      disabled={actionLoading}
+                      title="Permanently remove post"
+                    >
+                      <i className="bi bi-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-results-card">
+            <div className="empty-icon"><i className="bi bi-inbox-fill"></i></div>
+            <h3>No posts found matching your filter</h3>
+            <p>Try clearing your search query or selecting a different status filter above.</p>
+            <button className="btn-primary-reset" onClick={() => { setFilter('ALL'); setSearchTerm('') }}>
+              View All Content
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Details Modal */}
+      {showDetailsModal && selectedPost && (
+        <div className="modal-backdrop" onClick={() => setShowDetailsModal(false)}>
+          <div className="modal-box details-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-top-bar">
+              <div className="modal-title-box">
+                <i className="bi bi-file-earmark-post-fill title-icon"></i>
+                <div>
+                  <h2>Post & Author Detailed View</h2>
+                  <p>Content ID: <code>{selectedPost.content_id}</code></p>
+                </div>
+              </div>
+              <button className="modal-close-btn" onClick={() => setShowDetailsModal(false)}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+
+            <div className="modal-scroll-content">
+              {/* Image Gallery Showcase in Modal */}
+              {selectedPost.images && selectedPost.images.length > 0 ? (
+                <div className="modal-gallery-block">
+                  <div className="active-modal-image-view">
+                    <img
+                      src={selectedPost.images[modalActiveImageIndex] || selectedPost.images[0]}
+                      alt="Selected preview"
+                      onClick={() => openLightbox(selectedPost.images, modalActiveImageIndex)}
+                    />
+                    <button
+                      className="expand-image-btn"
+                      onClick={() => openLightbox(selectedPost.images, modalActiveImageIndex)}
+                    >
+                      <i className="bi bi-arrows-angle-expand"></i> Zoom Fullscreen
+                    </button>
+                    <div className="image-counter-tag">
+                      Photo {modalActiveImageIndex + 1} of {selectedPost.images.length}
+                    </div>
+                  </div>
+
+                  {selectedPost.images.length > 1 && (
+                    <div className="modal-thumbnails-strip">
+                      {selectedPost.images.map((imgUrl, idx) => (
+                        <div
+                          key={idx}
+                          className={`thumbnail-item ${idx === modalActiveImageIndex ? 'active' : ''}`}
+                          onClick={() => setModalActiveImageIndex(idx)}
+                        >
+                          <img src={imgUrl} alt="" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="modal-no-image-notice">
+                  <i className="bi bi-image-alt"></i>
+                  <span>No images attached to this post</span>
+                </div>
+              )}
+
+              {/* Author Dossier */}
+              <div className="modal-section-card">
+                <h3 className="section-heading"><i className="bi bi-person-circle"></i> Author Dossier</h3>
+                <div className="author-dossier-grid">
+                  <div className="author-avatar-large">
+                    {selectedPost.user?.profile_image ? (
+                      <img src={resolveImageUrl(selectedPost.user.profile_image, 'profile-images')} alt="" />
+                    ) : (
+                      <span>{selectedPost.author_name?.charAt(0)?.toUpperCase() || 'U'}</span>
+                    )}
+                  </div>
+
+                  <div className="author-info-fields">
+                    <h4>
+                      {selectedPost.author_name}
+                      {selectedPost.user_verified && <span className="verified-badge-pill"><i className="bi bi-patch-check-fill"></i> Verified</span>}
+                    </h4>
+
+                    <div className="fields-grid">
+                      <div className="field-item">
+                        <label>Email Address</label>
+                        <span>{selectedPost.author_email}</span>
+                      </div>
+
+                      {selectedPost.author_phone && (
+                        <div className="field-item">
+                          <label>Phone Number</label>
+                          <span>{selectedPost.author_phone}</span>
+                        </div>
+                      )}
+
+                      {selectedPost.author_location && (
+                        <div className="field-item">
+                          <label>Location / District</label>
+                          <span>{selectedPost.author_location}</span>
+                        </div>
+                      )}
+
+                      <div className="field-item">
+                        <label>Member Since</label>
+                        <span>{formatDate(selectedPost.author_joined)}</span>
+                      </div>
+
+                      <div className="field-item">
+                        <label>Account Status</label>
+                        <span className={`status-text ${selectedPost.user_status?.toLowerCase()}`}>{selectedPost.user_status}</span>
+                      </div>
+                    </div>
+
+                    {selectedPost.user_bio && (
+                      <div className="author-bio-box">
+                        <label>Bio / Notes:</label>
+                        <p>{selectedPost.user_bio}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Post Content Details */}
+              <div className="modal-section-card">
+                <h3 className="section-heading"><i className="bi bi-card-text"></i> Post Information</h3>
+
+                <div className="content-meta-bar">
+                  <div className="meta-pill">
+                    <label>Status:</label> {getStatusBadge(selectedPost.moderation_status)}
+                  </div>
+                  {selectedPost.category?.category_name && (
+                    <div className="meta-pill category">
+                      <i className="bi bi-tag-fill"></i> {selectedPost.category.category_name}
+                    </div>
+                  )}
+                  <div className="meta-pill date">
+                    <i className="bi bi-calendar3"></i> Posted {formatDate(selectedPost.post_created_at)}
+                  </div>
+                </div>
+
+                <div className="full-post-body">
+                  <h2 className="full-title">{selectedPost.title}</h2>
+                  <div className="full-text">{selectedPost.content}</div>
+                </div>
+              </div>
+
+              {/* Moderation History */}
+              {selectedPost.moderation_reason && (
+                <div className="modal-section-card warning-border">
+                  <h3 className="section-heading text-amber"><i className="bi bi-exclamation-triangle-fill"></i> Rejection History</h3>
+                  <div className="rejection-history-box">
+                    <p className="reason-text">{selectedPost.moderation_reason}</p>
+                    {selectedPost.reviewed_by_admin && (
+                      <p className="reviewed-by-text">
+                        Reviewed by <strong>{selectedPost.reviewed_by_admin.full_name}</strong> ({selectedPost.reviewed_by_admin.email}) on {formatDate(selectedPost.reviewed_at)}
+                      </p>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
-            
-            <div className="modal-footer">
-              <div className="footer-actions">
+
+            {/* Modal Actions Footer */}
+            <div className="modal-bottom-bar">
+              <div className="modal-actions-left">
                 {selectedPost.moderation_status !== 'APPROVED' && (
-                  <button className="btn-approve-modal" onClick={() => handleApprove(selectedPost)}>
-                    <i className="bi bi-check-lg"></i> {selectedPost.moderation_status === 'REJECTED' ? 'Re-approve' : 'Approve'}
+                  <button className="btn-modal-approve" onClick={() => handleApprove(selectedPost)} disabled={actionLoading}>
+                    <i className="bi bi-check-lg"></i> Approve Post
                   </button>
                 )}
+
                 {selectedPost.moderation_status !== 'REJECTED' && (
-                  <button className="btn-reject-modal" onClick={() => {
-                    setShowDetailsModal(false)
-                    setShowRejectModal(true)
-                  }}>
-                    <i className="bi bi-x-lg"></i> Reject
+                  <button
+                    className="btn-modal-reject"
+                    onClick={() => { setShowDetailsModal(false); setShowRejectModal(true) }}
+                    disabled={actionLoading}
+                  >
+                    <i className="bi bi-x-lg"></i> Reject Post
                   </button>
                 )}
-                <button className="btn-remove-modal" onClick={() => handleRemovePost(selectedPost)}>
-                  <i className="bi bi-trash"></i> Remove Post
+
+                <button className="btn-modal-delete" onClick={() => handleRemovePost(selectedPost)} disabled={actionLoading}>
+                  <i className="bi bi-trash"></i> Delete Post
                 </button>
               </div>
-              <button className="btn-close" onClick={() => setShowDetailsModal(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Lightbox */}
-      {showFullImage && selectedImage && postDetails && (
-        <div className="lightbox-overlay" onClick={() => setShowFullImage(false)}>
-          <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
-            <button className="lightbox-close" onClick={() => setShowFullImage(false)}>
-              <i className="bi bi-x-lg"></i>
-            </button>
-            
-            {postDetails.images && postDetails.images.length > 1 && (
-              <>
-                <button className="lightbox-prev" onClick={prevImage}>
-                  <i className="bi bi-chevron-left"></i>
-                </button>
-                <button className="lightbox-next" onClick={nextImage}>
-                  <i className="bi bi-chevron-right"></i>
-                </button>
-                <div className="lightbox-counter">
-                  {currentImageIndex + 1} / {postDetails.images.length}
-                </div>
-              </>
-            )}
-            
-            <img
-              src={selectedImage}
-              alt="Full size"
-              onError={(e) => {
-                e.target.src = 'https://placehold.co/600x400?text=Image+Not+Found'
-              }}
-            />
-            
-            <div className="lightbox-actions">
-              <button onClick={() => window.open(selectedImage, '_blank')}>
-                <i className="bi bi-box-arrow-up-right"></i> Open in new tab
-              </button>
+              <button className="btn-modal-close" onClick={() => setShowDetailsModal(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -849,44 +1079,46 @@ export default function ContentModeration() {
 
       {/* Reject Modal */}
       {showRejectModal && selectedPost && (
-        <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
-          <div className="modal-container modal-reject" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header warning">
-              <div className="modal-icon">
-                <i className="bi bi-exclamation-triangle-fill"></i>
+        <div className="modal-backdrop" onClick={() => setShowRejectModal(false)}>
+          <div className="modal-box reject-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-top-bar danger-header">
+              <div className="modal-title-box">
+                <i className="bi bi-exclamation-octagon-fill title-icon danger"></i>
+                <div>
+                  <h2>Reject Content</h2>
+                  <p>Select reason for rejecting post: "{selectedPost.title}"</p>
+                </div>
               </div>
-              <h3>Reject Content</h3>
-              <button className="modal-close" onClick={() => setShowRejectModal(false)}>
+              <button className="modal-close-btn" onClick={() => setShowRejectModal(false)}>
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
-            
-            <div className="modal-body">
-              <p>Please select a reason for rejecting this content:</p>
-              
-              <div className="quick-reasons">
-                {quickReasons.map((reason) => (
-                  <button
-                    key={reason.id}
-                    className={`quick-reason ${rejectReason === reason.reason ? 'selected' : ''}`}
+
+            <div className="modal-scroll-content">
+              <p className="reject-instruction">Please select a standard reason or provide a custom explanation below:</p>
+
+              <div className="quick-reasons-grid">
+                {quickReasons.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`reason-chip ${rejectReason === item.reason ? 'selected' : ''}`}
                     onClick={() => {
-                      setRejectReason(reason.reason)
+                      setRejectReason(item.reason)
                       setCustomReason('')
                     }}
-                    style={{ '--reason-color': reason.color }}
                   >
-                    <i className={`bi ${reason.icon}`}></i>
-                    <span>{reason.reason}</span>
-                    {rejectReason === reason.reason && <i className="bi bi-check-circle-fill check"></i>}
-                  </button>
+                    <i className={`bi ${item.icon}`} style={{ color: item.color }}></i>
+                    <span>{item.reason}</span>
+                    {rejectReason === item.reason && <i className="bi bi-check-circle-fill check-icon"></i>}
+                  </div>
                 ))}
               </div>
 
-              <div className="custom-reason">
-                <label>Or provide a custom reason:</label>
+              <div className="custom-reason-block">
+                <label>Custom Rejection Reason / Additional Notes:</label>
                 <textarea
                   rows="3"
-                  placeholder="Enter custom rejection reason..."
+                  placeholder="Describe specifically why this content is being rejected..."
                   value={customReason}
                   onChange={(e) => {
                     setCustomReason(e.target.value)
@@ -894,21 +1126,14 @@ export default function ContentModeration() {
                   }}
                 />
               </div>
-
-              {!rejectReason && !customReason && (
-                <div className="warning-note">
-                  <i className="bi bi-info-circle"></i>
-                  Please select or provide a reason for rejection
-                </div>
-              )}
             </div>
-            
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
-              <button 
-                className="btn-danger" 
-                onClick={handleReject}
-                disabled={actionLoading || (!rejectReason && !customReason)}
+
+            <div className="modal-bottom-bar">
+              <button className="btn-modal-close" onClick={() => setShowRejectModal(false)}>Cancel</button>
+              <button
+                className="btn-modal-reject"
+                onClick={handleRejectSubmit}
+                disabled={actionLoading || (!rejectReason && !customReason.trim())}
               >
                 {actionLoading ? 'Processing...' : 'Confirm Rejection'}
               </button>
@@ -917,1226 +1142,1142 @@ export default function ContentModeration() {
         </div>
       )}
 
+      {/* Lightbox Fullscreen Preview */}
+      {showLightbox && lightboxImages.length > 0 && (
+        <div className="lightbox-backdrop" onClick={() => setShowLightbox(false)}>
+          <div className="lightbox-dialog" onClick={(e) => e.stopPropagation()}>
+            <button className="lightbox-close" onClick={() => setShowLightbox(false)}>
+              <i className="bi bi-x-lg"></i>
+            </button>
+
+            {lightboxImages.length > 1 && (
+              <>
+                <button
+                  className="lightbox-nav prev"
+                  onClick={() => setLightboxIndex((prev) => (prev - 1 + lightboxImages.length) % lightboxImages.length)}
+                >
+                  <i className="bi bi-chevron-left"></i>
+                </button>
+                <button
+                  className="lightbox-nav next"
+                  onClick={() => setLightboxIndex((prev) => (prev + 1) % lightboxImages.length)}
+                >
+                  <i className="bi bi-chevron-right"></i>
+                </button>
+              </>
+            )}
+
+            <div className="lightbox-media-container">
+              <img src={lightboxImages[lightboxIndex]} alt="Fullscreen view" />
+            </div>
+
+            <div className="lightbox-toolbar">
+              <span className="lightbox-counter">Image {lightboxIndex + 1} of {lightboxImages.length}</span>
+              <a href={lightboxImages[lightboxIndex]} target="_blank" rel="noreferrer" className="lightbox-external-link">
+                <i className="bi bi-box-arrow-up-right"></i> Open Original
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Styled JSX */}
       <style jsx>{`
-        .moderation-container {
+        .moderation-page {
           max-width: 1400px;
           margin: 0 auto;
           padding: 24px;
         }
 
-        .loading-screen {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          min-height: 400px;
-        }
-
-        .loading-spinner {
-          width: 48px;
-          height: 48px;
-          border: 3px solid #e2e8f0;
-          border-top-color: #4f46e5;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-
-        .hero-section {
-          background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%);
-          border-radius: 24px;
-          padding: 40px;
-          margin-bottom: 32px;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .hero-section::before {
-          content: '';
-          position: absolute;
-          top: -50%;
-          right: -50%;
-          width: 200%;
-          height: 200%;
-          background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
-          animation: pulse 8s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); opacity: 0.5; }
-          50% { transform: scale(1.05); opacity: 0.8; }
-        }
-
-        .hero-content {
+        /* Toast Popup */
+        .toast-popup {
+          position: fixed;
+          top: 24px;
+          right: 24px;
+          z-index: 2000;
           display: flex;
           align-items: center;
-          gap: 24px;
-          position: relative;
-          z-index: 1;
-        }
-
-        .hero-icon {
-          width: 64px;
-          height: 64px;
-          background: rgba(255,255,255,0.15);
-          backdrop-filter: blur(10px);
-          border-radius: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .hero-icon i {
-          font-size: 32px;
+          gap: 12px;
+          padding: 14px 24px;
+          border-radius: 14px;
+          background: #0f172a;
           color: white;
-        }
-
-        .hero-title {
-          font-size: 28px;
-          font-weight: 700;
-          color: white;
-          margin: 0 0 8px 0;
-        }
-
-        .hero-subtitle {
+          box-shadow: 0 12px 24px -6px rgba(0,0,0,0.25);
+          font-weight: 500;
           font-size: 14px;
-          color: rgba(255,255,255,0.8);
+          animation: slideIn 0.3s ease;
+        }
+        .toast-popup.success { border-left: 5px solid #10b981; }
+        .toast-popup.warning { border-left: 5px solid #f59e0b; }
+        .toast-popup.error { border-left: 5px solid #ef4444; }
+        .toast-popup.info { border-left: 5px solid #3b82f6; }
+
+        /* Hero Banner */
+        .hero-banner {
+          background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4338ca 100%);
+          border-radius: 24px;
+          padding: 32px 40px;
+          margin-bottom: 28px;
+          color: white;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          box-shadow: 0 10px 25px -5px rgba(49, 46, 129, 0.3);
+        }
+        .hero-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: rgba(255,255,255,0.15);
+          backdrop-filter: blur(8px);
+          padding: 6px 14px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .hero-left h1 {
+          font-size: 28px;
+          font-weight: 800;
+          margin: 0 0 6px 0;
+          letter-spacing: -0.5px;
+        }
+        .hero-left p {
           margin: 0;
+          color: rgba(255,255,255,0.8);
+          font-size: 14px;
+        }
+        .btn-refresh {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 12px 20px;
+          background: rgba(255,255,255,0.15);
+          border: 1px solid rgba(255,255,255,0.25);
+          border-radius: 14px;
+          color: white;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .btn-refresh:hover {
+          background: rgba(255,255,255,0.25);
+          transform: translateY(-2px);
         }
 
-        .stats-grid {
+        /* Stats Row */
+        .stats-row {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 20px;
-          margin-bottom: 32px;
+          margin-bottom: 28px;
         }
-
         .stat-card {
           background: white;
           border-radius: 20px;
-          padding: 24px;
+          padding: 22px;
           display: flex;
           align-items: center;
           gap: 16px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          border: 2px solid #f1f5f9;
           cursor: pointer;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+          transition: all 0.25s ease;
+          position: relative;
         }
-
         .stat-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.02);
+          transform: translateY(-3px);
+          box-shadow: 0 12px 20px -5px rgba(0,0,0,0.08);
+          border-color: #cbd5e1;
         }
-
+        .stat-card.active {
+          border-color: #4f46e5;
+          box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.12);
+        }
         .stat-icon {
-          width: 56px;
-          height: 56px;
-          border-radius: 18px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 24px;
-        }
-
-        .stat-card.total .stat-icon { background: linear-gradient(135deg, #e0e7ff, #c7d2fe); color: #4f46e5; }
-        .stat-card.pending .stat-icon { background: linear-gradient(135deg, #fed7aa, #fde68a); color: #f59e0b; }
-        .stat-card.approved .stat-icon { background: linear-gradient(135deg, #d1fae5, #a7f3d0); color: #10b981; }
-        .stat-card.rejected .stat-icon { background: linear-gradient(135deg, #fee2e2, #fecaca); color: #ef4444; }
-
-        .stat-info { flex: 1; }
-        .stat-label { font-size: 13px; color: #6b7280; display: block; margin-bottom: 4px; }
-        .stat-info h2 { font-size: 32px; font-weight: 700; margin: 0; }
-        .text-warning { color: #f59e0b; }
-        .text-success { color: #10b981; }
-        .text-danger { color: #ef4444; }
-        .stat-trend { font-size: 11px; color: #9ca3af; margin-top: 4px; display: block; }
-
-        .filter-section {
-          margin-bottom: 32px;
-        }
-
-        .filter-buttons {
-          display: flex;
-          gap: 12px;
-          background: white;
-          padding: 6px;
+          width: 52px;
+          height: 52px;
           border-radius: 16px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-
-        .filter-btn {
-          flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          padding: 12px 20px;
-          background: transparent;
-          border: none;
-          border-radius: 12px;
-          font-size: 14px;
-          font-weight: 500;
-          color: #6b7280;
-          cursor: pointer;
-          transition: all 0.3s ease;
+          font-size: 22px;
+          flex-shrink: 0;
+        }
+        .stat-icon.total { background: #e0e7ff; color: #4338ca; }
+        .stat-icon.pending { background: #fef3c7; color: #d97706; }
+        .stat-icon.approved { background: #d1fae5; color: #059669; }
+        .stat-icon.rejected { background: #fee2e2; color: #dc2626; }
+
+        .stat-label { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; }
+        .stat-number { font-size: 26px; font-weight: 800; margin: 2px 0 0 0; color: #0f172a; }
+        .stat-sub { font-size: 11px; color: #94a3b8; }
+        .text-amber { color: #d97706; }
+        .text-emerald { color: #059669; }
+        .text-rose { color: #dc2626; }
+
+        .pulse-dot {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          width: 10px;
+          height: 10px;
+          background: #f59e0b;
+          border-radius: 50%;
+          box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+          animation: pulseRing 1.8s infinite;
+        }
+        @keyframes pulseRing {
+          0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+          70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
         }
 
-        .filter-btn:hover {
-          background: #f9fafb;
-          color: #4f46e5;
-        }
-
-        .filter-btn.active {
-          background: linear-gradient(135deg, #4f46e5, #7c3aed);
-          color: white;
-          box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);
-        }
-
-        .filter-count {
-          background: rgba(0,0,0,0.08);
-          padding: 2px 8px;
+        /* Toolbar */
+        .toolbar-card {
+          background: white;
           border-radius: 20px;
+          padding: 18px 24px;
+          display: flex;
+          gap: 20px;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 16px;
+          border: 1px solid #f1f5f9;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+          flex-wrap: wrap;
+        }
+        .search-box {
+          position: relative;
+          flex: 1;
+          min-width: 280px;
+        }
+        .search-icon {
+          position: absolute;
+          left: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #94a3b8;
+          font-size: 16px;
+        }
+        .search-box input {
+          width: 100%;
+          padding: 10px 36px 10px 42px;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 12px;
+          font-size: 13.5px;
+          outline: none;
+          transition: all 0.2s ease;
+        }
+        .search-box input:focus {
+          border-color: #4f46e5;
+          box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+        .clear-search {
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: #94a3b8;
+          cursor: pointer;
+        }
+
+        .filter-tabs {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .filter-chip {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 14px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #64748b;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .filter-chip:hover { background: #f1f5f9; color: #1e293b; }
+        .filter-chip.active {
+          background: #4f46e5;
+          color: white;
+          border-color: #4f46e5;
+        }
+        .count-pill {
+          padding: 2px 6px;
+          border-radius: 10px;
           font-size: 11px;
+          background: rgba(0,0,0,0.08);
+        }
+        .filter-chip.active .count-pill { background: rgba(255,255,255,0.25); color: white; }
+
+        .sort-box {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #64748b;
+        }
+        .sort-box select {
+          padding: 8px 12px;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 10px;
+          font-size: 13px;
+          outline: none;
+          cursor: pointer;
+          background: white;
         }
 
-        .filter-btn.active .filter-count {
-          background: rgba(255,255,255,0.2);
+        /* Results bar */
+        .results-bar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 20px;
+          padding: 0 4px;
+          font-size: 13px;
+          color: #64748b;
+        }
+        .reset-filters-btn {
+          background: none;
+          border: none;
+          color: #ef4444;
+          font-weight: 600;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 4px;
         }
 
-        .filter-count.warning { background: rgba(245,158,11,0.1); color: #f59e0b; }
-        .filter-count.success { background: rgba(16,185,129,0.1); color: #10b981; }
-        .filter-count.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .filter-btn.active .filter-count { color: white; background: rgba(255,255,255,0.2); }
-
+        /* Posts Grid */
         .posts-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
           gap: 24px;
         }
 
         .post-card {
           background: white;
-          border-radius: 24px;
+          border-radius: 20px;
+          border: 1px solid #e2e8f0;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.03);
           overflow: hidden;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-          animation: fadeInUp 0.5s ease backwards;
+          display: flex;
+          flex-direction: column;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
-
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
         .post-card:hover {
           transform: translateY(-4px);
-          box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.02);
+          box-shadow: 0 16px 28px -6px rgba(0,0,0,0.08);
+          border-color: #cbd5e1;
         }
 
-        .post-user {
-          padding: 20px;
-          background: #fafbfc;
-          border-bottom: 1px solid #f1f5f9;
+        /* Card User Header */
+        .card-user-header {
+          padding: 16px 20px;
           display: flex;
           align-items: center;
           gap: 12px;
+          border-bottom: 1px solid #f1f5f9;
+          background: #fafbfc;
         }
-
-        .user-avatar {
-          position: relative;
-          width: 48px;
-          height: 48px;
-          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        .avatar-wrapper {
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
+          overflow: hidden;
+          position: relative;
+          flex-shrink: 0;
+          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        }
+        .avatar-wrapper img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar-fallback {
+          width: 100%;
+          height: 100%;
           display: flex;
           align-items: center;
           justify-content: center;
           color: white;
-          font-weight: 600;
+          font-weight: 700;
           font-size: 18px;
-          overflow: hidden;
         }
-
-        .user-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .user-status {
-          position: absolute;
-          bottom: 0;
-          right: 0;
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          border: 2px solid white;
-        }
-
-        .user-status.pending { background: #f59e0b; }
-        .user-status.approved { background: #10b981; }
-        .user-status.rejected { background: #ef4444; }
-
-        .user-info {
-          flex: 1;
-        }
-
-        .user-info h4 {
-          font-size: 15px;
-          font-weight: 600;
-          margin: 0 0 4px 0;
-        }
-
-        .user-info p {
-          font-size: 12px;
-          color: #9ca3af;
-          margin: 0;
-        }
-
-        .user-location {
-          font-size: 10px;
-          color: #9ca3af;
+        .user-meta { flex: 1; min-width: 0; }
+        .author-name {
+          font-size: 14px;
+          font-weight: 700;
+          margin: 0 0 2px 0;
+          color: #0f172a;
           display: flex;
           align-items: center;
           gap: 4px;
-          margin-top: 4px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .verified-badge { color: #10b981; font-size: 13px; }
+        .author-email {
+          font-size: 11.5px;
+          color: #64748b;
+          margin: 0 0 4px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .time-location {
+          display: flex;
+          gap: 10px;
+          font-size: 10.5px;
+          color: #94a3b8;
         }
 
-        .post-images {
-          padding: 16px;
-          background: #fafbfc;
+        /* Status Pills */
+        .status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 10px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 700;
+          white-space: nowrap;
         }
+        .status-badge.pending { background: #fef3c7; color: #b45309; }
+        .status-badge.approved { background: #d1fae5; color: #047857; }
+        .status-badge.rejected { background: #fee2e2; color: #b91c1c; }
 
-        .images-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 8px;
+        /* Media Display */
+        .card-media-section {
+          background: #f8fafc;
+          border-bottom: 1px solid #f1f5f9;
         }
+        .image-display-container { position: relative; }
 
-        .image-item {
+        .single-image-wrapper {
           position: relative;
-          aspect-ratio: 1;
-          border-radius: 12px;
+          height: 220px;
           overflow: hidden;
           cursor: pointer;
         }
-
-        .image-item img {
+        .single-image-wrapper img {
           width: 100%;
           height: 100%;
           object-fit: cover;
           transition: transform 0.3s ease;
         }
+        .single-image-wrapper:hover img { transform: scale(1.04); }
 
-        .image-item:hover img {
-          transform: scale(1.05);
+        .dual-image-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 3px;
+          height: 200px;
         }
+        .multi-image-grid {
+          display: grid;
+          grid-template-columns: 2fr 1fr;
+          gap: 3px;
+          height: 210px;
+        }
+        .grid-main-image { position: relative; height: 100%; cursor: pointer; overflow: hidden; }
+        .grid-main-image img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+        .grid-main-image:hover img { transform: scale(1.04); }
 
-        .image-overlay {
+        .grid-side-stack { display: grid; grid-template-rows: 1fr 1fr; gap: 3px; height: 100%; }
+        .grid-image-item { position: relative; height: 100%; cursor: pointer; overflow: hidden; }
+        .grid-image-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+        .grid-image-item:hover img { transform: scale(1.04); }
+
+        .image-zoom-overlay {
           position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.5);
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(15, 23, 42, 0.45);
           display: flex;
           align-items: center;
           justify-content: center;
+          gap: 6px;
+          color: white;
+          font-size: 13px;
+          font-weight: 600;
           opacity: 0;
-          transition: opacity 0.3s ease;
+          transition: opacity 0.2s ease;
         }
-
-        .image-item:hover .image-overlay {
+        .single-image-wrapper:hover .image-zoom-overlay,
+        .grid-image-item:hover .image-zoom-overlay,
+        .grid-main-image:hover .image-zoom-overlay {
           opacity: 1;
         }
 
-        .image-overlay i {
-          font-size: 20px;
-          color: white;
-        }
-
-        .more-images {
-          background: linear-gradient(135deg, #4f46e5, #7c3aed);
-          color: white;
+        .more-images-overlay {
+          position: absolute;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(15, 23, 42, 0.75);
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 4px;
-          border-radius: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
+          color: white;
+          font-weight: 800;
+          font-size: 18px;
         }
+        .more-images-overlay small { font-size: 11px; font-weight: 500; text-transform: uppercase; }
 
-        .more-images:hover {
-          transform: scale(1.02);
-        }
-
-        .more-images i {
-          font-size: 20px;
-        }
-
-        .more-images span {
-          font-size: 11px;
-        }
-
-        :global(.no-image-placeholder) {
+        .media-badge-bar {
           display: flex;
-          flex-direction: column;
+          justify-content: space-between;
           align-items: center;
-          justify-content: center;
-          width: 100%;
-          height: 100%;
-          background: #f1f5f9;
-          color: #94a3b8;
-          gap: 4px;
-        }
-
-        :global(.no-image-placeholder i) {
-          font-size: 24px;
-        }
-
-        :global(.no-image-placeholder span) {
-          font-size: 10px;
-          font-weight: 500;
-        }
-
-        .image-count {
-          margin-top: 12px;
-          font-size: 11px;
-          color: #6b7280;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .post-content {
-          padding: 20px;
-        }
-
-        .post-content h3 {
-          font-size: 16px;
+          padding: 8px 14px;
+          background: rgba(15, 23, 42, 0.04);
+          font-size: 11.5px;
+          color: #475569;
           font-weight: 600;
+        }
+        .preview-all-btn {
+          background: none;
+          border: none;
+          color: #4f46e5;
+          font-weight: 700;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 11px;
+        }
+
+        .no-image-banner {
+          padding: 24px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          background: #f8fafc;
+          color: #94a3b8;
+        }
+        .no-image-icon {
+          width: 40px;
+          height: 40px;
+          border-radius: 12px;
+          background: #e2e8f0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          color: #64748b;
+        }
+        .no-image-text span { display: block; font-size: 13px; font-weight: 700; color: #475569; }
+        .no-image-text small { font-size: 11px; }
+
+        /* Card Body */
+        .card-body-section {
+          padding: 18px 20px;
+          flex: 1;
+        }
+        .category-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 3px 10px;
+          border-radius: 8px;
+          background: #e0e7ff;
+          color: #4338ca;
+          font-size: 11px;
+          font-weight: 700;
+          margin-bottom: 8px;
+        }
+        .post-title-text {
+          font-size: 15px;
+          font-weight: 700;
+          color: #0f172a;
           margin: 0 0 8px 0;
           line-height: 1.4;
         }
-
-        .post-content p {
+        .post-excerpt {
           font-size: 13px;
-          color: #6b7280;
-          margin: 0 0 12px 0;
+          color: #475569;
           line-height: 1.5;
+          margin: 0;
         }
-
-        .post-meta {
-          display: flex;
-          gap: 16px;
-          font-size: 11px;
-          color: #9ca3af;
-        }
-
-        .post-meta i {
-          margin-right: 4px;
-        }
-
-        .post-actions {
-          padding: 16px 20px 20px;
-          border-top: 1px solid #f1f5f9;
-          display: flex;
-          gap: 12px;
-        }
-
-        .btn-view {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 10px;
-          background: #f3f4f6;
-          border: none;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 500;
-          color: #4f46e5;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-view:hover {
-          background: #e0e7ff;
-        }
-
-        .action-group {
+        .rejection-reason-strip {
+          margin-top: 12px;
+          padding: 10px 12px;
+          background: #fef2f2;
+          border-left: 3px solid #ef4444;
+          border-radius: 6px;
+          font-size: 12px;
+          color: #991b1b;
           display: flex;
           gap: 8px;
-          flex: 2;
+          align-items: flex-start;
         }
 
-        .btn-approve, .btn-reject {
-          flex: 1;
+        /* Card Actions */
+        .card-actions-section {
+          padding: 14px 20px;
+          border-top: 1px solid #f1f5f9;
           display: flex;
+          gap: 10px;
           align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 10px;
+          background: #ffffff;
+        }
+        .btn-action-view {
+          padding: 9px 14px;
+          background: #f1f5f9;
           border: none;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 500;
+          border-radius: 10px;
+          color: #334155;
+          font-size: 12.5px;
+          font-weight: 600;
           cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-approve {
-          background: #ecfdf5;
-          color: #10b981;
-        }
-
-        .btn-approve:hover {
-          background: #10b981;
-          color: white;
-        }
-
-        .btn-reject {
-          background: #fef2f2;
-          color: #ef4444;
-        }
-
-        .btn-reject:hover {
-          background: #ef4444;
-          color: white;
-        }
-
-        .btn-remove-danger {
-          flex: 1;
           display: flex;
           align-items: center;
-          justify-content: center;
           gap: 6px;
-          padding: 10px;
-          border: 1px solid #fee2e2;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 500;
-          background: #fff;
-          color: #ef4444;
+          transition: all 0.2s ease;
+        }
+        .btn-action-view:hover { background: #e2e8f0; color: #0f172a; }
+
+        .action-buttons-group {
+          display: flex;
+          gap: 6px;
+          flex: 1;
+          justify-content: flex-end;
+        }
+        .btn-action-approve {
+          padding: 9px 14px;
+          background: #d1fae5;
+          color: #047857;
+          border: none;
+          border-radius: 10px;
+          font-size: 12.5px;
+          font-weight: 700;
           cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-remove-danger:hover {
-          background: #ef4444;
-          color: white;
-          border-color: #ef4444;
-        }
-
-        .status-badge {
-          display: inline-flex;
+          display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 6px 12px;
-          border-radius: 30px;
-          font-size: 11px;
-          font-weight: 500;
+          gap: 5px;
+          transition: all 0.2s ease;
         }
+        .btn-action-approve:hover { background: #10b981; color: white; }
 
-        .status-badge.pending { background: #fef3c7; color: #f59e0b; }
-        .status-badge.approved { background: #d1fae5; color: #10b981; }
-        .status-badge.rejected { background: #fee2e2; color: #ef4444; }
+        .btn-action-reject {
+          padding: 9px 14px;
+          background: #fee2e2;
+          color: #b91c1c;
+          border: none;
+          border-radius: 10px;
+          font-size: 12.5px;
+          font-weight: 700;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          transition: all 0.2s ease;
+        }
+        .btn-action-reject:hover { background: #ef4444; color: white; }
 
-        .empty-state {
+        .btn-action-delete {
+          padding: 9px 12px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          color: #94a3b8;
+          border-radius: 10px;
+          font-size: 13px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .btn-action-delete:hover { background: #fee2e2; border-color: #fca5a5; color: #dc2626; }
+
+        /* Empty State */
+        .empty-results-card {
           text-align: center;
           padding: 80px 20px;
           background: white;
           border-radius: 24px;
+          border: 1px dashed #cbd5e1;
+          margin-top: 20px;
         }
-
         .empty-icon {
-          width: 80px;
-          height: 80px;
+          width: 72px;
+          height: 72px;
           background: #f1f5f9;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          margin: 0 auto 20px;
+          font-size: 32px;
+          color: #94a3b8;
+          margin: 0 auto 16px;
+        }
+        .empty-results-card h3 { font-size: 18px; margin: 0 0 6px 0; color: #0f172a; }
+        .empty-results-card p { color: #64748b; font-size: 14px; margin: 0 0 20px 0; }
+        .btn-primary-reset {
+          padding: 10px 20px;
+          background: #4f46e5;
+          color: white;
+          border: none;
+          border-radius: 12px;
+          font-weight: 600;
+          cursor: pointer;
         }
 
-        .empty-icon i {
-          font-size: 40px;
-          color: #cbd5e1;
-        }
-
-        .empty-state h3 {
-          font-size: 20px;
-          margin-bottom: 8px;
-        }
-
-        .empty-state p {
-          color: #9ca3af;
-        }
-
-        .modal-overlay {
+        /* Modals */
+        .modal-backdrop {
           position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.6);
-          backdrop-filter: blur(8px);
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(15, 23, 42, 0.7);
+          backdrop-filter: blur(6px);
+          z-index: 1200;
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 1100;
+          padding: 20px;
           animation: fadeIn 0.2s ease;
         }
-
-        .modal-container {
+        .modal-box {
           background: white;
-          border-radius: 28px;
-          width: 90%;
-          max-width: 900px;
-          max-height: 85vh;
-          overflow-y: auto;
-          animation: slideUp 0.3s ease;
+          border-radius: 24px;
+          width: 100%;
+          max-width: 820px;
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          box-shadow: 0 25px 50px -12px rgba(0,0,0,0.3);
         }
-
-        .modal-container.modal-reject { max-width: 550px; }
-
-        .modal-header {
-          padding: 24px 28px;
+        .modal-top-bar {
+          padding: 20px 28px;
           border-bottom: 1px solid #f1f5f9;
           display: flex;
           justify-content: space-between;
           align-items: center;
-          position: sticky;
-          top: 0;
-          background: white;
-          z-index: 10;
+          background: #ffffff;
         }
-
-        .modal-header-content {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-        }
-
-        .modal-icon {
-          width: 48px;
-          height: 48px;
-          background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
-          border-radius: 24px;
+        .modal-title-box { display: flex; align-items: center; gap: 14px; }
+        .title-icon {
+          font-size: 24px;
+          width: 44px;
+          height: 44px;
+          border-radius: 14px;
+          background: #e0e7ff;
+          color: #4338ca;
           display: flex;
           align-items: center;
           justify-content: center;
         }
-
-        .modal-icon i {
-          font-size: 24px;
-          color: #4f46e5;
-        }
-
-        .modal-header h2 {
-          font-size: 20px;
-          margin: 0 0 4px 0;
-        }
-
-        .modal-header p {
-          margin: 0;
-          color: #6b7280;
-          font-size: 13px;
-        }
-
-        .modal-close {
+        .title-icon.danger { background: #fee2e2; color: #dc2626; }
+        .modal-title-box h2 { font-size: 18px; font-weight: 700; margin: 0; color: #0f172a; }
+        .modal-title-box p { margin: 2px 0 0 0; font-size: 12px; color: #64748b; }
+        .modal-close-btn {
           width: 36px;
           height: 36px;
+          border-radius: 50%;
           background: #f1f5f9;
           border: none;
-          border-radius: 50%;
           cursor: pointer;
-          transition: all 0.3s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #64748b;
+        }
+        .modal-close-btn:hover { background: #e2e8f0; color: #0f172a; }
+
+        .modal-scroll-content {
+          padding: 24px 28px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 24px;
         }
 
-        .modal-close:hover {
-          background: #e2e8f0;
-          transform: rotate(90deg);
+        /* Modal Gallery */
+        .active-modal-image-view {
+          position: relative;
+          height: 380px;
+          background: #0f172a;
+          border-radius: 16px;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .active-modal-image-view img {
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+          cursor: zoom-in;
+        }
+        .expand-image-btn {
+          position: absolute;
+          top: 14px;
+          right: 14px;
+          padding: 8px 14px;
+          background: rgba(15, 23, 42, 0.7);
+          backdrop-filter: blur(4px);
+          border: 1px solid rgba(255,255,255,0.2);
+          border-radius: 10px;
+          color: white;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .image-counter-tag {
+          position: absolute;
+          bottom: 14px;
+          left: 14px;
+          padding: 6px 12px;
+          background: rgba(15, 23, 42, 0.7);
+          backdrop-filter: blur(4px);
+          border-radius: 10px;
+          color: white;
+          font-size: 11.5px;
+          font-weight: 600;
+        }
+        .modal-thumbnails-strip {
+          display: flex;
+          gap: 10px;
+          overflow-x: auto;
+          padding-top: 12px;
+        }
+        .thumbnail-item {
+          width: 72px;
+          height: 72px;
+          border-radius: 12px;
+          overflow: hidden;
+          cursor: pointer;
+          border: 2px solid transparent;
+          flex-shrink: 0;
+          opacity: 0.6;
+          transition: all 0.2s ease;
+        }
+        .thumbnail-item.active { opacity: 1; border-color: #4f46e5; }
+        .thumbnail-item img { width: 100%; height: 100%; object-fit: cover; }
+        .modal-no-image-notice {
+          padding: 24px;
+          background: #f8fafc;
+          border-radius: 16px;
+          text-align: center;
+          color: #94a3b8;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          font-size: 13px;
         }
 
-        .modal-body {
-          padding: 28px;
+        /* Modal Dossier Cards */
+        .modal-section-card {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 16px;
+          padding: 20px;
+        }
+        .section-heading {
+          font-size: 14px;
+          font-weight: 700;
+          color: #334155;
+          margin: 0 0 16px 0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
         }
 
-        .modal-footer {
-          padding: 20px 28px;
+        .author-dossier-grid {
+          display: flex;
+          gap: 20px;
+          align-items: flex-start;
+        }
+        .author-avatar-large {
+          width: 64px;
+          height: 64px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 800;
+          font-size: 24px;
+          flex-shrink: 0;
+        }
+        .author-avatar-large img { width: 100%; height: 100%; object-fit: cover; }
+
+        .author-info-fields { flex: 1; }
+        .author-info-fields h4 { font-size: 16px; font-weight: 700; margin: 0 0 12px 0; color: #0f172a; display: flex; align-items: center; gap: 6px; }
+        .verified-badge-pill {
+          font-size: 11px;
+          background: #d1fae5;
+          color: #047857;
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-weight: 600;
+        }
+        .fields-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px 20px;
+        }
+        .field-item label { display: block; font-size: 11px; color: #64748b; font-weight: 600; margin-bottom: 2px; text-transform: uppercase; }
+        .field-item span { font-size: 13px; font-weight: 600; color: #0f172a; }
+        .author-bio-box {
+          margin-top: 14px;
+          padding: 10px 14px;
+          background: white;
+          border-radius: 10px;
+          border: 1px solid #e2e8f0;
+          font-size: 12.5px;
+        }
+        .author-bio-box label { display: block; font-weight: 700; color: #64748b; margin-bottom: 4px; }
+        .author-bio-box p { margin: 0; color: #334155; }
+
+        .content-meta-bar {
+          display: flex;
+          gap: 12px;
+          margin-bottom: 16px;
+          flex-wrap: wrap;
+        }
+        .meta-pill { font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 6px; }
+
+        .full-post-body {
+          background: white;
+          padding: 20px;
+          border-radius: 12px;
+          border: 1px solid #e2e8f0;
+        }
+        .full-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0 0 12px 0; }
+        .full-text { font-size: 14px; color: #334155; line-height: 1.6; white-space: pre-wrap; }
+
+        /* Rejection History */
+        .rejection-history-box {
+          background: #fef2f2;
+          padding: 14px 18px;
+          border-radius: 12px;
+          border-left: 4px solid #ef4444;
+        }
+        .reason-text { font-size: 13.5px; font-weight: 600; color: #991b1b; margin: 0 0 6px 0; }
+        .reviewed-by-text { font-size: 11.5px; color: #7f1d1d; margin: 0; }
+
+        /* Modal Footer */
+        .modal-bottom-bar {
+          padding: 18px 28px;
           border-top: 1px solid #f1f5f9;
           display: flex;
-          justify-content: flex-end;
-          gap: 12px;
-          background: white;
-          position: sticky;
-          bottom: 0;
-        }
-
-        .footer-actions {
-          display: flex;
-          gap: 12px;
-          flex: 1;
-        }
-
-        .modal-images {
-          margin-bottom: 28px;
-        }
-
-        .modal-images h4 {
-          font-size: 14px;
-          font-weight: 600;
-          margin-bottom: 12px;
-          display: flex;
+          justify-content: space-between;
           align-items: center;
-          gap: 8px;
+          background: #ffffff;
         }
-
-        .modal-images-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-          gap: 12px;
-        }
-
-        .modal-image {
-          position: relative;
-          aspect-ratio: 1;
-          border-radius: 12px;
-          overflow: hidden;
+        .modal-actions-left { display: flex; gap: 10px; }
+        .btn-modal-approve {
+          padding: 10px 18px;
+          background: #10b981;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-weight: 700;
+          font-size: 13px;
           cursor: pointer;
-          border: 2px solid #f1f5f9;
-          transition: all 0.3s ease;
-        }
-
-        .modal-image img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .modal-image:hover {
-          transform: scale(1.02);
-          border-color: #4f46e5;
-        }
-
-        .modal-image-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.6);
           display: flex;
           align-items: center;
-          justify-content: center;
-          opacity: 0;
-          transition: opacity 0.3s ease;
+          gap: 6px;
+        }
+        .btn-modal-reject {
+          padding: 10px 18px;
+          background: #ef4444;
           color: white;
-        }
-
-        .modal-image:hover .modal-image-overlay {
-          opacity: 1;
-        }
-
-        .modal-image-overlay i {
-          font-size: 20px;
-        }
-
-        .modal-section {
-          margin-bottom: 28px;
-        }
-
-        .modal-section h4 {
-          font-size: 14px;
-          font-weight: 600;
-          margin-bottom: 16px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          color: #1f2937;
-        }
-
-        .modal-section h4 i {
-          color: #4f46e5;
-        }
-
-        .author-card {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          padding: 20px;
-          background: #f9fafb;
-          border-radius: 20px;
-        }
-
-        .author-avatar {
-          width: 70px;
-          height: 70px;
-          background: linear-gradient(135deg, #4f46e5, #7c3aed);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-size: 28px;
-          font-weight: 600;
-          overflow: hidden;
-        }
-
-        .author-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .author-details h5 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0 0 8px 0;
-        }
-
-        .author-details p {
+          border: none;
+          border-radius: 10px;
+          font-weight: 700;
           font-size: 13px;
-          margin: 4px 0;
+          cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 8px;
-          color: #6b7280;
+          gap: 6px;
         }
-
-        .author-details p i {
-          font-size: 12px;
-          color: #9ca3af;
+        .btn-modal-delete {
+          padding: 10px 14px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          color: #dc2626;
+          border-radius: 10px;
+          font-size: 13px;
+          cursor: pointer;
         }
-
-        .author-meta-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 4px 16px;
-          margin-top: 8px;
-        }
-
-        .author-bio {
-          background: rgba(0,0,0,0.03);
-          padding: 8px 12px;
-          border-radius: 8px;
-          border-left: 3px solid #667eea;
-        }
-
-        .info-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 16px;
-        }
-
-        .info-item label {
-          display: block;
-          font-size: 11px;
-          font-weight: 600;
-          color: #6b7280;
-          margin-bottom: 4px;
-          text-transform: uppercase;
-        }
-
-        .info-item code {
+        .btn-modal-close {
+          padding: 10px 20px;
           background: #f1f5f9;
-          padding: 4px 8px;
-          border-radius: 6px;
-          font-size: 12px;
-        }
-
-        .post-title {
-          font-size: 18px;
+          border: none;
+          border-radius: 10px;
+          color: #334155;
           font-weight: 600;
-          padding: 16px;
-          background: #f9fafb;
+          cursor: pointer;
+        }
+
+        /* Reject Modal Grid */
+        .reject-modal { max-width: 580px; }
+        .reject-instruction { font-size: 13.5px; color: #475569; margin: 0 0 16px 0; }
+        .quick-reasons-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 10px;
+          margin-bottom: 20px;
+        }
+        .reason-chip {
+          padding: 12px 14px;
+          background: #f8fafc;
+          border: 1.5px solid #e2e8f0;
           border-radius: 12px;
-          margin-bottom: 16px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 12.5px;
+          font-weight: 600;
+          color: #334155;
+          position: relative;
+          transition: all 0.2s ease;
         }
-
-        .post-body {
-          background: #f9fafb;
-          padding: 20px;
-          border-radius: 12px;
-          line-height: 1.6;
-          white-space: pre-wrap;
-          font-size: 14px;
-        }
-
-        .category-badge {
-          display: inline-block;
-          padding: 8px 16px;
-          background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
-          color: #4f46e5;
-          border-radius: 30px;
-          font-size: 13px;
-          font-weight: 500;
-        }
-
-        .rejection-box {
+        .reason-chip:hover { background: #f1f5f9; border-color: #cbd5e1; }
+        .reason-chip.selected {
           background: #fef3c7;
-          padding: 16px;
+          border-color: #f59e0b;
+          color: #78350f;
+        }
+        .check-icon { position: absolute; right: 10px; color: #d97706; }
+
+        .custom-reason-block label { display: block; font-size: 12.5px; font-weight: 700; color: #334155; margin-bottom: 6px; }
+        .custom-reason-block textarea {
+          width: 100%;
+          padding: 12px;
+          border: 1.5px solid #e2e8f0;
           border-radius: 12px;
-          color: #92400e;
+          font-size: 13px;
+          outline: none;
+          resize: vertical;
         }
+        .custom-reason-block textarea:focus { border-color: #4f46e5; }
 
-        .moderation-box {
-          background: #f9fafb;
-          padding: 16px;
-          border-radius: 12px;
-        }
-
-        .moderation-box p {
-          margin: 0 0 8px 0;
-        }
-
-        .moderation-box p:last-child {
-          margin-bottom: 0;
-        }
-
-        .lightbox-overlay {
+        /* Lightbox Fullscreen */
+        .lightbox-backdrop {
           position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.95);
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0, 0, 0, 0.92);
+          z-index: 2000;
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 1200;
           animation: fadeIn 0.2s ease;
         }
-
-        .lightbox-content {
+        .lightbox-dialog {
           position: relative;
-          max-width: 90vw;
-          max-height: 90vh;
+          max-width: 92vw;
+          max-height: 92vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
         }
-
-        .lightbox-content img {
-          max-width: 90vw;
-          max-height: 85vh;
-          object-fit: contain;
-        }
-
         .lightbox-close {
           position: absolute;
-          top: -50px;
+          top: -46px;
           right: 0;
           width: 40px;
           height: 40px;
-          background: rgba(255,255,255,0.2);
-          border: none;
           border-radius: 50%;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
           color: white;
+          font-size: 18px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 20px;
-          transition: all 0.3s ease;
         }
-
-        .lightbox-close:hover {
-          background: rgba(255,255,255,0.3);
-          transform: rotate(90deg);
-        }
-
-        .lightbox-prev, .lightbox-next {
+        .lightbox-nav {
           position: absolute;
           top: 50%;
           transform: translateY(-50%);
           width: 48px;
           height: 48px;
-          background: rgba(255,255,255,0.2);
-          border: none;
           border-radius: 50%;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
           color: white;
+          font-size: 24px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 24px;
-          transition: all 0.3s ease;
+          transition: all 0.2s ease;
         }
+        .lightbox-nav:hover { background: rgba(255, 255, 255, 0.35); }
+        .lightbox-nav.prev { left: -60px; }
+        .lightbox-nav.next { right: -60px; }
 
-        .lightbox-prev { left: -60px; }
-        .lightbox-next { right: -60px; }
-
-        .lightbox-prev:hover, .lightbox-next:hover {
-          background: rgba(255,255,255,0.3);
-          transform: translateY(-50%) scale(1.1);
+        .lightbox-media-container {
+          max-width: 88vw;
+          max-height: 80vh;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
-
-        .lightbox-counter {
-          position: absolute;
-          bottom: -40px;
-          left: 50%;
-          transform: translateX(-50%);
-          background: rgba(0,0,0,0.7);
-          color: white;
-          padding: 4px 12px;
-          border-radius: 20px;
-          font-size: 13px;
-        }
-
-        .lightbox-actions {
-          position: absolute;
-          bottom: -40px;
-          right: 0;
-        }
-
-        .lightbox-actions button {
-          padding: 8px 16px;
-          background: rgba(0,0,0,0.7);
-          border: none;
+        .lightbox-media-container img {
+          max-width: 88vw;
+          max-height: 80vh;
+          object-fit: contain;
           border-radius: 8px;
-          color: white;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          transition: all 0.3s ease;
         }
 
-        .lightbox-actions button:hover {
-          background: rgba(0,0,0,0.9);
-        }
-
-        .quick-reasons {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .quick-reason {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px 16px;
-          background: #f9fafb;
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          position: relative;
-        }
-
-        .quick-reason:hover {
-          background: #f3f4f6;
-          transform: translateY(-2px);
-        }
-
-        .quick-reason.selected {
-          background: #fef3c7;
-          border-color: #f59e0b;
-        }
-
-        .quick-reason i {
-          font-size: 18px;
-          color: var(--reason-color);
-        }
-
-        .quick-reason .check {
-          position: absolute;
-          right: 12px;
-          top: 12px;
-          color: #10b981;
-          font-size: 16px;
-        }
-
-        .custom-reason {
-          margin-top: 20px;
-        }
-
-        .custom-reason label {
-          display: block;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 8px;
-        }
-
-        .custom-reason textarea {
-          width: 100%;
-          padding: 12px;
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          resize: vertical;
-          font-size: 14px;
-        }
-
-        .custom-reason textarea:focus {
-          outline: none;
-          border-color: #4f46e5;
-        }
-
-        .warning-note {
-          background: #fef3c7;
-          padding: 12px;
-          border-radius: 12px;
+        .lightbox-toolbar {
           margin-top: 16px;
           display: flex;
+          gap: 20px;
           align-items: center;
-          gap: 8px;
+          color: white;
           font-size: 13px;
-          color: #856404;
         }
-
-        .btn-secondary {
-          padding: 10px 20px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-          transition: all 0.3s ease;
-        }
-
-        .btn-secondary:hover {
-          background: #f3f4f6;
-        }
-
-        .btn-approve-modal {
-          padding: 10px 24px;
-          background: #10b981;
-          border: none;
-          border-radius: 10px;
-          color: white;
+        .lightbox-external-link {
+          color: #818cf8;
+          text-decoration: none;
           font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-approve-modal:hover {
-          background: #059669;
-          transform: translateY(-2px);
-        }
-
-        .btn-reject-modal {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-reject-modal:hover {
-          background: #dc2626;
-          transform: translateY(-2px);
-        }
-
-        .btn-remove-modal {
-          padding: 10px 24px;
-          background: #fff;
-          border: 2px solid #ef4444;
-          border-radius: 10px;
-          color: #ef4444;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-remove-modal:hover {
-          background: #ef4444;
-          color: white;
-          transform: translateY(-2px);
-        }
-
-        .btn-danger {
-          padding: 10px 24px;
-          background: #ef4444;
-          border: none;
-          border-radius: 10px;
-          color: white;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .btn-close {
-          padding: 10px 24px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          cursor: pointer;
-          font-weight: 500;
-        }
-
-        .loading-details {
-          text-align: center;
-          padding: 60px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
 
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
         }
-
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+        @keyframes slideIn {
+          from { transform: translateY(-20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
 
+        /* Responsive Breakpoints */
         @media (max-width: 1024px) {
-          .moderation-container { padding: 20px; }
-          .posts-grid { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
+          .stats-row { grid-template-columns: repeat(2, 1fr); }
+          .posts-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
         }
 
         @media (max-width: 768px) {
-          .moderation-container { padding: 16px; }
-          .hero-section { padding: 28px; }
-          .hero-content { flex-direction: column; text-align: center; }
-          .stats-grid { grid-template-columns: repeat(2, 1fr); }
-          .filter-buttons { flex-wrap: wrap; }
-          .filter-btn { flex: auto; }
-          .posts-grid { grid-template-columns: 1fr; }
-          .post-user { flex-wrap: wrap; }
-          .action-group { flex-direction: column; }
-          .info-grid { grid-template-columns: 1fr; }
-          .author-card { flex-direction: column; text-align: center; }
-          .author-details p { justify-content: center; }
-          .quick-reasons { grid-template-columns: 1fr; }
-          .footer-actions { flex-direction: column; }
-          .btn-approve-modal, .btn-reject-modal { width: 100%; }
-          .lightbox-prev, .lightbox-next { width: 40px; height: 40px; font-size: 18px; }
-          .lightbox-prev { left: -50px; }
-          .lightbox-next { right: -50px; }
-          .modal-images-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
-        }
-
-        @media (max-width: 480px) {
-          .hero-title { font-size: 22px; }
-          .stats-grid { grid-template-columns: 1fr; }
-          .post-card { border-radius: 20px; }
-          .post-user { padding: 16px; }
-          .post-content { padding: 16px; }
-          .post-actions { padding: 16px; }
+          .moderation-page { padding: 16px; }
+          .hero-banner { flex-direction: column; text-align: center; gap: 20px; padding: 24px; }
+          .stats-row { grid-template-columns: 1fr; }
+          .toolbar-card { flex-direction: column; align-items: stretch; }
+          .filter-tabs { overflow-x: auto; padding-bottom: 6px; }
+          .quick-reasons-grid { grid-template-columns: 1fr; }
+          .fields-grid { grid-template-columns: 1fr; }
+          .lightbox-nav.prev { left: 10px; }
+          .lightbox-nav.next { right: 10px; }
+          .modal-box { border-radius: 16px; }
+          .modal-top-bar, .modal-scroll-content, .modal-bottom-bar { padding: 16px; }
         }
       `}</style>
     </AdminLayout>

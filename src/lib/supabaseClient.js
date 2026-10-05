@@ -59,6 +59,11 @@ export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
   // Strip leading slash from path
   let finalPath = cleanPath.startsWith('/') ? cleanPath.substring(1) : cleanPath
 
+  // If path already starts with storage/
+  if (finalPath.startsWith('storage/')) {
+    return `${supabaseUrl}/${finalPath}`
+  }
+
   // Common agricultural app buckets
   const knownBuckets = [
     'barter-images', 'barters', 'listings', 'products', 'product-images',
