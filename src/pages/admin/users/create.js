@@ -276,12 +276,12 @@ export default function CreateUser() {
 
       if (emailResult.success) {
         if (emailResult.simulated) {
-          alert(`✅ User created successfully!\n\nNote: ${emailResult.message || 'Welcome email details were logged to the server console.'}`)
+          alert(`✅ User created successfully!\n\nNote: ${emailResult.message || 'Email logged to server console.'}\n\nTo send real emails, configure your SMTP server settings in Admin Settings > System Settings.`)
         } else {
           alert('✅ User created successfully! Welcome email has been sent to the new administrator.')
         }
       } else {
-        alert(`⚠️ User created successfully, but welcome email could not be sent.\n\nError: ${emailResult.error || 'Check email settings'}`)
+        alert(`⚠️ User created successfully, but welcome email could not be sent.\n\nError: ${emailResult.error || 'Check email settings in Admin Settings'}`)
       }
 
       // Success - redirect

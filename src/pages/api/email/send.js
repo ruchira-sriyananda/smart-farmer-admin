@@ -55,7 +55,7 @@ export default async function handler(req, res) {
 
     const port = parseInt(smtpSettings.smtp_port) || 587;
 
-    // Create transporter
+    // Create transporter with explicit timeouts for serverless environments
     const transporter = nodemailer.createTransport({
       host: smtpSettings.smtp_host,
       port: port,
@@ -64,6 +64,9 @@ export default async function handler(req, res) {
         user: smtpSettings.smtp_user,
         pass: smtpSettings.smtp_password,
       },
+      connectionTimeout: 8000, // 8s connection timeout
+      greetingTimeout: 5000,
+      socketTimeout: 8000,
       tls: {
         rejectUnauthorized: false, // Helps with self-signed certs or common hosting issues
       },
