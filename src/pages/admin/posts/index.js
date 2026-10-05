@@ -44,6 +44,14 @@ export default function ContentModeration() {
     const currentSrc = target.src
     const fallbackBuckets = ['post-images', 'posts', 'barter-images', 'listings', 'images', 'public']
 
+    let supabaseUrl = (
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      'https://uhrolwwkxenvcefnessp.supabase.co'
+    ).trim()
+    if (supabaseUrl.endsWith('/')) {
+      supabaseUrl = supabaseUrl.slice(0, -1)
+    }
+
     const triedStr = target.getAttribute('data-tried') || ''
     const triedBuckets = triedStr ? triedStr.split(',') : []
 
@@ -60,7 +68,7 @@ export default function ContentModeration() {
       if (nextBucket) {
         triedBuckets.push(nextBucket)
         target.setAttribute('data-tried', triedBuckets.join(','))
-        target.src = `https://uhrolwwkxenvcefnessp.supabase.co/storage/v1/object/public/${nextBucket}/${filename}`
+        target.src = `${supabaseUrl}/storage/v1/object/public/${nextBucket}/${filename}`
         return
       }
     }
@@ -74,6 +82,14 @@ export default function ContentModeration() {
     const target = e.target
     const currentSrc = target.src
     const avatarBuckets = ['profile-images', 'profiles', 'avatars', 'public']
+
+    let supabaseUrl = (
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      'https://uhrolwwkxenvcefnessp.supabase.co'
+    ).trim()
+    if (supabaseUrl.endsWith('/')) {
+      supabaseUrl = supabaseUrl.slice(0, -1)
+    }
 
     const triedStr = target.getAttribute('data-tried') || ''
     const triedBuckets = triedStr ? triedStr.split(',') : []
@@ -91,7 +107,7 @@ export default function ContentModeration() {
       if (nextBucket) {
         triedBuckets.push(nextBucket)
         target.setAttribute('data-tried', triedBuckets.join(','))
-        target.src = `https://uhrolwwkxenvcefnessp.supabase.co/storage/v1/object/public/${nextBucket}/${filename}`
+        target.src = `${supabaseUrl}/storage/v1/object/public/${nextBucket}/${filename}`
         return
       }
     }
@@ -217,7 +233,7 @@ export default function ContentModeration() {
         if (imagesData) {
           imagesData.forEach(img => {
             if (!postImagesMap[img.post_id]) postImagesMap[img.post_id] = []
-            const rawUrl = img.image_url || img.url || img.path || img.photo_url
+            const rawUrl = img.image_url || img.url || img.path || img.photo_url || img.image_path || img.file_path || img.src || img.uri
             if (rawUrl) {
               const url = resolveImageUrl(rawUrl, 'post-images')
               if (url && !postImagesMap[img.post_id].includes(url)) {

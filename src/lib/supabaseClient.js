@@ -47,8 +47,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
 export const resolveImageUrl = (path, defaultBucket = 'post-images') => {
   if (!path) return null
   const cleanPath = path.toString().trim()
-  if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) return cleanPath
-  if (cleanPath.startsWith('data:')) return cleanPath
+  if (!cleanPath) return null
 
   // Priority project URLs - ensure NO trailing slash
   let supabaseUrl = (
@@ -58,6 +57,20 @@ export const resolveImageUrl = (path, defaultBucket = 'post-images') => {
   if (supabaseUrl.endsWith('/')) {
     supabaseUrl = supabaseUrl.slice(0, -1)
   }
+
+  // Handle full HTTP(S) URLs
+  if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+    // If it's a Supabase storage URL (from ANY domain, e.g. old project domain),
+    // rewrite it to use current active supabaseUrl so it resolves properly!
+    if (cleanPath.includes('/storage/v1/object/public/')) {
+      const pathAfterPublic = cleanPath.substring(
+        cleanPath.indexOf('/storage/v1/object/public/') + '/storage/v1/object/public/'.length
+      )
+      return `${supabaseUrl}/storage/v1/object/public/${pathAfterPublic}`
+    }
+    return cleanPath
+  }
+  if (cleanPath.startsWith('data:')) return cleanPath
 
   // Strip leading slash from path
   let finalPath = cleanPath.startsWith('/') ? cleanPath.substring(1) : cleanPath
