@@ -272,6 +272,38 @@ export default function ContentModeration() {
           const url = resolveImageUrl(post.photo_url, 'post-images')
           if (url && !imagesList.includes(url)) imagesList.push(url)
         }
+        if (post.attachment_url) {
+          const url = resolveImageUrl(post.attachment_url, 'post-images')
+          if (url && !imagesList.includes(url)) imagesList.push(url)
+        }
+        if (post.media_url) {
+          const url = resolveImageUrl(post.media_url, 'post-images')
+          if (url && !imagesList.includes(url)) imagesList.push(url)
+        }
+        if (post.content_image) {
+          const url = resolveImageUrl(post.content_image, 'post-images')
+          if (url && !imagesList.includes(url)) imagesList.push(url)
+        }
+
+        if (post.attachments) {
+          let parsedAttachments = []
+          if (Array.isArray(post.attachments)) parsedAttachments = post.attachments
+          else if (typeof post.attachments === 'string') {
+            try {
+              const parsed = JSON.parse(post.attachments)
+              if (Array.isArray(parsed)) parsedAttachments = parsed
+              else if (typeof parsed === 'string') parsedAttachments = [parsed]
+            } catch (e) {
+              parsedAttachments = post.attachments.split(',').map(s => s.trim())
+            }
+          }
+          parsedAttachments.forEach(att => {
+            if (att) {
+              const url = resolveImageUrl(typeof att === 'string' ? att : att.url || att.image_url || att.path, 'post-images')
+              if (url && !imagesList.includes(url)) imagesList.push(url)
+            }
+          })
+        }
 
         if (post.images) {
           let parsedImages = []

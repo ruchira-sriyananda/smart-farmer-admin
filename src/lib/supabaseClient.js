@@ -41,13 +41,47 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
     })
 
 /**
- * Robustly resolves an image path to a full public URL.
- * Handles full URLs, relative paths, and common bucket fallbacks.
+ * Robustly resolves an image path or Base64 string to a full public URL or Data URI.
+ * Handles:
+ * - Data URIs (data:image/...)
+ * - Raw Base64 encoded strings from mobile app (JPEG/PNG/GIF/WebP magic bytes or long Base64)
+ * - Full HTTP(S) URLs (rewriting legacy Supabase domains to active project domain)
+ * - Relative storage paths and bucket fallbacks
  */
 export const resolveImageUrl = (path, defaultBucket = 'post-images') => {
   if (!path) return null
   const cleanPath = path.toString().trim()
   if (!cleanPath) return null
+
+  // 1. Data URI already prefixed
+  if (cleanPath.startsWith('data:')) {
+    return cleanPath
+  }
+
+  // 2. Base64 encoded image strings from Android app (ImageUtils.java)
+  // Common Base64 image headers:
+  // /9j/ = JPEG, iVBOR = PNG, R0lGO = GIF, UklGR = WebP, Qk = BMP
+  if (cleanPath.startsWith('/9j/')) {
+    return `data:image/jpeg;base64,${cleanPath.replace(/\s+/g, '')}`
+  }
+  if (cleanPath.startsWith('iVBOR')) {
+    return `data:image/png;base64,${cleanPath.replace(/\s+/g, '')}`
+  }
+  if (cleanPath.startsWith('R0lGO')) {
+    return `data:image/gif;base64,${cleanPath.replace(/\s+/g, '')}`
+  }
+  if (cleanPath.startsWith('UklGR')) {
+    return `data:image/webp;base64,${cleanPath.replace(/\s+/g, '')}`
+  }
+  if (cleanPath.startsWith('Qk')) {
+    return `data:image/bmp;base64,${cleanPath.replace(/\s+/g, '')}`
+  }
+
+  // General heuristic for un-prefixed Base64 strings (length > 100 with valid Base64 characters)
+  const isBase64Pattern = /^[A-Za-z0-9+/=\s]+$/
+  if (cleanPath.length > 100 && isBase64Pattern.test(cleanPath)) {
+    return `data:image/jpeg;base64,${cleanPath.replace(/\s+/g, '')}`
+  }
 
   // Priority project URLs - ensure NO trailing slash
   let supabaseUrl = (
@@ -58,7 +92,7 @@ export const resolveImageUrl = (path, defaultBucket = 'post-images') => {
     supabaseUrl = supabaseUrl.slice(0, -1)
   }
 
-  // Handle full HTTP(S) URLs
+  // 3. Handle full HTTP(S) URLs
   if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
     // If it's a Supabase storage URL (from ANY domain, e.g. old project domain),
     // rewrite it to use current active supabaseUrl so it resolves properly!
@@ -70,22 +104,21 @@ export const resolveImageUrl = (path, defaultBucket = 'post-images') => {
     }
     return cleanPath
   }
-  if (cleanPath.startsWith('data:')) return cleanPath
 
   // Strip leading slash from path
   let finalPath = cleanPath.startsWith('/') ? cleanPath.substring(1) : cleanPath
 
-  // If path already starts with storage/
+  // 4. If path already starts with storage/
   if (finalPath.startsWith('storage/')) {
     return `${supabaseUrl}/${finalPath}`
   }
 
-  // If path already includes a bucket structure (e.g. "post-images/123.jpg" or "barters/xyz.png")
+  // 5. If path already includes a bucket structure (e.g. "post-images/123.jpg" or "barters/xyz.png")
   if (finalPath.includes('/')) {
     return `${supabaseUrl}/storage/v1/object/public/${finalPath}`
   }
 
-  // If it's just a filename, use the provided default bucket
+  // 6. If it's just a filename, use the provided default bucket
   return `${supabaseUrl}/storage/v1/object/public/${defaultBucket}/${finalPath}`
 }
 
