@@ -44,14 +44,17 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
  * Robustly resolves an image path to a full public URL.
  * Handles full URLs, relative paths, and common bucket fallbacks.
  */
-export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
+export const resolveImageUrl = (path, defaultBucket = 'post-images') => {
   if (!path) return null
   const cleanPath = path.toString().trim()
-  if (cleanPath.startsWith('http')) return cleanPath
+  if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) return cleanPath
   if (cleanPath.startsWith('data:')) return cleanPath
 
   // Priority project URLs - ensure NO trailing slash
-  let supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vclmowfkmrshlqswhffv.supabase.co').trim()
+  let supabaseUrl = (
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    'https://uhrolwwkxenvcefnessp.supabase.co'
+  ).trim()
   if (supabaseUrl.endsWith('/')) {
     supabaseUrl = supabaseUrl.slice(0, -1)
   }
@@ -64,20 +67,14 @@ export const resolveImageUrl = (path, defaultBucket = 'barter-images') => {
     return `${supabaseUrl}/${finalPath}`
   }
 
-  // Common agricultural app buckets
-  const knownBuckets = [
-    'barter-images', 'barters', 'listings', 'products', 'product-images',
-    'profile-images', 'avatars', 'profiles', 'post-images', 'posts',
-    'ad-images', 'ads', 'public', 'images'
-  ]
-
-  // If path already includes a bucket structure
+  // If path already includes a bucket structure (e.g. "post-images/123.jpg" or "barters/xyz.png")
   if (finalPath.includes('/')) {
     return `${supabaseUrl}/storage/v1/object/public/${finalPath}`
   }
 
   // If it's just a filename, use the provided default bucket
   return `${supabaseUrl}/storage/v1/object/public/${defaultBucket}/${finalPath}`
+}
 }
 
 // Get current admin user from session

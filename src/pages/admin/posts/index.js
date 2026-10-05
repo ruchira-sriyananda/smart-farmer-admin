@@ -38,6 +38,70 @@ export default function ContentModeration() {
     setTimeout(() => setToastMessage(null), 4000)
   }
 
+  // Handle post image fallback across multiple Supabase storage buckets
+  const handleImageError = (e) => {
+    const target = e.target
+    const currentSrc = target.src
+    const fallbackBuckets = ['post-images', 'posts', 'barter-images', 'listings', 'images', 'public']
+
+    const triedStr = target.getAttribute('data-tried') || ''
+    const triedBuckets = triedStr ? triedStr.split(',') : []
+
+    const match = currentSrc.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/)
+    if (match) {
+      const currentBucket = match[1]
+      const filename = match[2]
+
+      if (!triedBuckets.includes(currentBucket)) {
+        triedBuckets.push(currentBucket)
+      }
+
+      const nextBucket = fallbackBuckets.find(b => !triedBuckets.includes(b))
+      if (nextBucket) {
+        triedBuckets.push(nextBucket)
+        target.setAttribute('data-tried', triedBuckets.join(','))
+        target.src = `https://uhrolwwkxenvcefnessp.supabase.co/storage/v1/object/public/${nextBucket}/${filename}`
+        return
+      }
+    }
+
+    target.onerror = null
+    target.src = 'https://placehold.co/600x400/f1f5f9/64748b?text=Image+Unavailable'
+  }
+
+  // Handle profile image fallback
+  const handleAvatarError = (e) => {
+    const target = e.target
+    const currentSrc = target.src
+    const avatarBuckets = ['profile-images', 'profiles', 'avatars', 'public']
+
+    const triedStr = target.getAttribute('data-tried') || ''
+    const triedBuckets = triedStr ? triedStr.split(',') : []
+
+    const match = currentSrc.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/)
+    if (match) {
+      const currentBucket = match[1]
+      const filename = match[2]
+
+      if (!triedBuckets.includes(currentBucket)) {
+        triedBuckets.push(currentBucket)
+      }
+
+      const nextBucket = avatarBuckets.find(b => !triedBuckets.includes(b))
+      if (nextBucket) {
+        triedBuckets.push(nextBucket)
+        target.setAttribute('data-tried', triedBuckets.join(','))
+        target.src = `https://uhrolwwkxenvcefnessp.supabase.co/storage/v1/object/public/${nextBucket}/${filename}`
+        return
+      }
+    }
+
+    target.style.display = 'none'
+    if (target.nextSibling) {
+      target.nextSibling.style.display = 'flex'
+    }
+  }
+
   const quickReasons = [
     { id: 1, reason: 'Inappropriate or explicit content', icon: 'bi-shield-slash-fill', color: '#ef4444' },
     { id: 2, reason: 'Spam, advertising, or promotional link', icon: 'bi-megaphone-fill', color: '#f59e0b' },
@@ -671,10 +735,7 @@ export default function ContentModeration() {
                       <img
                         src={resolveImageUrl(post.user.profile_image, 'profile-images')}
                         alt=""
-                        onError={(e) => {
-                          e.target.style.display = 'none'
-                          if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
-                        }}
+                        onError={handleAvatarError}
                       />
                     ) : null}
                     <div className="avatar-fallback" style={{ display: post.user?.profile_image ? 'none' : 'flex' }}>
@@ -711,9 +772,7 @@ export default function ContentModeration() {
                           <img
                             src={post.images[0]}
                             alt={post.title}
-                            onError={(e) => {
-                              e.target.src = 'https://placehold.co/600x400/f1f5f9/94a3b8?text=Image+Unavailable'
-                            }}
+                            onError={handleImageError}
                           />
                           <div className="image-zoom-overlay">
                             <i className="bi bi-zoom-in"></i>
@@ -729,9 +788,7 @@ export default function ContentModeration() {
                               <img
                                 src={img}
                                 alt=""
-                                onError={(e) => {
-                                  e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
-                                }}
+                                onError={handleImageError}
                               />
                               <div className="image-zoom-overlay">
                                 <i className="bi bi-zoom-in"></i>
@@ -747,9 +804,7 @@ export default function ContentModeration() {
                             <img
                               src={post.images[0]}
                               alt=""
-                              onError={(e) => {
-                                e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
-                              }}
+                              onError={handleImageError}
                             />
                             <div className="image-zoom-overlay">
                               <i className="bi bi-zoom-in"></i>
@@ -760,9 +815,7 @@ export default function ContentModeration() {
                               <img
                                 src={post.images[1]}
                                 alt=""
-                                onError={(e) => {
-                                  e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
-                                }}
+                                onError={handleImageError}
                               />
                               <div className="image-zoom-overlay">
                                 <i className="bi bi-zoom-in"></i>
@@ -772,9 +825,7 @@ export default function ContentModeration() {
                               <img
                                 src={post.images[2]}
                                 alt=""
-                                onError={(e) => {
-                                  e.target.src = 'https://placehold.co/400x400/f1f5f9/94a3b8?text=Error'
-                                }}
+                                onError={handleImageError}
                               />
                               {post.images.length > 3 && (
                                 <div className="more-images-overlay" onClick={(e) => { e.stopPropagation(); openDetails(post) }}>
@@ -914,6 +965,7 @@ export default function ContentModeration() {
                     <img
                       src={selectedPost.images[modalActiveImageIndex] || selectedPost.images[0]}
                       alt="Selected preview"
+                      onError={handleImageError}
                       onClick={() => openLightbox(selectedPost.images, modalActiveImageIndex)}
                     />
                     <button
@@ -935,7 +987,7 @@ export default function ContentModeration() {
                           className={`thumbnail-item ${idx === modalActiveImageIndex ? 'active' : ''}`}
                           onClick={() => setModalActiveImageIndex(idx)}
                         >
-                          <img src={imgUrl} alt="" />
+                          <img src={imgUrl} alt="" onError={handleImageError} />
                         </div>
                       ))}
                     </div>
@@ -954,7 +1006,11 @@ export default function ContentModeration() {
                 <div className="author-dossier-grid">
                   <div className="author-avatar-large">
                     {selectedPost.user?.profile_image ? (
-                      <img src={resolveImageUrl(selectedPost.user.profile_image, 'profile-images')} alt="" />
+                      <img
+                        src={resolveImageUrl(selectedPost.user.profile_image, 'profile-images')}
+                        alt=""
+                        onError={handleAvatarError}
+                      />
                     ) : (
                       <span>{selectedPost.author_name?.charAt(0)?.toUpperCase() || 'U'}</span>
                     )}
@@ -1168,7 +1224,7 @@ export default function ContentModeration() {
             )}
 
             <div className="lightbox-media-container">
-              <img src={lightboxImages[lightboxIndex]} alt="Fullscreen view" />
+              <img src={lightboxImages[lightboxIndex]} alt="Fullscreen view" onError={handleImageError} />
             </div>
 
             <div className="lightbox-toolbar">
