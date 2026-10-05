@@ -75,7 +75,6 @@ export const resolveImageUrl = (path, defaultBucket = 'post-images') => {
   // If it's just a filename, use the provided default bucket
   return `${supabaseUrl}/storage/v1/object/public/${defaultBucket}/${finalPath}`
 }
-}
 
 // Get current admin user from session
 export const getCurrentAdmin = () => {
