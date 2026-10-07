@@ -19,12 +19,42 @@ export default function Settings() {
     maintenance_mode: false,
     allow_registration: true,
     require_email_verification: true,
-    max_login_attempts: 5,
-    session_timeout_minutes: 30,
+    // Password Policy
+    password_min_length: 8,
+    password_require_uppercase: true,
+    password_require_number: true,
+    password_require_special_char: true,
+    password_expiry_days: 90,
+    force_password_change_first_login: true,
+    // 2FA / MFA
     enable_2fa: false,
+    enforce_super_admin_2fa: true,
+    mfa_provider: 'totp',
+    // Session & Access Control
+    session_timeout_minutes: 30,
+    max_concurrent_sessions: 2,
+    enable_ip_binding: false,
+    enable_ip_whitelist: false,
+    allowed_ip_whitelist: '',
+    // Threat Defense & Rate Limiting
+    max_login_attempts: 5,
+    lockout_duration_minutes: 15,
+    auto_block_suspicious_ip: true,
+    auto_block_threshold: 10,
     enable_recaptcha: true,
     recaptcha_site_key: '',
     recaptcha_secret_key: '',
+    // Data Protection & File Upload Security
+    enforce_https: true,
+    allowed_file_extensions: '.jpg, .jpeg, .png, .webp, .pdf',
+    max_file_upload_size_mb: 10,
+    sanitize_html_inputs: true,
+    // Security Alerting & Webhooks
+    enable_security_email_alerts: true,
+    security_alert_email: '',
+    security_webhook_url: '',
+    notify_on_high_severity: true,
+    // Other settings
     smtp_host: '',
     smtp_port: '587',
     smtp_user: '',
@@ -449,130 +479,523 @@ const handleTestEmail = async () => {
               <div className="section-header">
                 <h2>
                   <i className="bi bi-shield-lock-fill"></i>
-                  Security Settings
+                  Industry Standard Security Settings
                 </h2>
-                <p>Protect your application from unauthorized access</p>
+                <p>Enterprise threat defense, authentication rules, access control, and compliance policies</p>
               </div>
 
-              <div className="settings-grid">
-                <div className="setting-card">
-                  <div className="toggle-switch">
-                    <label className="toggle-label">
-                      <i className="bi bi-tools"></i>
-                      Maintenance Mode
-                    </label>
-                    <label className="toggle">
-                      <input 
-                        type="checkbox"
-                        checked={settings.maintenance_mode}
-                        onChange={(e) => handleSettingChange('maintenance_mode', e.target.checked)}
-                      />
-                      <span className="toggle-slider"></span>
-                    </label>
-                  </div>
-                  <small className="setting-hint">When enabled, only admins can access the site</small>
-                </div>
-
-                <div className="setting-card">
-                  <div className="toggle-switch">
-                    <label className="toggle-label">
-                      <i className="bi bi-shield-check"></i>
-                      Two-Factor Authentication (2FA)
-                    </label>
-                    <label className="toggle">
-                      <input 
-                        type="checkbox"
-                        checked={settings.enable_2fa}
-                        onChange={(e) => handleSettingChange('enable_2fa', e.target.checked)}
-                      />
-                      <span className="toggle-slider"></span>
-                    </label>
-                  </div>
-                  <small className="setting-hint">Adds an extra layer of security to user accounts</small>
-                </div>
-
-                <div className="setting-card">
-                  <label className="setting-label">
-                    <i className="bi bi-key"></i>
-                    Max Login Attempts
-                  </label>
-                  <input 
-                    type="number" 
-                    className="setting-input" 
-                    value={settings.max_login_attempts}
-                    onChange={(e) => handleSettingChange('max_login_attempts', parseInt(e.target.value))}
-                    min="1"
-                    max="10"
-                  />
-                  <small className="setting-hint">Number of failed attempts before temporary lockout</small>
-                </div>
-
-                <div className="setting-card">
-                  <label className="setting-label">
-                    <i className="bi bi-hourglass-split"></i>
-                    Session Timeout (minutes)
-                  </label>
-                  <input 
-                    type="number" 
-                    className="setting-input" 
-                    value={settings.session_timeout_minutes}
-                    onChange={(e) => handleSettingChange('session_timeout_minutes', parseInt(e.target.value))}
-                    min="5"
-                    max="120"
-                  />
-                  <small className="setting-hint">Auto logout after inactivity</small>
-                </div>
-
-                <div className="setting-card">
-                  <div className="toggle-switch">
-                    <label className="toggle-label">
-                      <i className="bi bi-robot"></i>
-                      Google reCAPTCHA
-                    </label>
-                    <label className="toggle">
-                      <input 
-                        type="checkbox"
-                        checked={settings.enable_recaptcha}
-                        onChange={(e) => handleSettingChange('enable_recaptcha', e.target.checked)}
-                      />
-                      <span className="toggle-slider"></span>
-                    </label>
-                  </div>
-                  <small className="setting-hint">Protects forms from spam and abuse</small>
-                </div>
-
-                {settings.enable_recaptcha && (
-                  <>
-                    <div className="setting-card">
-                      <label className="setting-label">
-                        <i className="bi bi-key-fill"></i>
-                        reCAPTCHA Site Key
-                      </label>
-                      <input 
-                        type="text" 
-                        className="setting-input" 
-                        value={settings.recaptcha_site_key}
-                        onChange={(e) => handleSettingChange('recaptcha_site_key', e.target.value)}
-                        placeholder="Enter site key"
-                      />
+              {/* Security Compliance Overview Banner */}
+              <div className="security-status-banner mb-4">
+                <div className="banner-badge">
+                  <i className="bi bi-shield-check text-success fs-4 me-2"></i>
+                  <div>
+                    <strong>Security Compliance Shield</strong>
+                    <div className="small text-muted">
+                      Password Policy: Active | 2FA Enforced: {settings.enable_2fa ? 'Yes' : 'Optional'} | Rate Limit: Guarded | Session Timeout: {settings.session_timeout_minutes}m
                     </div>
-
-                    <div className="setting-card">
-                      <label className="setting-label">
-                        <i className="bi bi-lock-fill"></i>
-                        reCAPTCHA Secret Key
-                      </label>
-                      <input 
-                        type="password" 
-                        className="setting-input" 
-                        value={settings.recaptcha_secret_key}
-                        onChange={(e) => handleSettingChange('recaptcha_secret_key', e.target.value)}
-                        placeholder="Enter secret key"
-                      />
-                    </div>
-                  </>
-                )}
+                  </div>
+                </div>
               </div>
+
+              {/* Category 1: System Access & Maintenance Mode */}
+              <div className="security-group-card mb-4">
+                <h5 className="group-title"><i className="bi bi-sliders text-primary me-2"></i> System Access & Maintenance</h5>
+                <div className="settings-grid mt-3">
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-tools"></i>
+                        Maintenance Mode
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.maintenance_mode}
+                          onChange={(e) => handleSettingChange('maintenance_mode', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">When enabled, only active admins can access the portal</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-lock"></i>
+                        Enforce HTTPS / TLS Connection
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.enforce_https}
+                          onChange={(e) => handleSettingChange('enforce_https', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Reject unencrypted HTTP traffic across all API and Admin routes</small>
+                  </div>
+                </div>
+              </div>
+
+              {/* Category 2: Password Policy & Account Hardening */}
+              <div className="security-group-card mb-4">
+                <h5 className="group-title"><i className="bi bi-key-fill text-warning me-2"></i> Password Policy & Account Hardening</h5>
+                <div className="settings-grid mt-3">
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-type-italic"></i>
+                      Minimum Password Length
+                    </label>
+                    <input
+                      type="number"
+                      className="setting-input"
+                      value={settings.password_min_length}
+                      onChange={(e) => handleSettingChange('password_min_length', parseInt(e.target.value) || 8)}
+                      min="8"
+                      max="32"
+                    />
+                    <small className="setting-hint">Industry standard recommendation: minimum 8-12 characters</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-calendar-event"></i>
+                      Password Expiration (Days)
+                    </label>
+                    <input
+                      type="number"
+                      className="setting-input"
+                      value={settings.password_expiry_days}
+                      onChange={(e) => handleSettingChange('password_expiry_days', parseInt(e.target.value) || 90)}
+                      min="30"
+                      max="365"
+                    />
+                    <small className="setting-hint">Mandatory password reset interval for admin accounts</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-check2-square"></i>
+                        Require Uppercase Letters
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.password_require_uppercase}
+                          onChange={(e) => handleSettingChange('password_require_uppercase', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Require at least one uppercase character (A-Z)</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-123"></i>
+                        Require Numbers & Special Characters
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.password_require_number}
+                          onChange={(e) => handleSettingChange('password_require_number', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Require numbers (0-9) and symbols (!@#$%^&*)</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-person-exclamation"></i>
+                        Force Reset on First Login
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.force_password_change_first_login}
+                          onChange={(e) => handleSettingChange('force_password_change_first_login', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Newly provisioned admins must change temp password immediately</small>
+                  </div>
+                </div>
+              </div>
+
+              {/* Category 3: Multi-Factor Authentication (2FA) */}
+              <div className="security-group-card mb-4">
+                <h5 className="group-title"><i className="bi bi-shield-check text-success me-2"></i> Multi-Factor Authentication (MFA / 2FA)</h5>
+                <div className="settings-grid mt-3">
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-phone"></i>
+                        Enable 2FA Platform-Wide
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.enable_2fa}
+                          onChange={(e) => handleSettingChange('enable_2fa', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Allow admins to bind TOTP authenticator apps</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-award-fill"></i>
+                        Enforce 2FA for Super Admins
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.enforce_super_admin_2fa}
+                          onChange={(e) => handleSettingChange('enforce_super_admin_2fa', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Mandatory 2FA challenge for all Super Administrator accounts</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-qr-code-scan"></i>
+                      2FA Provider Standard
+                    </label>
+                    <select
+                      className="setting-select"
+                      value={settings.mfa_provider || 'totp'}
+                      onChange={(e) => handleSettingChange('mfa_provider', e.target.value)}
+                    >
+                      <option value="totp">Authenticator App (TOTP - Google / Authy / Microsoft)</option>
+                      <option value="email_otp">Email Verification OTP Code</option>
+                      <option value="hybrid">Hybrid (TOTP + Email Fallback)</option>
+                    </select>
+                    <small className="setting-hint">Cryptographic protocol standard for 2FA verification</small>
+                  </div>
+                </div>
+              </div>
+
+              {/* Category 4: Session Control & IP Whitelisting */}
+              <div className="security-group-card mb-4">
+                <h5 className="group-title"><i className="bi bi-hourglass-split text-info me-2"></i> Session Control & IP Whitelisting</h5>
+                <div className="settings-grid mt-3">
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-stopwatch"></i>
+                      Session Timeout (Minutes)
+                    </label>
+                    <input
+                      type="number"
+                      className="setting-input"
+                      value={settings.session_timeout_minutes}
+                      onChange={(e) => handleSettingChange('session_timeout_minutes', parseInt(e.target.value) || 30)}
+                      min="5"
+                      max="120"
+                    />
+                    <small className="setting-hint">Automatically log out inactive sessions after X minutes</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-people-fill"></i>
+                      Max Concurrent Sessions
+                    </label>
+                    <input
+                      type="number"
+                      className="setting-input"
+                      value={settings.max_concurrent_sessions || 2}
+                      onChange={(e) => handleSettingChange('max_concurrent_sessions', parseInt(e.target.value) || 2)}
+                      min="1"
+                      max="5"
+                    />
+                    <small className="setting-hint">Maximum concurrent active sessions per admin account</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-ethernet"></i>
+                        Session IP Lock (IP Binding)
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.enable_ip_binding}
+                          onChange={(e) => handleSettingChange('enable_ip_binding', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Invalidates session if client IP address changes during active session</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-funnel-fill"></i>
+                        Restrict Portal to Whitelisted IPs
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.enable_ip_whitelist}
+                          onChange={(e) => handleSettingChange('enable_ip_whitelist', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Block access unless user IP is listed in the Allowed Whitelist</small>
+                  </div>
+
+                  {settings.enable_ip_whitelist && (
+                    <div className="setting-card style-full-width">
+                      <label className="setting-label">
+                        <i className="bi bi-list-check"></i>
+                        Whitelisted IP / CIDR Ranges
+                      </label>
+                      <input 
+                        type="text"
+                        className="setting-input"
+                        value={settings.allowed_ip_whitelist || ''}
+                        onChange={(e) => handleSettingChange('allowed_ip_whitelist', e.target.value)}
+                        placeholder="e.g. 192.168.1.1, 10.0.0.0/24, 203.0.113.45"
+                      />
+                      <small className="setting-hint">Comma-separated list of IPv4/IPv6 addresses or CIDR subnets allowed to access Admin Portal</small>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Category 5: Threat Defense & Brute-Force Rate Limiting */}
+              <div className="security-group-card mb-4">
+                <h5 className="group-title"><i className="bi bi-shield-slash-fill text-danger me-2"></i> Threat Defense & Brute-Force Rate Limiting</h5>
+                <div className="settings-grid mt-3">
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-x-octagon"></i>
+                      Max Login Failure Limit
+                    </label>
+                    <input
+                      type="number"
+                      className="setting-input"
+                      value={settings.max_login_attempts}
+                      onChange={(e) => handleSettingChange('max_login_attempts', parseInt(e.target.value) || 5)}
+                      min="3"
+                      max="10"
+                    />
+                    <small className="setting-hint">Failed password attempts before temporary account lockout</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-clock-history"></i>
+                      Lockout Duration (Minutes)
+                    </label>
+                    <input
+                      type="number"
+                      className="setting-input"
+                      value={settings.lockout_duration_minutes || 15}
+                      onChange={(e) => handleSettingChange('lockout_duration_minutes', parseInt(e.target.value) || 15)}
+                      min="5"
+                      max="1440"
+                    />
+                    <small className="setting-hint">Cool-down duration before locked account can attempt re-login</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-ban"></i>
+                        Auto-Block Malicious IP Addresses
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.auto_block_suspicious_ip}
+                          onChange={(e) => handleSettingChange('auto_block_suspicious_ip', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Automatically add IP to blacklists after exceeding threshold</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-robot"></i>
+                        Google reCAPTCHA v3 / Enterprise
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.enable_recaptcha}
+                          onChange={(e) => handleSettingChange('enable_recaptcha', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Bot challenge on login, registration, and sensitive forms</small>
+                  </div>
+
+                  {settings.enable_recaptcha && (
+                    <>
+                      <div className="setting-card">
+                        <label className="setting-label">
+                          <i className="bi bi-key-fill"></i>
+                          reCAPTCHA Site Key
+                        </label>
+                        <input
+                          type="text"
+                          className="setting-input"
+                          value={settings.recaptcha_site_key}
+                          onChange={(e) => handleSettingChange('recaptcha_site_key', e.target.value)}
+                          placeholder="Public site key"
+                        />
+                      </div>
+
+                      <div className="setting-card">
+                        <label className="setting-label">
+                          <i className="bi bi-lock-fill"></i>
+                          reCAPTCHA Secret Key
+                        </label>
+                        <input
+                          type="password"
+                          className="setting-input"
+                          value={settings.recaptcha_secret_key}
+                          onChange={(e) => handleSettingChange('recaptcha_secret_key', e.target.value)}
+                          placeholder="Secret key"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Category 6: File Upload Security & Input Sanitization */}
+              <div className="security-group-card mb-4">
+                <h5 className="group-title"><i className="bi bi-file-earmark-check text-secondary me-2"></i> File Upload Security & Input Sanitization</h5>
+                <div className="settings-grid mt-3">
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-file-earmark-code"></i>
+                      Allowed File Upload Extensions
+                    </label>
+                    <input
+                      type="text"
+                      className="setting-input"
+                      value={settings.allowed_file_extensions || '.jpg, .jpeg, .png, .webp, .pdf'}
+                      onChange={(e) => handleSettingChange('allowed_file_extensions', e.target.value)}
+                      placeholder=".jpg, .png, .webp, .pdf"
+                    />
+                    <small className="setting-hint">Restrict uploads to whitelisted file extensions only</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-hdd-network"></i>
+                      Max Upload Limit (MB)
+                    </label>
+                    <input
+                      type="number"
+                      className="setting-input"
+                      value={settings.max_file_upload_size_mb || 10}
+                      onChange={(e) => handleSettingChange('max_file_upload_size_mb', parseInt(e.target.value) || 10)}
+                      min="1"
+                      max="100"
+                    />
+                    <small className="setting-hint">Maximum payload size per single media/file upload</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-code-slash"></i>
+                        XSS / HTML Input Sanitization
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.sanitize_html_inputs}
+                          onChange={(e) => handleSettingChange('sanitize_html_inputs', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Strip malicious JavaScript/HTML code from user inputs before DB write</small>
+                  </div>
+                </div>
+              </div>
+
+              {/* Category 7: Incident Alerting & Webhooks */}
+              <div className="security-group-card mb-4">
+                <h5 className="group-title"><i className="bi bi-bell-fill text-warning me-2"></i> Security Incident Alerting & Webhooks</h5>
+                <div className="settings-grid mt-3">
+                  <div className="setting-card">
+                    <div className="toggle-switch">
+                      <label className="toggle-label">
+                        <i className="bi bi-envelope-at"></i>
+                        Instant Security Email Alerts
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={settings.enable_security_email_alerts}
+                          onChange={(e) => handleSettingChange('enable_security_email_alerts', e.target.checked)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <small className="setting-hint">Send immediate email notifications on detected security breaches</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-envelope-check"></i>
+                      Security Incident Email
+                    </label>
+                    <input
+                      type="email"
+                      className="setting-input"
+                      value={settings.security_alert_email || ''}
+                      onChange={(e) => handleSettingChange('security_alert_email', e.target.value)}
+                      placeholder="security@smartfarmer.lk"
+                    />
+                    <small className="setting-hint">Dedicated email address for SOC / Security Team alerts</small>
+                  </div>
+
+                  <div className="setting-card">
+                    <label className="setting-label">
+                      <i className="bi bi-discord"></i>
+                      Security Webhook URL (Slack / Discord)
+                    </label>
+                    <input
+                      type="url"
+                      className="setting-input"
+                      value={settings.security_webhook_url || ''}
+                      onChange={(e) => handleSettingChange('security_webhook_url', e.target.value)}
+                      placeholder="https://hooks.slack.com/services/..."
+                    />
+                    <small className="setting-hint">Receive real-time threat notifications in Slack, Discord, or Teams channel</small>
+                  </div>
+                </div>
+              </div>
+
             </div>
           )}
 
@@ -1171,6 +1594,38 @@ const handleTestEmail = async () => {
           background: white;
           border-radius: 24px;
           padding: 32px;
+        }
+
+        .security-status-banner {
+          background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+          border: 1px solid #a7f3d0;
+          border-radius: 16px;
+          padding: 16px 20px;
+        }
+
+        .banner-badge {
+          display: flex;
+          align-items: center;
+        }
+
+        .security-group-card {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 20px;
+          padding: 24px;
+        }
+
+        .group-title {
+          font-size: 16px;
+          font-weight: 700;
+          color: #1e293b;
+          margin: 0;
+          display: flex;
+          align-items: center;
+        }
+
+        .style-full-width {
+          grid-column: 1 / -1;
         }
 
         .section-header {

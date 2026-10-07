@@ -503,3 +503,52 @@ export const getAdvancedActivityDistribution = async (days = 30) => {
   }
 }
 
+// Helper to log a security alert safely
+export const safeLogSecurityAlert = async (alertType, severityLevel, message, detectedIp) => {
+  try {
+    const { error } = await supabase
+      .from('security_alerts')
+      .insert({
+        alert_type: alertType,
+        severity_level: severityLevel, // 'HIGH', 'MEDIUM', 'LOW'
+        alert_message: message,
+        detected_ip: detectedIp || 'unknown',
+        resolved: false,
+        created_at: new Date().toISOString()
+      })
+    if (error) console.warn('Failed to insert security alert:', error.message)
+  } catch (err) {
+    console.warn('Security alert logging exception:', err.message)
+  }
+}
+
+// Helper to calculate security health score (0 - 100)
+export const calculateSecurityHealthScore = (settings = {}, stats = {}) => {
+  let score = 60 // Base score
+
+  // 1. 2FA Configuration (+15)
+  if (settings.enable_2fa) score += 10
+  if (settings.enforce_super_admin_2fa) score += 5
+
+  // 2. Password Policy Strength (+15)
+  if (Number(settings.password_min_length) >= 10) score += 5
+  if (settings.password_require_uppercase && settings.password_require_number && settings.password_require_special_char) score += 10
+
+  // 3. Brute Force Protection & reCAPTCHA (+10)
+  if (settings.enable_recaptcha) score += 5
+  if (Number(settings.max_login_attempts) <= 5) score += 5
+
+  // 4. Session Security (+10)
+  if (Number(settings.session_timeout_minutes) <= 30) score += 5
+  if (settings.enable_ip_binding) score += 5
+
+  // Deductions for high active security alerts
+  const highAlerts = stats.highSeverity || 0
+  const totalAlerts = stats.totalAlerts || 0
+  score -= (highAlerts * 10)
+  score -= (totalAlerts * 2)
+
+  return Math.min(100, Math.max(15, score))
+}
+
+
