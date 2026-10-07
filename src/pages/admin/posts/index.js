@@ -246,12 +246,20 @@ export default function ContentModeration() {
 
       // 6. Process and compile final posts list
       const processedPosts = (postsData || []).map(post => {
-        const mod = modData?.find(m => m.content_id === post.post_id && m.content_type === 'POST') || {
-          moderation_status: 'PENDING',
-          moderation_id: `new-${post.post_id}`,
+        const mod = modData?.find(m => m.content_id === post.post_id && m.content_type === 'POST') || null
+
+        const effectiveStatus = mod?.moderation_status || post.status || post.moderation_status || 'PENDING'
+        const effectiveReason = mod?.moderation_reason || post.rejection_reason || post.rejected_reason || post.moderation_reason || null
+
+        const modObj = {
+          moderation_status: effectiveStatus,
+          moderation_reason: effectiveReason,
+          moderation_id: mod?.moderation_id || `new-${post.post_id}`,
           content_id: post.post_id,
           content_type: 'POST',
-          created_at: post.created_at
+          created_at: mod?.created_at || post.created_at,
+          reviewed_by_admin: mod?.reviewed_by_admin || null,
+          reviewed_at: mod?.reviewed_at || null
         }
 
         const userData = usersMap[post.user_id] || null
@@ -327,7 +335,10 @@ export default function ContentModeration() {
         }
 
         return {
-          ...mod,
+          ...modObj,
+          status: effectiveStatus,
+          rejection_reason: effectiveReason,
+          rejected_reason: effectiveReason,
           post_id: post.post_id,
           title: post.title || 'Untitled Post',
           content: post.content || 'No content provided',
@@ -411,14 +422,16 @@ export default function ContentModeration() {
     try {
       const sessionStr = localStorage.getItem('adminSession')
       const session = sessionStr ? JSON.parse(sessionStr) : null
+      const finalReason = reason || (status === 'APPROVED' ? null : post.moderation_reason || post.rejection_reason || post.rejected_reason || null)
 
+      // 1. Insert or update in content_moderation table
       const moderationData = {
         content_id: post.content_id,
         content_type: 'POST',
         moderation_status: status,
         reviewed_by: session?.admin?.admin_id || null,
         reviewed_at: new Date().toISOString(),
-        moderation_reason: reason || (status === 'APPROVED' ? null : post.moderation_reason)
+        moderation_reason: finalReason
       }
 
       let resultError
@@ -437,12 +450,63 @@ export default function ContentModeration() {
 
       if (resultError) throw resultError
 
-      // Log activity
+      // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed,
+      // and post authors can see their rejected status & reason in their posts view!
+      try {
+        const postsUpdatePayload = {
+          status: status,
+          moderation_status: status,
+          rejection_reason: status === 'REJECTED' ? finalReason : null,
+          rejected_reason: status === 'REJECTED' ? finalReason : null,
+          moderation_reason: status === 'REJECTED' ? finalReason : null,
+          updated_at: new Date().toISOString()
+        }
+
+        const { error: postErr } = await supabase
+          .from('posts')
+          .update(postsUpdatePayload)
+          .eq('post_id', post.content_id)
+
+        if (postErr) {
+          console.warn('Full posts table update warning, attempting subset update:', postErr.message)
+          // Fallback: try updating with common status and rejection_reason columns
+          await supabase
+            .from('posts')
+            .update({
+              status: status,
+              rejection_reason: status === 'REJECTED' ? finalReason : null
+            })
+            .eq('post_id', post.content_id)
+        }
+      } catch (pErr) {
+        console.warn('Failed to update posts table directly:', pErr.message)
+      }
+
+      // 3. Insert notification for the mobile user if rejected
+      if (status === 'REJECTED' && post.user_id) {
+        try {
+          await supabase
+            .from('notifications')
+            .insert({
+              user_id: post.user_id,
+              title: 'Post Rejected',
+              message: `Your post "${post.title}" was rejected. Reason: ${finalReason}`,
+              type: 'POST_REJECTED',
+              related_id: post.content_id,
+              is_read: false,
+              created_at: new Date().toISOString()
+            })
+        } catch (notifErr) {
+          console.warn('User notification insert warning:', notifErr.message)
+        }
+      }
+
+      // 4. Log activity
       if (session?.admin?.admin_id) {
         await safeLogActivity(
           session.admin.admin_id,
           'CONTENT_MODERATION',
-          `Set status of post "${post.title}" (ID: ${post.content_id}) to ${status}`,
+          `Set status of post "${post.title}" (ID: ${post.content_id}) to ${status}${finalReason ? ` (Reason: ${finalReason})` : ''}`,
           'internal'
         )
       }
@@ -455,7 +519,10 @@ export default function ContentModeration() {
           return {
             ...p,
             moderation_status: status,
-            moderation_reason: reason || (status === 'APPROVED' ? null : p.moderation_reason),
+            status: status,
+            moderation_reason: finalReason,
+            rejection_reason: finalReason,
+            rejected_reason: finalReason,
             reviewed_at: new Date().toISOString(),
             reviewed_by_admin: session?.admin ? {
               admin_id: session.admin.admin_id,
@@ -924,11 +991,11 @@ export default function ContentModeration() {
                   </p>
 
                   {/* Rejection reason banner if rejected */}
-                  {post.moderation_status === 'REJECTED' && post.moderation_reason && (
+                  {post.moderation_status === 'REJECTED' && (post.moderation_reason || post.rejection_reason || post.rejected_reason) && (
                     <div className="rejection-reason-strip">
                       <i className="bi bi-exclamation-triangle-fill"></i>
                       <div>
-                        <strong>Reason for Rejection:</strong> {post.moderation_reason}
+                        <strong>Reason for Rejection:</strong> {post.moderation_reason || post.rejection_reason || post.rejected_reason}
                       </div>
                     </div>
                   )}
@@ -1136,11 +1203,11 @@ export default function ContentModeration() {
               </div>
 
               {/* Moderation History */}
-              {selectedPost.moderation_reason && (
+              {(selectedPost.moderation_reason || selectedPost.rejection_reason || selectedPost.rejected_reason) && (
                 <div className="modal-section-card warning-border">
                   <h3 className="section-heading text-amber"><i className="bi bi-exclamation-triangle-fill"></i> Rejection History</h3>
                   <div className="rejection-history-box">
-                    <p className="reason-text">{selectedPost.moderation_reason}</p>
+                    <p className="reason-text">{selectedPost.moderation_reason || selectedPost.rejection_reason || selectedPost.rejected_reason}</p>
                     {selectedPost.reviewed_by_admin && (
                       <p className="reviewed-by-text">
                         Reviewed by <strong>{selectedPost.reviewed_by_admin.full_name}</strong> ({selectedPost.reviewed_by_admin.email}) on {formatDate(selectedPost.reviewed_at)}

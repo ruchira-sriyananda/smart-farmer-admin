@@ -171,11 +171,11 @@ export default function AdminDashboard() {
   }
 
   const handleModeratePosts = () => {
-    router.push('/admin/mobile-posts')
+    router.push('/admin/posts')
   }
 
   const handleBarterOversight = () => {
-    router.push('/admin/mobile-barter')
+    router.push('/admin/barter')
   }
 
   const handleManageAds = () => {
