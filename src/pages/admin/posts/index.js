@@ -22,6 +22,16 @@ export default function ContentModeration() {
   const [customReason, setCustomReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
 
+  // Toggle showing original content for rejected posts
+  const [showOriginalMap, setShowOriginalMap] = useState({})
+
+  const toggleShowOriginal = (postId) => {
+    setShowOriginalMap(prev => ({
+      ...prev,
+      [postId]: !prev[postId]
+    }))
+  }
+
   // Details Modal image state
   const [modalActiveImageIndex, setModalActiveImageIndex] = useState(0)
 
@@ -246,7 +256,7 @@ export default function ContentModeration() {
 
       // 6. Process and compile final posts list
       const processedPosts = (postsData || []).map(post => {
-        const mod = modData?.find(m => m.content_id === post.post_id && m.content_type === 'POST') || null
+        const mod = modData?.find(m => String(m.content_id) === String(post.post_id) && m.content_type === 'POST') || null
 
         const effectiveStatus = mod?.moderation_status || post.status || post.moderation_status || 'PENDING'
         const effectiveReason = mod?.moderation_reason || post.rejection_reason || post.rejected_reason || post.moderation_reason || null
@@ -879,7 +889,17 @@ export default function ContentModeration() {
 
                 {/* Images Display Area */}
                 <div className="card-media-section">
-                  {post.images && post.images.length > 0 ? (
+                  {post.moderation_status === 'REJECTED' && !showOriginalMap[post.content_id] ? (
+                    <div className="warning-rejected-banner">
+                      <div className="warning-rejected-icon">
+                        <i className="bi bi-shield-x"></i>
+                      </div>
+                      <div className="warning-rejected-text">
+                        <span>⚠️ Image Content Removed</span>
+                        <small>Media hidden due to content rejection</small>
+                      </div>
+                    </div>
+                  ) : post.images && post.images.length > 0 ? (
                     <div className="image-display-container">
                       {/* Image Layouts based on Count */}
                       {post.images.length === 1 && (
@@ -985,10 +1005,22 @@ export default function ContentModeration() {
                       <i className="bi bi-tag-fill"></i> {post.category.category_name}
                     </div>
                   )}
-                  <h3 className="post-title-text">{post.title}</h3>
-                  <p className="post-excerpt">
-                    {post.content.length > 140 ? `${post.content.substring(0, 140)}...` : post.content}
-                  </p>
+
+                  {post.moderation_status === 'REJECTED' && !showOriginalMap[post.content_id] ? (
+                    <>
+                      <h3 className="post-title-text text-danger">⚠️ [Content Removed - Rejected Post]</h3>
+                      <p className="post-excerpt text-muted">
+                        This post content was removed from public view due to a violation of community guidelines.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="post-title-text">{post.title}</h3>
+                      <p className="post-excerpt">
+                        {post.content.length > 140 ? `${post.content.substring(0, 140)}...` : post.content}
+                      </p>
+                    </>
+                  )}
 
                   {/* Rejection reason banner if rejected */}
                   {post.moderation_status === 'REJECTED' && (post.moderation_reason || post.rejection_reason || post.rejected_reason) && (
@@ -998,6 +1030,16 @@ export default function ContentModeration() {
                         <strong>Reason for Rejection:</strong> {post.moderation_reason || post.rejection_reason || post.rejected_reason}
                       </div>
                     </div>
+                  )}
+
+                  {post.moderation_status === 'REJECTED' && (
+                    <button
+                      className={`btn-show-original ${showOriginalMap[post.content_id] ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); toggleShowOriginal(post.content_id); }}
+                    >
+                      <i className={`bi ${showOriginalMap[post.content_id] ? 'bi-eye-slash' : 'bi-eye'}`}></i>
+                      <span>{showOriginalMap[post.content_id] ? 'Hide Original Content' : 'View Original Content'}</span>
+                    </button>
                   )}
                 </div>
 
@@ -1074,7 +1116,13 @@ export default function ContentModeration() {
 
             <div className="modal-scroll-content">
               {/* Image Gallery Showcase in Modal */}
-              {selectedPost.images && selectedPost.images.length > 0 ? (
+              {selectedPost.moderation_status === 'REJECTED' && !showOriginalMap[selectedPost.content_id] ? (
+                <div className="modal-warning-image-banner">
+                  <div className="warning-big-icon"><i className="bi bi-shield-x"></i></div>
+                  <h3>⚠️ Image Content Removed</h3>
+                  <p>Media has been hidden because this post was rejected by content moderation.</p>
+                </div>
+              ) : selectedPost.images && selectedPost.images.length > 0 ? (
                 <div className="modal-gallery-block">
                   <div className="active-modal-image-view">
                     <img
@@ -1196,10 +1244,33 @@ export default function ContentModeration() {
                   </div>
                 </div>
 
-                <div className="full-post-body">
-                  <h2 className="full-title">{selectedPost.title}</h2>
-                  <div className="full-text">{selectedPost.content}</div>
-                </div>
+                {selectedPost.moderation_status === 'REJECTED' && !showOriginalMap[selectedPost.content_id] ? (
+                  <div className="full-post-body warning-body">
+                    <h2 className="full-title text-danger">⚠️ [Content Removed - Rejected Post]</h2>
+                    <div className="full-text text-muted">
+                      This post text content was removed from public view following administrative rejection for violating community policies.
+                    </div>
+                    <button
+                      className="btn-show-original"
+                      onClick={() => toggleShowOriginal(selectedPost.content_id)}
+                    >
+                      <i className="bi bi-eye"></i> View Original Content (Admin Only)
+                    </button>
+                  </div>
+                ) : (
+                  <div className="full-post-body">
+                    <h2 className="full-title">{selectedPost.title}</h2>
+                    <div className="full-text">{selectedPost.content}</div>
+                    {selectedPost.moderation_status === 'REJECTED' && (
+                      <button
+                        className="btn-show-original active"
+                        onClick={() => toggleShowOriginal(selectedPost.content_id)}
+                      >
+                        <i className="bi bi-eye-slash"></i> Hide Original Content
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Moderation History */}
@@ -1845,6 +1916,71 @@ export default function ContentModeration() {
         .no-image-text span { display: block; font-size: 13px; font-weight: 700; color: #475569; }
         .no-image-text small { font-size: 11px; }
 
+        /* Warning Banner for Rejected Media */
+        .warning-rejected-banner {
+          padding: 28px 20px;
+          background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+          border-bottom: 1px solid #fca5a5;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+        .warning-rejected-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 14px;
+          background: #ef4444;
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+          flex-shrink: 0;
+          box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2);
+        }
+        .warning-rejected-text span {
+          display: block;
+          font-size: 13.5px;
+          font-weight: 800;
+          color: #991b1b;
+        }
+        .warning-rejected-text small {
+          font-size: 11.5px;
+          color: #b91c1c;
+        }
+
+        .modal-warning-image-banner {
+          padding: 42px 24px;
+          background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+          border-radius: 16px;
+          text-align: center;
+          color: #991b1b;
+          border: 1.5px dashed #fca5a5;
+        }
+        .modal-warning-image-banner .warning-big-icon {
+          width: 60px;
+          height: 60px;
+          border-radius: 50%;
+          background: #ef4444;
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 28px;
+          margin: 0 auto 12px;
+          box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+        }
+        .modal-warning-image-banner h3 {
+          font-size: 16px;
+          font-weight: 800;
+          margin: 0 0 4px 0;
+        }
+        .modal-warning-image-banner p {
+          font-size: 13px;
+          margin: 0;
+          color: #b91c1c;
+        }
+
         /* Card Body */
         .card-body-section {
           padding: 18px 20px;
@@ -1869,11 +2005,18 @@ export default function ContentModeration() {
           margin: 0 0 8px 0;
           line-height: 1.4;
         }
+        .post-title-text.text-danger {
+          color: #dc2626 !important;
+        }
         .post-excerpt {
           font-size: 13px;
           color: #475569;
           line-height: 1.5;
           margin: 0;
+        }
+        .post-excerpt.text-muted {
+          color: #7f1d1d !important;
+          font-style: italic;
         }
         .rejection-reason-strip {
           margin-top: 12px;
@@ -1886,6 +2029,36 @@ export default function ContentModeration() {
           display: flex;
           gap: 8px;
           align-items: flex-start;
+        }
+
+        .btn-show-original {
+          margin-top: 12px;
+          padding: 6px 12px;
+          background: #f1f5f9;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          font-size: 11.5px;
+          font-weight: 700;
+          color: #475569;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.2s ease;
+        }
+        .btn-show-original:hover {
+          background: #e2e8f0;
+          color: #0f172a;
+        }
+        .btn-show-original.active {
+          background: #fee2e2;
+          border-color: #fca5a5;
+          color: #b91c1c;
+        }
+
+        .warning-body {
+          border-color: #fca5a5 !important;
+          background: #fff5f5 !important;
         }
 
         /* Card Actions */
