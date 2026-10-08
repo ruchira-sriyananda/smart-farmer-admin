@@ -22,15 +22,7 @@ export default function ContentModeration() {
   const [customReason, setCustomReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
 
-  // Toggle showing original content for rejected posts
-  const [showOriginalMap, setShowOriginalMap] = useState({})
 
-  const toggleShowOriginal = (postId) => {
-    setShowOriginalMap(prev => ({
-      ...prev,
-      [postId]: !prev[postId]
-    }))
-  }
 
   // Details Modal image state
   const [modalActiveImageIndex, setModalActiveImageIndex] = useState(0)
@@ -344,50 +336,19 @@ export default function ContentModeration() {
           })
         }
 
-        const isRejected = effectiveStatus === 'REJECTED'
-        const WARNING_TITLE = '⚠️ [Content Removed - Rejected Post]'
-        const WARNING_TEXT = `This post content was removed from public view due to a violation of community guidelines.${effectiveReason ? ` Reason: ${effectiveReason}` : ''}`
-        const WARNING_IMAGE_URL = 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
+        // Use post title and content directly without replacing or duplicating text
+        let postTitle = post.title || 'Untitled Post'
+        let postContent = post.content || 'No content provided'
 
-        // Save original text / images if they were not already replaced
-        const originalTitle = post.title && post.title !== WARNING_TITLE ? post.title : null
-        const originalContent = post.content && !post.content.includes('removed from public view') ? post.content : null
-        const originalImages = imagesList.filter(img => img !== WARNING_IMAGE_URL)
-
-        const finalTitle = isRejected ? WARNING_TITLE : (post.title || 'Untitled Post')
-        const finalContent = isRejected ? WARNING_TEXT : (post.content || 'No content provided')
-        const finalImages = isRejected ? [WARNING_IMAGE_URL] : imagesList
-
-        // Sync Supabase database for rejected posts if DB has not been updated yet
-        if (isRejected && (post.title !== WARNING_TITLE || !post.content?.includes('removed from public view'))) {
-          supabase
-            .from('posts')
-            .update({
-              title: WARNING_TITLE,
-              content: WARNING_TEXT,
-              image_url: WARNING_IMAGE_URL,
-              status: 'REJECTED',
-              moderation_status: 'REJECTED',
-              rejection_reason: effectiveReason,
-              rejected_reason: effectiveReason,
-              moderation_reason: effectiveReason,
-              updated_at: new Date().toISOString()
-            })
-            .eq('post_id', post.post_id)
-            .then(({ error: syncErr }) => {
-              if (syncErr) console.warn('Background sync warning for rejected post:', syncErr.message)
-            })
-
-          supabase
-            .from('post_images')
-            .update({
-              image_url: WARNING_IMAGE_URL
-            })
-            .eq('post_id', post.post_id)
-            .then(({ error: imgSyncErr }) => {
-              if (imgSyncErr) console.warn('Background sync warning for post_images:', imgSyncErr.message)
-            })
+        // Fallback cleanup if previously stored with warning title/text in DB
+        if (postTitle === '⚠️ [Content Removed - Rejected Post]') {
+          postTitle = 'Untitled Post'
         }
+        if (typeof postContent === 'string' && postContent.includes('removed from public view due to a violation')) {
+          postContent = 'No content provided'
+        }
+
+        const finalImages = imagesList.filter(img => !img.includes('fee2e2/dc2626?text=Content+Removed'))
 
         return {
           ...modObj,
@@ -395,11 +356,8 @@ export default function ContentModeration() {
           rejection_reason: effectiveReason,
           rejected_reason: effectiveReason,
           post_id: post.post_id,
-          title: finalTitle,
-          content: finalContent,
-          original_title: originalTitle,
-          original_content: originalContent,
-          original_images: originalImages.length > 0 ? originalImages : null,
+          title: postTitle,
+          content: postContent,
           category: categoryData,
           images: finalImages,
           image_count: finalImages.length,
@@ -509,13 +467,8 @@ export default function ContentModeration() {
       if (resultError) throw resultError
 
       // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed,
-      // and post authors can see their rejected status & reason in their posts view!
-      // Replaces existing title, text, and images with warning text/image in Supabase DB when rejected.
+      // 2. ALSO update the posts table status and moderation reason
       try {
-        const WARNING_TITLE = '⚠️ [Content Removed - Rejected Post]'
-        const WARNING_TEXT = `This post content was removed from public view due to a violation of community guidelines.${finalReason ? ` Reason: ${finalReason}` : ''}`
-        const WARNING_IMAGE_URL = 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
-
         const postsUpdatePayload = {
           status: status,
           moderation_status: status,
@@ -525,62 +478,20 @@ export default function ContentModeration() {
           updated_at: new Date().toISOString()
         }
 
-        if (status === 'REJECTED') {
-          postsUpdatePayload.title = WARNING_TITLE
-          postsUpdatePayload.content = WARNING_TEXT
-          postsUpdatePayload.image_url = WARNING_IMAGE_URL
-          if (post.image !== undefined) postsUpdatePayload.image = WARNING_IMAGE_URL
-          if (post.photo_url !== undefined) postsUpdatePayload.photo_url = WARNING_IMAGE_URL
-          if (post.attachment_url !== undefined) postsUpdatePayload.attachment_url = WARNING_IMAGE_URL
-          if (post.media_url !== undefined) postsUpdatePayload.media_url = WARNING_IMAGE_URL
-          if (post.content_image !== undefined) postsUpdatePayload.content_image = WARNING_IMAGE_URL
-          if (post.images !== undefined) {
-            postsUpdatePayload.images = typeof post.images === 'string'
-              ? JSON.stringify([WARNING_IMAGE_URL])
-              : [WARNING_IMAGE_URL]
-          }
-          if (post.attachments !== undefined) {
-            postsUpdatePayload.attachments = typeof post.attachments === 'string'
-              ? JSON.stringify([WARNING_IMAGE_URL])
-              : [WARNING_IMAGE_URL]
-          }
-        }
-
         const { error: postErr } = await supabase
           .from('posts')
           .update(postsUpdatePayload)
           .eq('post_id', post.content_id)
 
         if (postErr) {
-          console.warn('Full posts table update warning, attempting subset update:', postErr.message)
-          // Fallback: try updating with common status, rejection_reason, title, content, and image_url columns
-          const fallbackPayload = {
-            status: status,
-            rejection_reason: status === 'REJECTED' ? finalReason : null
-          }
-          if (status === 'REJECTED') {
-            fallbackPayload.title = WARNING_TITLE
-            fallbackPayload.content = WARNING_TEXT
-            fallbackPayload.image_url = WARNING_IMAGE_URL
-          }
+          console.warn('Posts table update warning, attempting subset update:', postErr.message)
           await supabase
             .from('posts')
-            .update(fallbackPayload)
+            .update({
+              status: status,
+              rejection_reason: status === 'REJECTED' ? finalReason : null
+            })
             .eq('post_id', post.content_id)
-        }
-
-        // Also replace image records in post_images table if rejected
-        if (status === 'REJECTED') {
-          try {
-            await supabase
-              .from('post_images')
-              .update({
-                image_url: WARNING_IMAGE_URL
-              })
-              .eq('post_id', post.content_id)
-          } catch (imgErr) {
-            console.warn('Failed to update post_images table directly:', imgErr.message)
-          }
         }
       } catch (pErr) {
         console.warn('Failed to update posts table directly:', pErr.message)
@@ -620,25 +531,8 @@ export default function ContentModeration() {
       // Update local state smoothly
       setPosts(prev => prev.map(p => {
         if (p.content_id === post.content_id) {
-          const isRejected = status === 'REJECTED'
-          const WARNING_TITLE = '⚠️ [Content Removed - Rejected Post]'
-          const WARNING_TEXT = `This post content was removed from public view due to a violation of community guidelines.${finalReason ? ` Reason: ${finalReason}` : ''}`
-          const WARNING_IMAGE_URL = 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
-
-          const updatedTitle = isRejected ? WARNING_TITLE : (p.original_title || p.title)
-          const updatedContent = isRejected ? WARNING_TEXT : (p.original_content || p.content)
-          const updatedImages = isRejected ? [WARNING_IMAGE_URL] : (p.original_images && p.original_images.length > 0 ? p.original_images : p.images)
-
           return {
             ...p,
-            original_title: isRejected ? (p.original_title || p.title) : p.original_title,
-            original_content: isRejected ? (p.original_content || p.content) : p.original_content,
-            original_images: isRejected ? (p.original_images || p.images) : p.original_images,
-            title: updatedTitle,
-            content: updatedContent,
-            images: updatedImages,
-            cover_image: updatedImages[0] || null,
-            image_count: updatedImages.length,
             moderation_status: status,
             status: status,
             moderation_reason: finalReason,
@@ -648,6 +542,18 @@ export default function ContentModeration() {
             reviewed_by_admin: session?.admin ? {
               admin_id: session.admin.admin_id,
               full_name: session.admin.full_name || 'Admin',
+              email: session.admin.email
+            } : p.reviewed_by_admin
+          }
+        }
+        return p
+      }))
+
+      setShowRejectModal(false)
+      setRejectReason('')
+      setCustomReason('')
+      setSelectedPost(null)
+      setShowDetailsModal(false)
               email: session.admin.email
             } : p.reviewed_by_admin
           }
@@ -1000,17 +906,7 @@ export default function ContentModeration() {
 
                 {/* Images Display Area */}
                 <div className="card-media-section">
-                  {post.moderation_status === 'REJECTED' && !showOriginalMap[post.content_id] ? (
-                    <div className="warning-rejected-banner">
-                      <div className="warning-rejected-icon">
-                        <i className="bi bi-shield-x"></i>
-                      </div>
-                      <div className="warning-rejected-text">
-                        <span>⚠️ Image Content Removed</span>
-                        <small>Media hidden due to content rejection</small>
-                      </div>
-                    </div>
-                  ) : post.images && post.images.length > 0 ? (
+                  {post.images && post.images.length > 0 ? (
                     <div className="image-display-container">
                       {/* Image Layouts based on Count */}
                       {post.images.length === 1 && (
@@ -1117,21 +1013,10 @@ export default function ContentModeration() {
                     </div>
                   )}
 
-                  {post.moderation_status === 'REJECTED' && !showOriginalMap[post.content_id] ? (
-                    <>
-                      <h3 className="post-title-text text-danger">⚠️ [Content Removed - Rejected Post]</h3>
-                      <p className="post-excerpt text-muted">
-                        This post content was removed from public view due to a violation of community guidelines.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <h3 className="post-title-text">{post.title}</h3>
-                      <p className="post-excerpt">
-                        {post.content.length > 140 ? `${post.content.substring(0, 140)}...` : post.content}
-                      </p>
-                    </>
-                  )}
+                  <h3 className="post-title-text">{post.title}</h3>
+                  <p className="post-excerpt">
+                    {post.content.length > 140 ? `${post.content.substring(0, 140)}...` : post.content}
+                  </p>
 
                   {/* Rejection reason banner if rejected */}
                   {post.moderation_status === 'REJECTED' && (post.moderation_reason || post.rejection_reason || post.rejected_reason) && (
@@ -1141,16 +1026,6 @@ export default function ContentModeration() {
                         <strong>Reason for Rejection:</strong> {post.moderation_reason || post.rejection_reason || post.rejected_reason}
                       </div>
                     </div>
-                  )}
-
-                  {post.moderation_status === 'REJECTED' && (
-                    <button
-                      className={`btn-show-original ${showOriginalMap[post.content_id] ? 'active' : ''}`}
-                      onClick={(e) => { e.stopPropagation(); toggleShowOriginal(post.content_id); }}
-                    >
-                      <i className={`bi ${showOriginalMap[post.content_id] ? 'bi-eye-slash' : 'bi-eye'}`}></i>
-                      <span>{showOriginalMap[post.content_id] ? 'Hide Original Content' : 'View Original Content'}</span>
-                    </button>
                   )}
                 </div>
 
@@ -1227,35 +1102,29 @@ export default function ContentModeration() {
 
             <div className="modal-scroll-content">
               {/* Image Gallery Showcase in Modal */}
-              {selectedPost.moderation_status === 'REJECTED' && !showOriginalMap[selectedPost.content_id] ? (
-                <div className="modal-warning-image-banner">
-                  <div className="warning-big-icon"><i className="bi bi-shield-x"></i></div>
-                  <h3>⚠️ Image Content Removed</h3>
-                  <p>Media has been hidden because this post was rejected by content moderation.</p>
-                </div>
-              ) : (showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images) && (showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images).length > 0 ? (
+              {selectedPost.images && selectedPost.images.length > 0 ? (
                 <div className="modal-gallery-block">
                   <div className="active-modal-image-view">
                     <img
-                      src={(showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images)[modalActiveImageIndex] || selectedPost.images[0]}
+                      src={selectedPost.images[modalActiveImageIndex] || selectedPost.images[0]}
                       alt="Selected preview"
                       onError={handleImageError}
-                      onClick={() => openLightbox((showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images), modalActiveImageIndex)}
+                      onClick={() => openLightbox(selectedPost.images, modalActiveImageIndex)}
                     />
                     <button
                       className="expand-image-btn"
-                      onClick={() => openLightbox((showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images), modalActiveImageIndex)}
+                      onClick={() => openLightbox(selectedPost.images, modalActiveImageIndex)}
                     >
                       <i className="bi bi-arrows-angle-expand"></i> Zoom Fullscreen
                     </button>
                     <div className="image-counter-tag">
-                      Photo {modalActiveImageIndex + 1} of {(showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images).length}
+                      Photo {modalActiveImageIndex + 1} of {selectedPost.images.length}
                     </div>
                   </div>
 
-                  {(showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images).length > 1 && (
+                  {selectedPost.images.length > 1 && (
                     <div className="modal-thumbnails-strip">
-                      {(showOriginalMap[selectedPost.content_id] && selectedPost.original_images ? selectedPost.original_images : selectedPost.images).map((imgUrl, idx) => (
+                      {selectedPost.images.map((imgUrl, idx) => (
                         <div
                           key={idx}
                           className={`thumbnail-item ${idx === modalActiveImageIndex ? 'active' : ''}`}
@@ -1355,33 +1224,10 @@ export default function ContentModeration() {
                   </div>
                 </div>
 
-                {selectedPost.moderation_status === 'REJECTED' && !showOriginalMap[selectedPost.content_id] ? (
-                  <div className="full-post-body warning-body">
-                    <h2 className="full-title text-danger">⚠️ [Content Removed - Rejected Post]</h2>
-                    <div className="full-text text-muted">
-                      This post text content was removed from public view following administrative rejection for violating community policies.
-                    </div>
-                    <button
-                      className="btn-show-original"
-                      onClick={() => toggleShowOriginal(selectedPost.content_id)}
-                    >
-                      <i className="bi bi-eye"></i> View Original Content (Admin Only)
-                    </button>
-                  </div>
-                ) : (
-                  <div className="full-post-body">
-                    <h2 className="full-title">{showOriginalMap[selectedPost.content_id] && selectedPost.original_title ? selectedPost.original_title : selectedPost.title}</h2>
-                    <div className="full-text">{showOriginalMap[selectedPost.content_id] && selectedPost.original_content ? selectedPost.original_content : selectedPost.content}</div>
-                    {selectedPost.moderation_status === 'REJECTED' && (
-                      <button
-                        className="btn-show-original active"
-                        onClick={() => toggleShowOriginal(selectedPost.content_id)}
-                      >
-                        <i className="bi bi-eye-slash"></i> Hide Original Content
-                      </button>
-                    )}
-                  </div>
-                )}
+                <div className="full-post-body">
+                  <h2 className="full-title">{selectedPost.title}</h2>
+                  <div className="full-text">{selectedPost.content}</div>
+                </div>
               </div>
 
               {/* Moderation History */}
