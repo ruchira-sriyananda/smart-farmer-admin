@@ -477,7 +477,6 @@ export default function ContentModeration() {
       // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed
       const postsUpdatePayload = {
         status: status,
-        rejection_reason: status === 'REJECTED' ? finalReason : null,
         ...(status === 'REJECTED' ? {
           title: `⚠️ Rejected: ${finalReason}`,
           content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
