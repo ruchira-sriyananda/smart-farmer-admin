@@ -481,7 +481,6 @@ export default function ContentModeration() {
         ...(status === 'REJECTED' ? {
           title: `⚠️ Rejected: ${finalReason}`,
           content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
-          description: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
           image_url: warningImage
         } : {}),
         updated_at: new Date().toISOString()
