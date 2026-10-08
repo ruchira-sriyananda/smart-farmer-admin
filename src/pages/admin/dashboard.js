@@ -907,7 +907,9 @@ export default function AdminDashboard() {
                   )}
                   <div className="post-card-content">
                     <h6>{post.title}</h6>
-                    <p>{post.content?.substring(0, 80)}...</p>
+                    {post.content && post.content.trim().toLowerCase() !== post.title?.trim().toLowerCase() && (
+                      <p>{post.content?.substring(0, 80)}...</p>
+                    )}
                     <div className="post-card-meta">
                       <span><i className="bi bi-person-circle"></i> {post.author_name}</span>
                       <span><i className="bi bi-calendar3"></i> {new Date(post.created_at).toLocaleDateString()}</span>

@@ -1002,9 +1002,11 @@ export default function ContentModeration() {
                   )}
 
                   <h3 className="post-title-text">{post.title}</h3>
-                  <p className="post-excerpt">
-                    {post.content.length > 140 ? `${post.content.substring(0, 140)}...` : post.content}
-                  </p>
+                  {post.content && post.content.trim().toLowerCase() !== post.title?.trim().toLowerCase() && (
+                    <p className="post-excerpt">
+                      {post.content.length > 140 ? `${post.content.substring(0, 140)}...` : post.content}
+                    </p>
+                  )}
 
                   {/* Rejection reason banner if rejected */}
                   {post.moderation_status === 'REJECTED' && (post.moderation_reason || post.rejection_reason || post.rejected_reason) && (
@@ -1214,7 +1216,9 @@ export default function ContentModeration() {
 
                 <div className="full-post-body">
                   <h2 className="full-title">{selectedPost.title}</h2>
-                  <div className="full-text">{selectedPost.content}</div>
+                  {selectedPost.content && selectedPost.content.trim().toLowerCase() !== selectedPost.title?.trim().toLowerCase() && (
+                    <div className="full-text">{selectedPost.content}</div>
+                  )}
                 </div>
               </div>
 
