@@ -470,57 +470,38 @@ export default function ContentModeration() {
 
       if (resultError) throw resultError
 
-      // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed,
-      // 2. ALSO update the posts table status and moderation reason
-      try {
-        const postsUpdatePayload = {
-          status: status,
-          moderation_status: status,
-          rejection_reason: status === 'REJECTED' ? finalReason : null,
-          rejected_reason: status === 'REJECTED' ? finalReason : null,
-          moderation_reason: status === 'REJECTED' ? finalReason : null,
-          ...(status === 'REJECTED' ? {
-            title: '⚠️ [Content Removed - Rejected Post]',
-            content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
-            image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
-          } : {}),
-          updated_at: new Date().toISOString()
-        }
+      // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed
+      const postsUpdatePayload = {
+        status: status,
+        moderation_status: status,
+        rejection_reason: status === 'REJECTED' ? finalReason : null,
+        rejected_reason: status === 'REJECTED' ? finalReason : null,
+        moderation_reason: status === 'REJECTED' ? finalReason : null,
+        ...(status === 'REJECTED' ? {
+          title: '⚠️ [Content Removed - Rejected Post]',
+          content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+          image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
+        } : {}),
+        updated_at: new Date().toISOString()
+      }
 
-        const { error: postErr } = await supabase
-          .from('posts')
-          .update(postsUpdatePayload)
-          .eq('post_id', post.content_id)
+      const { error: postErr } = await supabase
+        .from('posts')
+        .update(postsUpdatePayload)
+        .eq('post_id', post.content_id)
 
-        if (postErr) {
-          console.warn('Posts table update warning, attempting subset update:', postErr.message)
-          await supabase
-            .from('posts')
-            .update({
-              status: status,
-              rejection_reason: status === 'REJECTED' ? finalReason : null,
-              ...(status === 'REJECTED' ? {
-                title: '⚠️ [Content Removed - Rejected Post]',
-                content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`
-              } : {})
-            })
-            .eq('post_id', post.content_id)
-        }
+      if (postErr) throw postErr
 
-        if (status === 'REJECTED') {
-          try {
-            await supabase.from('post_images').delete().eq('post_id', post.content_id)
-            await supabase.from('post_images').insert({
-              post_id: post.content_id,
-              image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed',
-              image_order: 1
-            })
-          } catch (imgErr) {
-            console.warn('Failed to update post_images table with warning image:', imgErr.message)
-          }
-        }
-      } catch (pErr) {
-        console.warn('Failed to update posts table directly:', pErr.message)
+      if (status === 'REJECTED') {
+        const { error: imgDelErr } = await supabase.from('post_images').delete().eq('post_id', post.content_id)
+        if (imgDelErr) throw imgDelErr
+
+        const { error: imgInsErr } = await supabase.from('post_images').insert({
+          post_id: post.content_id,
+          image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed',
+          image_order: 1
+        })
+        if (imgInsErr) throw imgInsErr
       }
 
       // 3. Insert notification for the mobile user if rejected
