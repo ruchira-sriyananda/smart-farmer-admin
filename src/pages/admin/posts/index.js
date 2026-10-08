@@ -470,15 +470,19 @@ export default function ContentModeration() {
 
       if (resultError) throw resultError
 
+      const warningImage = status === 'REJECTED' && finalReason
+        ? `https://placehold.co/600x400/fee2e2/dc2626?text=${encodeURIComponent(finalReason)}`
+        : 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
+
       // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed
       const postsUpdatePayload = {
         status: status,
         rejection_reason: status === 'REJECTED' ? finalReason : null,
         ...(status === 'REJECTED' ? {
-          title: '⚠️ [Content Removed - Rejected Post]',
+          title: `⚠️ Rejected: ${finalReason}`,
           content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
           description: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
-          image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
+          image_url: warningImage
         } : {}),
         updated_at: new Date().toISOString()
       }
@@ -496,7 +500,7 @@ export default function ContentModeration() {
 
         const { error: imgInsErr } = await supabase.from('post_images').insert({
           post_id: post.content_id,
-          image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed',
+          image_url: warningImage,
           image_order: 1
         })
         if (imgInsErr) throw imgInsErr
@@ -536,9 +540,9 @@ export default function ContentModeration() {
       // Update local state smoothly
       setPosts(prev => prev.map(p => {
         if (p.content_id === post.content_id) {
-          const newTitle = status === 'REJECTED' ? '⚠️ [Content Removed - Rejected Post]' : p.title
+          const newTitle = status === 'REJECTED' ? `⚠️ Rejected: ${finalReason}` : p.title
           const newContent = status === 'REJECTED' ? `This post has been removed from public view due to a violation. Reason: ${finalReason}` : p.content
-          const newImages = status === 'REJECTED' ? ['https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'] : p.images
+          const newImages = status === 'REJECTED' ? [warningImage] : p.images
           return {
             ...p,
             moderation_status: status,
