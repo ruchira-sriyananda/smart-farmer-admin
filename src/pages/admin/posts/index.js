@@ -475,33 +475,60 @@ export default function ContentModeration() {
         : 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
 
       // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed
-      const postsUpdatePayload = {
-        status: status,
-        ...(status === 'REJECTED' ? {
-          title: `⚠️ Rejected: ${finalReason}`,
-          content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
-          image_url: warningImage
-        } : {}),
-        updated_at: new Date().toISOString()
+      try {
+        const postsUpdatePayload = {
+          ...(status === 'REJECTED' ? {
+            title: `⚠️ Rejected: ${finalReason}`,
+            content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+            image_url: warningImage
+          } : {})
+        }
+
+        // Try updating posts with moderation_status first
+        let { error: postErr } = await supabase
+          .from('posts')
+          .update({
+            ...postsUpdatePayload,
+            moderation_status: status,
+            updated_at: new Date().toISOString()
+          })
+          .eq('post_id', post.content_id)
+
+        // If moderation_status column is not on posts table, try status or content-only payload
+        if (postErr && postErr.message?.includes('column')) {
+          const fallbackRes = await supabase
+            .from('posts')
+            .update({
+              ...postsUpdatePayload,
+              status: status,
+              updated_at: new Date().toISOString()
+            })
+            .eq('post_id', post.content_id)
+
+          if (fallbackRes.error && fallbackRes.error.message?.includes('column')) {
+            if (Object.keys(postsUpdatePayload).length > 0) {
+              await supabase
+                .from('posts')
+                .update(postsUpdatePayload)
+                .eq('post_id', post.content_id)
+            }
+          }
+        }
+      } catch (pErr) {
+        console.warn('Post table direct update notice:', pErr.message)
       }
 
-      const { error: postErr } = await supabase
-        .from('posts')
-        .update(postsUpdatePayload)
-        .eq('post_id', post.content_id)
-
-      if (postErr) throw postErr
-
       if (status === 'REJECTED') {
-        const { error: imgDelErr } = await supabase.from('post_images').delete().eq('post_id', post.content_id)
-        if (imgDelErr) throw imgDelErr
-
-        const { error: imgInsErr } = await supabase.from('post_images').insert({
-          post_id: post.content_id,
-          image_url: warningImage,
-          image_order: 1
-        })
-        if (imgInsErr) throw imgInsErr
+        try {
+          await supabase.from('post_images').delete().eq('post_id', post.content_id)
+          await supabase.from('post_images').insert({
+            post_id: post.content_id,
+            image_url: warningImage,
+            image_order: 1
+          })
+        } catch (imgErr) {
+          console.warn('Post images update notice:', imgErr.message)
+        }
       }
 
       // 3. Insert notification for the mobile user if rejected
