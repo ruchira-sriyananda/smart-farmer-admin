@@ -554,18 +554,6 @@ export default function ContentModeration() {
       setCustomReason('')
       setSelectedPost(null)
       setShowDetailsModal(false)
-              email: session.admin.email
-            } : p.reviewed_by_admin
-          }
-        }
-        return p
-      }))
-
-      setShowRejectModal(false)
-      setRejectReason('')
-      setCustomReason('')
-      setSelectedPost(null)
-      setShowDetailsModal(false)
     } catch (err) {
       console.error('Error updating status:', err)
       showToast(`Failed to update status: ${err.message}`, 'error')
