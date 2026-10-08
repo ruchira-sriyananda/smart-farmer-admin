@@ -340,15 +340,19 @@ export default function ContentModeration() {
         let postTitle = post.title || 'Untitled Post'
         let postContent = post.content || 'No content provided'
 
-        // Fallback cleanup if previously stored with warning title/text in DB
-        if (postTitle === '⚠️ [Content Removed - Rejected Post]') {
-          postTitle = 'Untitled Post'
-        }
-        if (typeof postContent === 'string' && postContent.includes('removed from public view due to a violation')) {
-          postContent = 'No content provided'
+        // Only cleanup if NOT rejected
+        if (effectiveStatus !== 'REJECTED') {
+          if (postTitle === '⚠️ [Content Removed - Rejected Post]') {
+            postTitle = 'Untitled Post'
+          }
+          if (typeof postContent === 'string' && postContent.includes('removed from public view due to a violation')) {
+            postContent = 'No content provided'
+          }
         }
 
-        const finalImages = imagesList.filter(img => !img.includes('fee2e2/dc2626?text=Content+Removed'))
+        const finalImages = effectiveStatus === 'REJECTED'
+          ? (imagesList.length > 0 ? imagesList : ['https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'])
+          : imagesList.filter(img => !img.includes('fee2e2/dc2626?text=Content+Removed'))
 
         return {
           ...modObj,
@@ -475,6 +479,11 @@ export default function ContentModeration() {
           rejection_reason: status === 'REJECTED' ? finalReason : null,
           rejected_reason: status === 'REJECTED' ? finalReason : null,
           moderation_reason: status === 'REJECTED' ? finalReason : null,
+          ...(status === 'REJECTED' ? {
+            title: '⚠️ [Content Removed - Rejected Post]',
+            content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+            image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
+          } : {}),
           updated_at: new Date().toISOString()
         }
 
@@ -489,9 +498,26 @@ export default function ContentModeration() {
             .from('posts')
             .update({
               status: status,
-              rejection_reason: status === 'REJECTED' ? finalReason : null
+              rejection_reason: status === 'REJECTED' ? finalReason : null,
+              ...(status === 'REJECTED' ? {
+                title: '⚠️ [Content Removed - Rejected Post]',
+                content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`
+              } : {})
             })
             .eq('post_id', post.content_id)
+        }
+
+        if (status === 'REJECTED') {
+          try {
+            await supabase.from('post_images').delete().eq('post_id', post.content_id)
+            await supabase.from('post_images').insert({
+              post_id: post.content_id,
+              image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed',
+              image_order: 1
+            })
+          } catch (imgErr) {
+            console.warn('Failed to update post_images table with warning image:', imgErr.message)
+          }
         }
       } catch (pErr) {
         console.warn('Failed to update posts table directly:', pErr.message)
@@ -531,6 +557,9 @@ export default function ContentModeration() {
       // Update local state smoothly
       setPosts(prev => prev.map(p => {
         if (p.content_id === post.content_id) {
+          const newTitle = status === 'REJECTED' ? '⚠️ [Content Removed - Rejected Post]' : p.title
+          const newContent = status === 'REJECTED' ? `This post has been removed from public view due to a violation. Reason: ${finalReason}` : p.content
+          const newImages = status === 'REJECTED' ? ['https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'] : p.images
           return {
             ...p,
             moderation_status: status,
@@ -538,6 +567,11 @@ export default function ContentModeration() {
             moderation_reason: finalReason,
             rejection_reason: finalReason,
             rejected_reason: finalReason,
+            title: newTitle,
+            content: newContent,
+            images: newImages,
+            image_count: newImages.length,
+            cover_image: newImages[0] || null,
             reviewed_at: new Date().toISOString(),
             reviewed_by_admin: session?.admin ? {
               admin_id: session.admin.admin_id,
