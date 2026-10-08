@@ -473,13 +473,11 @@ export default function ContentModeration() {
       // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed
       const postsUpdatePayload = {
         status: status,
-        moderation_status: status,
         rejection_reason: status === 'REJECTED' ? finalReason : null,
-        rejected_reason: status === 'REJECTED' ? finalReason : null,
-        moderation_reason: status === 'REJECTED' ? finalReason : null,
         ...(status === 'REJECTED' ? {
           title: '⚠️ [Content Removed - Rejected Post]',
           content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+          description: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
           image_url: 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
         } : {}),
         updated_at: new Date().toISOString()
