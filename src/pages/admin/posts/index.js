@@ -474,37 +474,66 @@ export default function ContentModeration() {
         ? `https://placehold.co/600x400/fee2e2/dc2626?text=${encodeURIComponent(finalReason)}`
         : 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
 
-      // 2. If rejected, update post title/content/image on posts table so mobile feed replaces rejected post text (do NOT update status column on posts table)
+      // 2. If rejected, update post title, content, and image on posts table and post_images table
       if (status === 'REJECTED') {
         try {
-          const postsUpdatePayload = {
-            title: `⚠️ Rejected: ${finalReason}`,
-            content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
-            image_url: warningImage,
-            updated_at: new Date().toISOString()
-          }
+          const possibleImagePayloads = [
+            { image_url: warningImage },
+            { image: warningImage },
+            { photo_url: warningImage },
+            { media_url: warningImage },
+            { content_image: warningImage },
+            { attachment_url: warningImage },
+            { images: JSON.stringify([warningImage]) },
+            { attachments: JSON.stringify([warningImage]) }
+          ]
 
+          // First try updating title, content, image_url, and updated_at
           let { error: postErr } = await supabase
             .from('posts')
-            .update(postsUpdatePayload)
+            .update({
+              title: `⚠️ Rejected: ${finalReason}`,
+              content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+              image_url: warningImage,
+              updated_at: new Date().toISOString()
+            })
             .eq('post_id', post.content_id)
 
-          // If updated_at or image_url column doesn't exist on posts table, fallback to title & content only
+          // If image_url or updated_at fails due to missing column, try other image column variations dynamically
           if (postErr && postErr.message?.includes('column')) {
-            await supabase
-              .from('posts')
-              .update({
-                title: `⚠️ Rejected: ${finalReason}`,
-                content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`
-              })
-              .eq('post_id', post.content_id)
+            let updatedSuccessfully = false
+            for (const imgPayload of possibleImagePayloads) {
+              const res = await supabase
+                .from('posts')
+                .update({
+                  title: `⚠️ Rejected: ${finalReason}`,
+                  content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+                  ...imgPayload
+                })
+                .eq('post_id', post.content_id)
+
+              if (!res.error) {
+                updatedSuccessfully = true
+                break
+              }
+            }
+
+            if (!updatedSuccessfully) {
+              // Fallback to title and content only
+              await supabase
+                .from('posts')
+                .update({
+                  title: `⚠️ Rejected: ${finalReason}`,
+                  content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`
+                })
+                .eq('post_id', post.content_id)
+            }
           }
         } catch (pErr) {
-          console.warn('Post table text update notice:', pErr.message)
+          console.warn('Post table text and image update notice:', pErr.message)
         }
-      }
 
-      if (status === 'REJECTED') {
+        // Also update post_images table so image list reflects the rejection banner
         try {
           await supabase.from('post_images').delete().eq('post_id', post.content_id)
           await supabase.from('post_images').insert({
