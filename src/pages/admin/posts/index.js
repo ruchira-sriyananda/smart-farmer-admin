@@ -474,48 +474,34 @@ export default function ContentModeration() {
         ? `https://placehold.co/600x400/fee2e2/dc2626?text=${encodeURIComponent(finalReason)}`
         : 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
 
-      // 2. ALSO update the posts table directly so mobile users cannot see rejected posts in feed
-      try {
-        const postsUpdatePayload = {
-          ...(status === 'REJECTED' ? {
+      // 2. If rejected, update post title/content/image on posts table so mobile feed replaces rejected post text (do NOT update status column on posts table)
+      if (status === 'REJECTED') {
+        try {
+          const postsUpdatePayload = {
             title: `⚠️ Rejected: ${finalReason}`,
             content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
-            image_url: warningImage
-          } : {})
-        }
-
-        // Try updating posts with moderation_status first
-        let { error: postErr } = await supabase
-          .from('posts')
-          .update({
-            ...postsUpdatePayload,
-            moderation_status: status,
+            image_url: warningImage,
             updated_at: new Date().toISOString()
-          })
-          .eq('post_id', post.content_id)
+          }
 
-        // If moderation_status column is not on posts table, try status or content-only payload
-        if (postErr && postErr.message?.includes('column')) {
-          const fallbackRes = await supabase
+          let { error: postErr } = await supabase
             .from('posts')
-            .update({
-              ...postsUpdatePayload,
-              status: status,
-              updated_at: new Date().toISOString()
-            })
+            .update(postsUpdatePayload)
             .eq('post_id', post.content_id)
 
-          if (fallbackRes.error && fallbackRes.error.message?.includes('column')) {
-            if (Object.keys(postsUpdatePayload).length > 0) {
-              await supabase
-                .from('posts')
-                .update(postsUpdatePayload)
-                .eq('post_id', post.content_id)
-            }
+          // If updated_at or image_url column doesn't exist on posts table, fallback to title & content only
+          if (postErr && postErr.message?.includes('column')) {
+            await supabase
+              .from('posts')
+              .update({
+                title: `⚠️ Rejected: ${finalReason}`,
+                content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`
+              })
+              .eq('post_id', post.content_id)
           }
+        } catch (pErr) {
+          console.warn('Post table text update notice:', pErr.message)
         }
-      } catch (pErr) {
-        console.warn('Post table direct update notice:', pErr.message)
       }
 
       if (status === 'REJECTED') {
