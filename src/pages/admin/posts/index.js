@@ -470,30 +470,79 @@ export default function ContentModeration() {
 
       if (resultError) throw resultError
 
-      // 2. If rejected, update post title and content on posts table (preserve original image URLs in posts and post_images so mobile apps can load images)
+      const warningImage = status === 'REJECTED' && finalReason
+        ? `https://placehold.co/600x400/fee2e2/dc2626?text=${encodeURIComponent(finalReason)}`
+        : 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
+
+      // 2. If rejected, update post title, content, and image on posts table and post_images table with warning image
       if (status === 'REJECTED') {
         try {
+          const possibleImagePayloads = [
+            { image_url: warningImage },
+            { image: warningImage },
+            { photo_url: warningImage },
+            { media_url: warningImage },
+            { content_image: warningImage },
+            { attachment_url: warningImage },
+            { images: JSON.stringify([warningImage]) },
+            { attachments: JSON.stringify([warningImage]) }
+          ]
+
+          // First try updating title, content, image_url, and updated_at
           let { error: postErr } = await supabase
             .from('posts')
             .update({
               title: `⚠️ Rejected: ${finalReason}`,
               content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+              image_url: warningImage,
               updated_at: new Date().toISOString()
             })
             .eq('post_id', post.content_id)
 
-          // If updated_at column is missing on posts table, fallback to title and content
+          // If image_url or updated_at fails due to missing column, try other image column variations dynamically
           if (postErr && postErr.message?.includes('column')) {
-            await supabase
-              .from('posts')
-              .update({
-                title: `⚠️ Rejected: ${finalReason}`,
-                content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`
-              })
-              .eq('post_id', post.content_id)
+            let updatedSuccessfully = false
+            for (const imgPayload of possibleImagePayloads) {
+              const res = await supabase
+                .from('posts')
+                .update({
+                  title: `⚠️ Rejected: ${finalReason}`,
+                  content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+                  ...imgPayload
+                })
+                .eq('post_id', post.content_id)
+
+              if (!res.error) {
+                updatedSuccessfully = true
+                break
+              }
+            }
+
+            if (!updatedSuccessfully) {
+              // Fallback to title and content
+              await supabase
+                .from('posts')
+                .update({
+                  title: `⚠️ Rejected: ${finalReason}`,
+                  content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`
+                })
+                .eq('post_id', post.content_id)
+            }
           }
         } catch (pErr) {
-          console.warn('Post table text update notice:', pErr.message)
+          console.warn('Post table text and image update notice:', pErr.message)
+        }
+
+        // Also update post_images table with warning image
+        try {
+          await supabase.from('post_images').delete().eq('post_id', post.content_id)
+          await supabase.from('post_images').insert({
+            post_id: post.content_id,
+            image_url: warningImage,
+            image_order: 1
+          })
+        } catch (imgErr) {
+          console.warn('Post images update notice:', imgErr.message)
         }
       }
 
@@ -542,7 +591,7 @@ export default function ContentModeration() {
         if (p.content_id === post.content_id) {
           const newTitle = status === 'REJECTED' ? `⚠️ Rejected: ${finalReason}` : p.title
           const newContent = status === 'REJECTED' ? `This post has been removed from public view due to a violation. Reason: ${finalReason}` : p.content
-          const currentImages = p.images || []
+          const currentImages = status === 'REJECTED' ? [warningImage] : (p.images || [])
           return {
             ...p,
             moderation_status: status,
