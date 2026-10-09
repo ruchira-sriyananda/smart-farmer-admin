@@ -500,17 +500,26 @@ export default function ContentModeration() {
       // 3. Insert notification for the mobile user if rejected
       if (status === 'REJECTED' && post.user_id) {
         try {
-          await supabase
+          const notificationPayload = {
+            user_id: post.user_id,
+            title: 'Post Rejected',
+            message: `Your post "${post.title}" was rejected. Reason: ${finalReason}`,
+            created_at: new Date().toISOString()
+          }
+
+          const { error: notifErr } = await supabase
             .from('notifications')
             .insert({
-              user_id: post.user_id,
-              title: 'Post Rejected',
-              message: `Your post "${post.title}" was rejected. Reason: ${finalReason}`,
+              ...notificationPayload,
               type: 'POST_REJECTED',
               related_id: post.content_id,
-              is_read: false,
-              created_at: new Date().toISOString()
+              is_read: false
             })
+
+          if (notifErr) {
+            // Fallback for notifications tables with simpler schema
+            await supabase.from('notifications').insert(notificationPayload)
+          }
         } catch (notifErr) {
           console.warn('User notification insert warning:', notifErr.message)
         }
@@ -533,6 +542,7 @@ export default function ContentModeration() {
         if (p.content_id === post.content_id) {
           const newTitle = status === 'REJECTED' ? `⚠️ Rejected: ${finalReason}` : p.title
           const newContent = status === 'REJECTED' ? `This post has been removed from public view due to a violation. Reason: ${finalReason}` : p.content
+          const currentImages = p.images || []
           return {
             ...p,
             moderation_status: status,
@@ -542,9 +552,9 @@ export default function ContentModeration() {
             rejected_reason: finalReason,
             title: newTitle,
             content: newContent,
-            images: newImages,
-            image_count: newImages.length,
-            cover_image: newImages[0] || null,
+            images: currentImages,
+            image_count: currentImages.length,
+            cover_image: currentImages[0] || null,
             reviewed_at: new Date().toISOString(),
             reviewed_by_admin: session?.admin ? {
               admin_id: session.admin.admin_id,

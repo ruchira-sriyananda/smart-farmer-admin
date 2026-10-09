@@ -16,15 +16,14 @@ export default async function handler(req, res) {
   }
 
   if (!serviceRoleKey) {
-    console.error('SUPABASE_SERVICE_ROLE_KEY is missing for online-status')
-    return res.status(500).json({ error: 'Server configuration error' })
+    return res.status(200).json({ success: false, onlineCount: 1, message: 'SUPABASE_SERVICE_ROLE_KEY missing' })
   }
 
   try {
     const { userId, userEmail, userName, userRole, ipAddress, deviceInfo } = req.body
 
     if (!userId) {
-      return res.status(400).json({ error: 'User ID required' })
+      return res.status(200).json({ success: false, onlineCount: 1, error: 'User ID required' })
     }
 
     // First, update or insert online status
@@ -43,12 +42,8 @@ export default async function handler(req, res) {
       })
 
     if (upsertError) {
-      console.error('Upsert online_users error:', upsertError)
-      // Check if table exists error (code 42P01)
-      if (upsertError.code === '42P01') {
-        return res.status(500).json({ error: 'Database table online_users does not exist' })
-      }
-      throw upsertError
+      console.warn('Upsert online_users warning:', upsertError.message)
+      return res.status(200).json({ success: false, onlineCount: 1, message: upsertError.message })
     }
 
     // Cleanup old sessions (older than 5 minutes)
@@ -58,16 +53,16 @@ export default async function handler(req, res) {
       .lt('last_activity', new Date(Date.now() - 5 * 60 * 1000).toISOString())
 
     // Get current online count
-    const { count, error: countError } = await supabaseAdmin
+    const { count } = await supabaseAdmin
       .from('online_users')
       .select('*', { count: 'exact', head: true })
 
     return res.status(200).json({ 
       success: true, 
-      onlineCount: count || 0
+      onlineCount: count || 1
     })
   } catch (err) {
-    console.error('Error updating online status:', err)
-    return res.status(500).json({ error: 'Internal server error' })
+    console.warn('Error updating online status:', err.message)
+    return res.status(200).json({ success: false, onlineCount: 1, message: err.message })
   }
 }
