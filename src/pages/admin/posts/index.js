@@ -1043,14 +1043,14 @@ export default function ContentModeration() {
                   </button>
 
                   <div className="action-buttons-group">
-                    {post.moderation_status !== 'APPROVED' && (
+                    {post.moderation_status === 'PENDING' && (
                       <button
                         className="btn-action-approve"
                         onClick={() => handleApprove(post)}
                         disabled={actionLoading}
                       >
                         <i className="bi bi-check-lg"></i>
-                        <span>{post.moderation_status === 'REJECTED' ? 'Re-Approve' : 'Approve'}</span>
+                        <span>Approve</span>
                       </button>
                     )}
 
@@ -1258,7 +1258,7 @@ export default function ContentModeration() {
             {/* Modal Actions Footer */}
             <div className="modal-bottom-bar">
               <div className="modal-actions-left">
-                {selectedPost.moderation_status !== 'APPROVED' && (
+                {selectedPost.moderation_status === 'PENDING' && (
                   <button className="btn-modal-approve" onClick={() => handleApprove(selectedPost)} disabled={actionLoading}>
                     <i className="bi bi-check-lg"></i> Approve Post
                   </button>
