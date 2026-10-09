@@ -22,8 +22,6 @@ export default function ContentModeration() {
   const [customReason, setCustomReason] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
 
-
-
   // Details Modal image state
   const [modalActiveImageIndex, setModalActiveImageIndex] = useState(0)
 
@@ -40,19 +38,53 @@ export default function ContentModeration() {
     setTimeout(() => setToastMessage(null), 4000)
   }
 
-  // Handle post image fallback across multiple Supabase storage buckets
+  // ============================================
+  // IMAGE URL TECHNOLOGY - Core Functions
+  // ============================================
+
+  /**
+   * Get Supabase base URL (consistent across app)
+   */
+  const getSupabaseUrl = () => {
+    let url = (
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      'https://uhrolwwkxenvcefnessp.supabase.co'
+    ).trim()
+    if (url.endsWith('/')) {
+      url = url.slice(0, -1)
+    }
+    return url
+  }
+
+  /**
+   * Generate a warning image URL using the existing image URL technology.
+   * This creates a data URL that can be stored in the post_images table
+   * and will render consistently with the existing image fallback system.
+   */
+  const generateWarningImageUrl = (reason) => {
+    const encodedReason = encodeURIComponent(reason || 'Content Removed')
+    // Use placehold.co with the existing pattern for consistency
+    return `https://placehold.co/600x400/fee2e2/dc2626?text=${encodedReason}`
+  }
+
+  /**
+   * Resolve image URL using the existing technology.
+   * This is the same logic used for all post images.
+   */
+  const resolvePostImageUrl = (rawUrl, bucket = 'post-images') => {
+    return resolveImageUrl(rawUrl, bucket)
+  }
+
+  /**
+   * Handle post image fallback across multiple Supabase storage buckets.
+   * This is the existing technology for all post images.
+   */
   const handleImageError = (e) => {
     const target = e.target
     const currentSrc = target.src
     const fallbackBuckets = ['post-images', 'posts', 'barter-images', 'listings', 'images', 'public']
 
-    let supabaseUrl = (
-      process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      'https://uhrolwwkxenvcefnessp.supabase.co'
-    ).trim()
-    if (supabaseUrl.endsWith('/')) {
-      supabaseUrl = supabaseUrl.slice(0, -1)
-    }
+    let supabaseUrl = getSupabaseUrl()
 
     const triedStr = target.getAttribute('data-tried') || ''
     const triedBuckets = triedStr ? triedStr.split(',') : []
@@ -79,19 +111,15 @@ export default function ContentModeration() {
     target.src = 'https://placehold.co/600x400/f1f5f9/64748b?text=Image+Unavailable'
   }
 
-  // Handle profile image fallback
+  /**
+   * Handle profile image fallback.
+   */
   const handleAvatarError = (e) => {
     const target = e.target
     const currentSrc = target.src
     const avatarBuckets = ['profile-images', 'profiles', 'avatars', 'public']
 
-    let supabaseUrl = (
-      process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      'https://uhrolwwkxenvcefnessp.supabase.co'
-    ).trim()
-    if (supabaseUrl.endsWith('/')) {
-      supabaseUrl = supabaseUrl.slice(0, -1)
-    }
+    let supabaseUrl = getSupabaseUrl()
 
     const triedStr = target.getAttribute('data-tried') || ''
     const triedBuckets = triedStr ? triedStr.split(',') : []
@@ -119,6 +147,16 @@ export default function ContentModeration() {
       target.nextSibling.style.display = 'flex'
     }
   }
+
+  /**
+   * Check if a URL is a warning/rejection placeholder image
+   */
+  const isWarningImageUrl = (url) => {
+    if (!url) return false
+    return url.includes('fee2e2/dc2626?text=') || url.includes('Content+Removed') || url.includes('Content%20Removed')
+  }
+
+  // ============================================
 
   const quickReasons = [
     { id: 1, reason: 'Inappropriate or explicit content', icon: 'bi-shield-slash-fill', color: '#ef4444' },
@@ -237,7 +275,8 @@ export default function ContentModeration() {
             if (!postImagesMap[img.post_id]) postImagesMap[img.post_id] = []
             const rawUrl = img.image_url || img.url || img.path || img.photo_url || img.image_path || img.file_path || img.src || img.uri
             if (rawUrl) {
-              const url = resolveImageUrl(rawUrl, 'post-images')
+              // Use the existing image URL technology
+              const url = resolvePostImageUrl(rawUrl, 'post-images')
               if (url && !postImagesMap[img.post_id].includes(url)) {
                 postImagesMap[img.post_id].push(url)
               }
@@ -271,27 +310,27 @@ export default function ContentModeration() {
         let imagesList = postImagesMap[post.post_id] ? [...postImagesMap[post.post_id]] : []
 
         if (post.image_url) {
-          const url = resolveImageUrl(post.image_url, 'post-images')
+          const url = resolvePostImageUrl(post.image_url, 'post-images')
           if (url && !imagesList.includes(url)) imagesList.push(url)
         }
         if (post.image) {
-          const url = resolveImageUrl(post.image, 'post-images')
+          const url = resolvePostImageUrl(post.image, 'post-images')
           if (url && !imagesList.includes(url)) imagesList.push(url)
         }
         if (post.photo_url) {
-          const url = resolveImageUrl(post.photo_url, 'post-images')
+          const url = resolvePostImageUrl(post.photo_url, 'post-images')
           if (url && !imagesList.includes(url)) imagesList.push(url)
         }
         if (post.attachment_url) {
-          const url = resolveImageUrl(post.attachment_url, 'post-images')
+          const url = resolvePostImageUrl(post.attachment_url, 'post-images')
           if (url && !imagesList.includes(url)) imagesList.push(url)
         }
         if (post.media_url) {
-          const url = resolveImageUrl(post.media_url, 'post-images')
+          const url = resolvePostImageUrl(post.media_url, 'post-images')
           if (url && !imagesList.includes(url)) imagesList.push(url)
         }
         if (post.content_image) {
-          const url = resolveImageUrl(post.content_image, 'post-images')
+          const url = resolvePostImageUrl(post.content_image, 'post-images')
           if (url && !imagesList.includes(url)) imagesList.push(url)
         }
 
@@ -309,7 +348,7 @@ export default function ContentModeration() {
           }
           parsedAttachments.forEach(att => {
             if (att) {
-              const url = resolveImageUrl(typeof att === 'string' ? att : att.url || att.image_url || att.path, 'post-images')
+              const url = resolvePostImageUrl(typeof att === 'string' ? att : att.url || att.image_url || att.path, 'post-images')
               if (url && !imagesList.includes(url)) imagesList.push(url)
             }
           })
@@ -330,7 +369,7 @@ export default function ContentModeration() {
           }
           parsedImages.forEach(img => {
             if (img) {
-              const url = resolveImageUrl(typeof img === 'string' ? img : img.image_url || img.url, 'post-images')
+              const url = resolvePostImageUrl(typeof img === 'string' ? img : img.image_url || img.url, 'post-images')
               if (url && !imagesList.includes(url)) imagesList.push(url)
             }
           })
@@ -351,8 +390,8 @@ export default function ContentModeration() {
         }
 
         const finalImages = effectiveStatus === 'REJECTED'
-          ? (imagesList.length > 0 ? imagesList : ['https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'])
-          : imagesList.filter(img => !img.includes('fee2e2/dc2626?text=Content+Removed'))
+          ? (imagesList.length > 0 ? imagesList : [generateWarningImageUrl(effectiveReason)])
+          : imagesList.filter(img => !isWarningImageUrl(img))
 
         return {
           ...modObj,
@@ -436,7 +475,9 @@ export default function ContentModeration() {
     })
   }, [posts, filter, searchTerm, sortBy])
 
-  // Moderation status update
+  // ============================================
+  // MODERATION STATUS UPDATE - With Warning Image using Existing Technology
+  // ============================================
   const updateStatus = async (post, status, reason = null) => {
     setActionLoading(true)
     try {
@@ -470,37 +511,42 @@ export default function ContentModeration() {
 
       if (resultError) throw resultError
 
-      const warningImage = status === 'REJECTED' && finalReason
-        ? `https://placehold.co/600x400/fee2e2/dc2626?text=${encodeURIComponent(finalReason)}`
-        : 'https://placehold.co/600x400/fee2e2/dc2626?text=Content+Removed'
+      // Generate warning image URL using existing technology
+      const warningImageUrl = generateWarningImageUrl(finalReason)
 
-      // 2. If rejected, update post title, content, and image on posts table and post_images table with warning image
+      // 2. If rejected, update post title, content, and image using EXISTING IMAGE URL TECHNOLOGY
       if (status === 'REJECTED') {
         try {
-          const possibleImagePayloads = [
-            { image_url: warningImage },
-            { image: warningImage },
-            { photo_url: warningImage },
-            { media_url: warningImage },
-            { content_image: warningImage },
-            { attachment_url: warningImage },
-            { images: JSON.stringify([warningImage]) },
-            { attachments: JSON.stringify([warningImage]) }
-          ]
+          // Use the same image URL resolution technology as all other post images
+          // This ensures the warning image displays consistently with the existing system
 
-          // First try updating title, content, image_url, and updated_at
+          // First, try to update the posts table with the warning image
+          // Using the same column names that the existing code checks for
+          const postUpdatePayload = {
+            title: `⚠️ Rejected: ${finalReason}`,
+            content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
+            image_url: warningImageUrl,
+            updated_at: new Date().toISOString()
+          }
+
           let { error: postErr } = await supabase
             .from('posts')
-            .update({
-              title: `⚠️ Rejected: ${finalReason}`,
-              content: `This post has been removed from public view due to a violation. Reason: ${finalReason}`,
-              image_url: warningImage,
-              updated_at: new Date().toISOString()
-            })
+            .update(postUpdatePayload)
             .eq('post_id', post.content_id)
 
-          // If image_url or updated_at fails due to missing column, try other image column variations dynamically
+          // If image_url or updated_at fails due to missing column, try other image column variations
           if (postErr && postErr.message?.includes('column')) {
+            const possibleImagePayloads = [
+              { image_url: warningImageUrl },
+              { image: warningImageUrl },
+              { photo_url: warningImageUrl },
+              { media_url: warningImageUrl },
+              { content_image: warningImageUrl },
+              { attachment_url: warningImageUrl },
+              { images: JSON.stringify([warningImageUrl]) },
+              { attachments: JSON.stringify([warningImageUrl]) }
+            ]
+
             let updatedSuccessfully = false
             for (const imgPayload of possibleImagePayloads) {
               const res = await supabase
@@ -519,7 +565,7 @@ export default function ContentModeration() {
             }
 
             if (!updatedSuccessfully) {
-              // Fallback to title and content
+              // Fallback to title and content only
               await supabase
                 .from('posts')
                 .update({
@@ -533,20 +579,46 @@ export default function ContentModeration() {
           console.warn('Post table text and image update notice:', pErr.message)
         }
 
-        // Also update post_images table with warning image
+        // Update post_images table with warning image using EXISTING IMAGE URL TECHNOLOGY
         try {
+          // Delete existing images for this post
           await supabase.from('post_images').delete().eq('post_id', post.content_id)
-          await supabase.from('post_images').insert({
+
+          // Insert warning image using the same structure as regular post images
+          // This uses the existing image URL technology so it displays consistently
+          const { error: imgInsertErr } = await supabase.from('post_images').insert({
             post_id: post.content_id,
-            image_url: warningImage,
+            image_url: warningImageUrl,
             image_order: 1
           })
+
+          if (imgInsertErr) {
+            console.warn('Post images insert notice:', imgInsertErr.message)
+
+            // Try alternative column names that the existing system might use
+            const altInsertPayloads = [
+              { post_id: post.content_id, url: warningImageUrl, image_order: 1 },
+              { post_id: post.content_id, path: warningImageUrl, image_order: 1 },
+              { post_id: post.content_id, photo_url: warningImageUrl, image_order: 1 },
+              { post_id: post.content_id, image_path: warningImageUrl, image_order: 1 }
+            ]
+
+            for (const payload of altInsertPayloads) {
+              const res = await supabase.from('post_images').insert(payload)
+              if (!res.error) break
+            }
+          }
         } catch (imgErr) {
           console.warn('Post images update notice:', imgErr.message)
         }
       }
 
-      // 3. Insert notification for the mobile user if rejected
+      // 3. If approved, optionally restore original images (if they were replaced)
+      if (status === 'APPROVED') {
+        // No action needed - images remain as they are
+      }
+
+      // 4. Insert notification for the mobile user if rejected
       if (status === 'REJECTED' && post.user_id) {
         try {
           const notificationPayload = {
@@ -574,7 +646,7 @@ export default function ContentModeration() {
         }
       }
 
-      // 4. Log activity
+      // 5. Log activity
       if (session?.admin?.admin_id) {
         await safeLogActivity(
           session.admin.admin_id,
@@ -586,12 +658,15 @@ export default function ContentModeration() {
 
       showToast(`Content ${status.toLowerCase()} successfully!`, status === 'APPROVED' ? 'success' : 'warning')
 
-      // Update local state smoothly
+      // Update local state smoothly using the SAME image URL technology
       setPosts(prev => prev.map(p => {
         if (p.content_id === post.content_id) {
           const newTitle = status === 'REJECTED' ? `⚠️ Rejected: ${finalReason}` : p.title
           const newContent = status === 'REJECTED' ? `This post has been removed from public view due to a violation. Reason: ${finalReason}` : p.content
-          const currentImages = status === 'REJECTED' ? [warningImage] : (p.images || [])
+
+          // Use the warning image URL generated by the existing technology
+          const currentImages = status === 'REJECTED' ? [warningImageUrl] : (p.images || [])
+
           return {
             ...p,
             moderation_status: status,
@@ -1931,71 +2006,6 @@ export default function ContentModeration() {
         .no-image-text span { display: block; font-size: 13px; font-weight: 700; color: #475569; }
         .no-image-text small { font-size: 11px; }
 
-        /* Warning Banner for Rejected Media */
-        .warning-rejected-banner {
-          padding: 28px 20px;
-          background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
-          border-bottom: 1px solid #fca5a5;
-          display: flex;
-          align-items: center;
-          gap: 14px;
-        }
-        .warning-rejected-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 14px;
-          background: #ef4444;
-          color: white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 24px;
-          flex-shrink: 0;
-          box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2);
-        }
-        .warning-rejected-text span {
-          display: block;
-          font-size: 13.5px;
-          font-weight: 800;
-          color: #991b1b;
-        }
-        .warning-rejected-text small {
-          font-size: 11.5px;
-          color: #b91c1c;
-        }
-
-        .modal-warning-image-banner {
-          padding: 42px 24px;
-          background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
-          border-radius: 16px;
-          text-align: center;
-          color: #991b1b;
-          border: 1.5px dashed #fca5a5;
-        }
-        .modal-warning-image-banner .warning-big-icon {
-          width: 60px;
-          height: 60px;
-          border-radius: 50%;
-          background: #ef4444;
-          color: white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 28px;
-          margin: 0 auto 12px;
-          box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
-        }
-        .modal-warning-image-banner h3 {
-          font-size: 16px;
-          font-weight: 800;
-          margin: 0 0 4px 0;
-        }
-        .modal-warning-image-banner p {
-          font-size: 13px;
-          margin: 0;
-          color: #b91c1c;
-        }
-
         /* Card Body */
         .card-body-section {
           padding: 18px 20px;
@@ -2020,18 +2030,11 @@ export default function ContentModeration() {
           margin: 0 0 8px 0;
           line-height: 1.4;
         }
-        .post-title-text.text-danger {
-          color: #dc2626 !important;
-        }
         .post-excerpt {
           font-size: 13px;
           color: #475569;
           line-height: 1.5;
           margin: 0;
-        }
-        .post-excerpt.text-muted {
-          color: #7f1d1d !important;
-          font-style: italic;
         }
         .rejection-reason-strip {
           margin-top: 12px;
@@ -2044,36 +2047,6 @@ export default function ContentModeration() {
           display: flex;
           gap: 8px;
           align-items: flex-start;
-        }
-
-        .btn-show-original {
-          margin-top: 12px;
-          padding: 6px 12px;
-          background: #f1f5f9;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          font-size: 11.5px;
-          font-weight: 700;
-          color: #475569;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.2s ease;
-        }
-        .btn-show-original:hover {
-          background: #e2e8f0;
-          color: #0f172a;
-        }
-        .btn-show-original.active {
-          background: #fee2e2;
-          border-color: #fca5a5;
-          color: #b91c1c;
-        }
-
-        .warning-body {
-          border-color: #fca5a5 !important;
-          background: #fff5f5 !important;
         }
 
         /* Card Actions */
