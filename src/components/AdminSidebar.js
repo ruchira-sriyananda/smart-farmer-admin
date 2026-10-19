@@ -170,7 +170,7 @@ export default function AdminSidebar() {
       {/* Sidebar */}
       <aside className={`admin-sidebar ${collapsed ? 'collapsed' : ''}`}>
         {/* Brand Section - Fixed at top */}
-        <div className="brand-section">
+        <div className="brand-section" data-tour="sidebar-brand">
           <div className="brand-logo">
             {/* Logo Image - Replace with your actual logo path */}
             <img 
@@ -186,7 +186,7 @@ export default function AdminSidebar() {
         </div>
 
         {/* Profile Section - Fixed */}
-        <div className="profile-section">
+        <div className="profile-section" data-tour="sidebar-profile">
           <div className="profile-avatar">
             <i className="bi bi-person-circle"></i>
           </div>
@@ -203,13 +203,14 @@ export default function AdminSidebar() {
         </div>
 
         {/* Navigation Menu - Scrollable area */}
-        <div className="navigation-wrapper">
+        <div className="navigation-wrapper" data-tour="sidebar-nav">
           <nav className="navigation-menu">
             <ul className="menu-list">
               {filteredMenuItems.map((item) => (
                 <li key={item.path} className="menu-item">
                   <button
                     className={`menu-link ${isActive(item.path) ? 'active' : ''}`}
+                    data-tour={`nav-${item.path}`}
                     onClick={() => router.push(item.path)}
                     onMouseEnter={() => setHoveredItem(item.path)}
                     onMouseLeave={() => setHoveredItem(null)}

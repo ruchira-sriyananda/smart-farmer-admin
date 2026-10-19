@@ -550,7 +550,7 @@ export default function AnalyticsDashboard() {
   return (
     <AdminLayout title="Analytics Dashboard">
       <div className="analytics-container">
-        <div className="page-header">
+        <div className="page-header" data-tour="analytics-header">
           <div className="header-content">
             <div className="header-icon">
               <i className="bi bi-graph-up"></i>
@@ -570,7 +570,7 @@ export default function AnalyticsDashboard() {
           </button>
         </div>
 
-        <div className="metrics-grid">
+        <div className="metrics-grid" data-tour="analytics-overview">
           <div className="metric-card">
             <div className="metric-icon primary"><i className="bi bi-people-fill"></i></div>
             <div className="metric-info">
@@ -597,7 +597,7 @@ export default function AnalyticsDashboard() {
           </div>
         </div>
 
-        <div className="charts-section">
+        <div className="charts-section" data-tour="analytics-charts">
           <div className="chart-card full-width">
             <div className="chart-header">
               <h5>📈 User Growth Trend</h5>

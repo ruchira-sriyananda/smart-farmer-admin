@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabaseClient'
 import AdminSidebar from './AdminSidebar'
 import OnlineHeartbeat from './OnlineHeartbeat'
+import AdminTour from './tour/AdminTour'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import 'bootstrap-icons/font/bootstrap-icons.css'
 
@@ -12,6 +13,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
   const [currentTime, setCurrentTime] = useState(new Date())
   const [showDropdown, setShowDropdown] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [showTour, setShowTour] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loadingNotifications, setLoadingNotifications] = useState(true)
@@ -443,20 +445,32 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
       <div style={{ marginLeft: '280px', width: '100%' }}>
         {/* Top Navbar */}
         <nav className="navbar navbar-light bg-white shadow-sm px-4 py-2 sticky-top">
-          <div>
+          <div data-tour="header-title">
             <h5 className="mb-0 fw-bold text-primary">{title}</h5>
             <small className="text-muted">{currentTime.toLocaleString()}</small>
           </div>
           
           <div className="d-flex align-items-center gap-3">
             {/* Security Status */}
-            <div className="bg-success bg-opacity-10 rounded-pill px-3 py-1 d-none d-md-block">
+            <div data-tour="header-security" className="bg-success bg-opacity-10 rounded-pill px-3 py-1 d-none d-md-block">
               <i className="bi bi-shield-check text-success me-1"></i>
               <small className="text-success">Secure Connection</small>
             </div>
 
+            {/* Interactive Feature Tour Button */}
+            <div data-tour="header-tour-btn">
+              <button
+                className="btn btn-light rounded-circle d-flex align-items-center justify-content-center text-primary shadow-sm hover-scale"
+                onClick={() => setShowTour(true)}
+                title="Interactive Feature Tour"
+                style={{ width: '40px', height: '40px' }}
+              >
+                <i className="bi bi-compass-fill fs-5"></i>
+              </button>
+            </div>
+
             {/* Enhanced Notifications Dropdown */}
-            <div className="position-relative" ref={notificationRef}>
+            <div data-tour="header-notifications" className="position-relative" ref={notificationRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 position-relative"
                 onClick={() => setShowNotifications(!showNotifications)}
@@ -574,7 +588,7 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
             </div>
 
             {/* Profile Dropdown */}
-            <div className="position-relative" ref={dropdownRef}>
+            <div data-tour="header-profile" className="position-relative" ref={dropdownRef}>
               <button
                 className="btn btn-link text-decoration-none p-0 d-flex align-items-center"
                 onClick={() => setShowDropdown(!showDropdown)}
@@ -646,6 +660,14 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
                         </div>
                       </button>
 
+                      <button className="dropdown-item-custom" onClick={() => { setShowDropdown(false); setShowTour(true); }}>
+                        <i className="bi bi-compass me-3 text-primary"></i>
+                        <div>
+                          <div className="fw-semibold small">Interactive Feature Tour</div>
+                          <div className="text-muted" style={{ fontSize: '10px' }}>Restart role-based feature guide</div>
+                        </div>
+                      </button>
+
                       <button className="dropdown-item-custom" onClick={() => { setShowDropdown(false); router.push('/admin/security/logs'); }}>
                         <i className="bi bi-activity me-3"></i>
                         <div>
@@ -682,6 +704,15 @@ export default function AdminLayout({ children, title = "Dashboard" }) {
         
         {/* Page Content */}
         <div className="p-4">{children}</div>
+
+        {/* Role-Based Interactive Feature Tour */}
+        <AdminTour
+          userRole={profileRole || userRole}
+          isSuperAdmin={session?.admin?.is_super_admin || false}
+          userId={userId}
+          isOpen={showTour}
+          onClose={() => setShowTour(false)}
+        />
       </div>
 
       <style jsx>{`

@@ -771,7 +771,7 @@ export default function ContentModeration() {
         )}
 
         {/* Hero Header */}
-        <div className="hero-banner">
+        <div className="hero-banner" data-tour="posts-header">
           <div className="hero-left">
             <div className="hero-badge">
               <i className="bi bi-shield-check"></i>
@@ -845,7 +845,7 @@ export default function ContentModeration() {
             )}
           </div>
 
-          <div className="filter-tabs">
+          <div className="filter-tabs" data-tour="posts-tabs">
             <button className={`filter-chip ${filter === 'ALL' ? 'active' : ''}`} onClick={() => setFilter('ALL')}>
               <i className="bi bi-grid-fill"></i>
               <span>All</span>
@@ -897,7 +897,7 @@ export default function ContentModeration() {
 
         {/* Posts Grid */}
         {filteredPosts.length > 0 ? (
-          <div className="posts-grid">
+          <div className="posts-grid" data-tour="posts-grid">
             {filteredPosts.map((post) => (
               <div key={post.content_id} className={`post-card ${post.moderation_status.toLowerCase()}`}>
                 <div className="card-user-header">
@@ -1026,7 +1026,7 @@ export default function ContentModeration() {
                     <i className="bi bi-eye-fill"></i> Details
                   </button>
 
-                  <div className="action-buttons-group">
+                  <div className="action-buttons-group" data-tour="posts-moderate-action">
                     {post.moderation_status === 'PENDING' && (
                       <button className="btn-action-approve" onClick={() => handleApprove(post)} disabled={actionLoading}>
                         <i className="bi bi-check-lg"></i>

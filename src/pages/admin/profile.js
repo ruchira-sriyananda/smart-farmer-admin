@@ -252,7 +252,7 @@ export default function Profile() {
 
       <div className="row g-4">
         {/* Left Column - Profile Card */}
-        <div className="col-lg-4">
+        <div className="col-lg-4" data-tour="profile-card">
           <div className="card border-0 shadow-sm rounded-4 overflow-hidden">
             <div className="bg-gradient-primary p-4 text-center">
               <div className="position-relative d-inline-block">
@@ -290,7 +290,7 @@ export default function Profile() {
                 </div>
               </div>
               <hr />
-              <div className="d-flex justify-content-around">
+              <div className="d-flex justify-content-around mb-3">
                 <div className="text-center">
                   <i className="bi bi-envelope fs-4 text-primary"></i>
                   <p className="small text-muted mb-0">Email</p>
@@ -304,12 +304,30 @@ export default function Profile() {
                   <p className="small text-muted mb-0">UTC+5:30</p>
                 </div>
               </div>
+              <hr />
+              <div data-tour="profile-tour-restart">
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm w-100 rounded-3 py-2 d-flex align-items-center justify-content-center gap-2 fw-medium"
+                  onClick={() => {
+                    const sessionData = localStorage.getItem('adminSession')
+                    const parsed = sessionData ? JSON.parse(sessionData) : null
+                    const uId = parsed?.admin?.admin_id || 'default'
+                    const uRole = parsed?.role || 'SUPER_ADMIN'
+                    localStorage.removeItem(`smart_farmer_tour_completed_${uId}_${uRole}`)
+                    window.location.href = '/admin/dashboard'
+                  }}
+                >
+                  <i className="bi bi-compass-fill"></i>
+                  <span>Take Interactive Tour Again</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Right Column - Tabs Content */}
-        <div className="col-lg-8">
+        <div className="col-lg-8" data-tour="profile-edit">
           {/* Tabs Navigation */}
           <div className="card border-0 shadow-sm rounded-4">
             <div className="card-header bg-white border-0 pt-4 px-4">

@@ -298,7 +298,7 @@ const handleTestEmail = async () => {
     <AdminLayout title="System Settings">
       <div className="settings-dashboard">
         {/* Hero Section */}
-        <div className="hero-section">
+        <div className="hero-section" data-tour="settings-header">
           <div className="hero-content">
             <div className="hero-text">
               <h1 className="hero-title">
@@ -364,7 +364,7 @@ const handleTestEmail = async () => {
         <div className="tab-content">
           {/* General Settings */}
           {activeTab === 'general' && (
-            <div className="settings-section fade-in">
+            <div className="settings-section fade-in" data-tour="settings-general">
               <div className="section-header">
                 <h2>
                   <i className="bi bi-gear-fill"></i>
@@ -374,7 +374,28 @@ const handleTestEmail = async () => {
               </div>
 
               <div className="settings-grid">
-                
+                <div className="setting-card" data-tour="settings-tour-restart">
+                  <label className="setting-label">
+                    <i className="bi bi-compass-fill text-primary me-2"></i>
+                    Interactive Onboarding Tour
+                  </label>
+                  <p className="small text-muted mb-3">Re-take the role-based guided tour to review administrative tools, workflows, and permissions.</p>
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary btn-sm d-inline-flex align-items-center gap-2 rounded-2"
+                    onClick={() => {
+                      const sessionData = localStorage.getItem('adminSession')
+                      const parsed = sessionData ? JSON.parse(sessionData) : null
+                      const uId = parsed?.admin?.admin_id || 'default'
+                      const uRole = parsed?.role || 'SUPER_ADMIN'
+                      localStorage.removeItem(`smart_farmer_tour_completed_${uId}_${uRole}`)
+                      window.location.href = '/admin/dashboard'
+                    }}
+                  >
+                    <i className="bi bi-play-circle-fill"></i>
+                    Restart Tour Now
+                  </button>
+                </div>
 
                 <div className="setting-card">
                   <label className="setting-label">

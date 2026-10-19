@@ -331,7 +331,7 @@ export default function UserManagement() {
     <AdminLayout title="User Management">
       <div className="user-management-container">
         {/* Hero Section */}
-        <div className="hero-section">
+        <div className="hero-section" data-tour="users-header">
           <div className="hero-content">
             <div className="hero-text">
               <div className="hero-icon-wrapper">
@@ -342,7 +342,7 @@ export default function UserManagement() {
                 <p className="hero-subtitle">Manage system administrators and their permissions</p>
               </div>
             </div>
-            <div className="hero-actions">
+            <div className="hero-actions" data-tour="users-create-btn">
               {isSuperAdmin && (
                 <button className="btn-create" onClick={() => router.push('/admin/users/create')}>
                   <i className="bi bi-person-plus-fill"></i>
@@ -404,7 +404,7 @@ export default function UserManagement() {
         </div>
 
         {/* Controls Bar */}
-        <div className="controls-bar">
+        <div className="controls-bar" data-tour="users-search-filter">
           <div className="controls-left">
             <div className="search-box">
               <i className="bi bi-search"></i>
@@ -481,7 +481,7 @@ export default function UserManagement() {
         </div>
 
         {/* Users Table */}
-        <div className="users-table-container">
+        <div className="users-table-container" data-tour="users-table">
           <div className="table-header">
             <div className="table-title">
               <i className="bi bi-person-badge"></i>

@@ -607,7 +607,7 @@ export default function AdminDashboard() {
     <AdminLayout title="Farmers Platform Dashboard">
       <div className="dashboard-wrapper">
         {/* Welcome Section with Role Badge */}
-        <div className="welcome-section">
+        <div className="welcome-section" data-tour="dashboard-welcome">
           <div className="welcome-text">
             <div className="greeting">{greeting} 👋</div>
             <h1 className="welcome-title">
@@ -636,7 +636,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Main Stats Cards */}
-        <div className="stats-grid">
+        <div className="stats-grid" data-tour="dashboard-stats">
           <div className="stat-card primary" onClick={handleViewAllUsers}>
             <div className="stat-card-icon"><i className="bi bi-people-fill"></i></div>
             <div className="stat-card-content">
@@ -738,7 +738,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Charts */}
-        <div className="charts-row">
+        <div className="charts-row" data-tour="dashboard-charts">
           <div className="chart-card">
             <div className="chart-header">
               <h5>📈 User Growth Trend</h5>
@@ -807,7 +807,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Online Users */}
-        <div className="online-section">
+        <div className="online-section" data-tour="dashboard-online">
           <div className="online-header">
             <h5><i className="bi bi-wifi"></i> Currently Online</h5>
             <p>{onlineCount} active users right now</p>
@@ -846,7 +846,7 @@ export default function AdminDashboard() {
 
         {/* Recent Users Table */}
         {perms.canViewAllUsers && (
-          <div className="recent-table">
+          <div className="recent-table" data-tour="dashboard-recent-users">
             <div className="table-header">
               <h5><i className="bi bi-people"></i> Recent Users</h5>
               <button className="view-all" onClick={handleViewAllUsers}>View All <i className="bi bi-arrow-right"></i></button>
@@ -888,7 +888,7 @@ export default function AdminDashboard() {
 
         {/* Recent Posts */}
         {(perms.canViewAllPosts || perms.canModerateContent) && (
-          <div className="recent-posts-section">
+          <div className="recent-posts-section" data-tour="dashboard-recent-posts">
             <div className="section-header">
               <h5><i className="bi bi-file-post"></i> Recent Posts</h5>
               <button className="view-all" onClick={handleViewAllPosts}>View All <i className="bi bi-arrow-right"></i></button>

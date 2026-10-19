@@ -640,7 +640,7 @@ export default function Advertisements() {
     <AdminLayout title="Advertisements">
       <div className="ads-dashboard">
         {/* Animated Hero Section */}
-        <div className="hero-section">
+        <div className="hero-section" data-tour="ads-header">
           <div className="hero-content">
             <div className="hero-text">
               <div className="hero-icon-wrapper">
@@ -664,7 +664,7 @@ export default function Advertisements() {
                 <i className="bi bi-tags"></i>
                 Packages
               </button>
-              <button className="btn-create-campaign" onClick={() => setShowCreateModal(true)}>
+              <button className="btn-create-campaign" data-tour="ads-create" onClick={() => setShowCreateModal(true)}>
                 <i className="bi bi-plus-circle"></i>
                 Create Campaign
               </button>
@@ -677,7 +677,7 @@ export default function Advertisements() {
         </div>
 
         {/* Animated Stats Cards */}
-        <div className="stats-wrapper">
+        <div className="stats-wrapper" data-tour="ads-campaigns">
           <div className="stats-grid">
             <div className="stat-card stat-total">
               <div className="stat-icon">

@@ -326,7 +326,7 @@ export default function SecurityDashboard() {
         </div>
 
         {/* Page Header */}
-        <div className="page-header">
+        <div className="page-header" data-tour="security-header">
           <div className="header-content">
             <div className="header-icon">
               <i className="bi bi-shield-check"></i>
@@ -337,7 +337,7 @@ export default function SecurityDashboard() {
             </div>
           </div>
           <div className="header-actions">
-            <button className="btn-audit" onClick={handleExportAuditLog}>
+            <button className="btn-audit" onClick={handleExportAuditLog} data-tour="security-logs-link">
               <i className="bi bi-download me-1"></i> Audit Export
             </button>
             <button className="refresh-btn" onClick={fetchSecurityData}>
@@ -389,7 +389,7 @@ export default function SecurityDashboard() {
         </div>
 
         {/* Stats Grid */}
-        <div className="stats-grid">
+        <div className="stats-grid" data-tour="security-alerts">
           <div className="stat-card total">
             <div className="stat-icon"><i className="bi bi-shield-exclamation"></i></div>
             <div className="stat-info">
@@ -430,7 +430,7 @@ export default function SecurityDashboard() {
         {/* Two Columns: Failed Logins & Blacklist Controls */}
         <div className="two-columns">
           {/* Failed Login Attempts */}
-          <div className="failed-attempts-card">
+          <div className="failed-attempts-card" data-tour="security-sessions">
             <div className="section-header">
               <h5><i className="bi bi-key-fill me-2 text-warning"></i> Failed Login Telemetry</h5>
               <span className="section-badge">{failedAttempts.length} recorded</span>

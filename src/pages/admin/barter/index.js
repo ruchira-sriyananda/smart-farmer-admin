@@ -586,7 +586,7 @@ export default function BarterTransactions() {
     <AdminLayout title="Barter System">
       <div className="barter-container">
         {/* Header */}
-        <div className="page-header">
+        <div className="page-header" data-tour="barter-header">
           <div className="header-content">
             <div className="header-icon">
               <i className="bi bi-arrow-left-right"></i>
@@ -610,7 +610,7 @@ export default function BarterTransactions() {
         </div>
 
         {/* Stats Cards */}
-        <div className="stats-grid">
+        <div className="stats-grid" data-tour="barter-list">
           <div className="stat-card pending-approval">
             <div className="stat-icon"><i className="bi bi-clock-history"></i></div>
             <div className="stat-info">
