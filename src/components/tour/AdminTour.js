@@ -45,15 +45,19 @@ export default function AdminTour({
   // Storage key for completion tracking per user and role
   const completionKey = `smart_farmer_tour_completed_${userId}_${userRole}`
 
-  // Check if tour should run automatically on first login
+  // Check if tour should run automatically on first login across any admin page
   useEffect(() => {
     if (typeof window === 'undefined') return
 
     // Check completion status
     const isCompleted = localStorage.getItem(completionKey) === 'true'
 
-    // Auto start welcome modal if first time and dashboard is loaded
-    if (!isCompleted && router.pathname === '/admin/dashboard' && !isOpen && !active) {
+    // Auto start welcome modal if first time and loaded on any admin page (not login/blocked)
+    const isAdminPage = router.pathname.startsWith('/admin') &&
+                        router.pathname !== '/admin/login' &&
+                        router.pathname !== '/admin/blocked'
+
+    if (!isCompleted && isAdminPage && !isOpen && !active) {
       const timer = setTimeout(() => {
         setShowWelcomeModal(true)
       }, 1200)
