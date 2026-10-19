@@ -349,7 +349,7 @@ export default function MobileUsers() {
     <AdminLayout title="Mobile Users Management">
       <div className="users-container">
         {/* Hero Section */}
-        <div className="hero-section">
+        <div className="hero-section" data-tour="mobile-users-header">
           <div className="hero-content">
             <div className="hero-text">
               <div className="hero-icon-wrapper">
@@ -369,7 +369,7 @@ export default function MobileUsers() {
         </div>
 
         {/* Stats Cards */}
-        <div className="stats-grid">
+        <div className="stats-grid" data-tour="mobile-users-stats">
           <div className="stat-card total">
             <div className="stat-icon"><i className="bi bi-people"></i></div>
             <div className="stat-info">
@@ -421,7 +421,7 @@ export default function MobileUsers() {
         </div>
 
         {/* Controls Bar */}
-        <div className="controls-bar">
+        <div className="controls-bar" data-tour="mobile-users-search">
           <div className="controls-left">
             <div className="search-box">
               <i className="bi bi-search"></i>
@@ -457,7 +457,7 @@ export default function MobileUsers() {
 
         {/* Users Table */}
         {filteredUsers.length > 0 ? (
-          <div className="users-table-container">
+          <div className="users-table-container" data-tour="mobile-users-table">
             <div className="table-responsive">
               <table className="users-table">
                 <thead>

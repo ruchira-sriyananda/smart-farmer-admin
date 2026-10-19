@@ -1,4 +1,4 @@
-// Multilingual translations for SmartFarmer Web Admin Panel Tour (All 9 Modules)
+// Multilingual translations for SmartFarmer Web Admin Panel Tour (Including Mobile Users)
 // Languages supported: English (en), Sinhala (si), Tamil (ta)
 
 export const tourTranslations = {
@@ -17,11 +17,11 @@ export const tourTranslations = {
     safeModeBadge: '🔒 Safe Mode Demonstration',
     roleTag: 'Role: {role}',
     welcomeTitle: 'Welcome to SmartFarmer Web Admin!',
-    welcomeDesc: 'Let us take you on an interactive feature tour customized for your role ({role}). This guided tour will show you all 9 administrative modules, tools, and workflows across the entire platform.',
+    welcomeDesc: 'Let us take you on an interactive feature tour customized for your role ({role}). This guided tour will show you all administrative modules, including mobile user management, tools, and workflows across the platform.',
     startTourBtn: 'Start Interactive Tour',
     maybeLaterBtn: 'Dismiss / Later',
     completedTitle: 'Tour Completed!',
-    completedDesc: 'You have explored all 9 administrative modules available for your role ({role}). You can restart this tour anytime from the profile menu or settings.',
+    completedDesc: 'You have explored all administrative modules available for your role ({role}). You can restart this tour anytime from the profile menu or settings.',
     gotItBtn: 'Got it, let\'s begin!',
 
     // Modules
@@ -29,7 +29,8 @@ export const tourTranslations = {
       header: 'Header & Overview',
       sidebar: 'Navigation Menu',
       dashboard: 'Admin Dashboard',
-      users: 'User Management',
+      users: 'Admin User Management',
+      mobileUsers: 'Mobile Users Management',
       posts: 'Content Moderation',
       analytics: 'Analytics & Platform Reports',
       security: 'Security & System',
@@ -74,8 +75,8 @@ export const tourTranslations = {
         description: 'Displays your logged-in administrator name, email, and exact role level (e.g. Super Admin, Content Admin, Security Admin, or Support Admin).'
       },
       sidebarNav: {
-        title: 'Role-Based Navigation Menu (All 9 Modules)',
-        description: 'Every menu item here covers the 9 core modules dynamically filtered based on your administrator role and permissions.'
+        title: 'Role-Based Navigation Menu',
+        description: 'Every menu item here covers all core modules dynamically filtered based on your administrator role and permissions.'
       },
 
       // Dashboard steps
@@ -106,26 +107,45 @@ export const tourTranslations = {
 
       // User Management steps
       usersHeader: {
-        title: 'User Management Center',
-        description: 'Central hub for reviewing, managing, creating, editing, and monitoring all administrator and mobile user accounts.'
+        title: 'Admin User Management Center',
+        description: 'Central hub for reviewing, managing, creating, editing, and monitoring all administrator accounts.'
       },
       usersCreateBtn: {
-        title: 'Create New Administrator / User Account',
+        title: 'Create New Administrator Account',
         description: 'Click here to add a new administrator user, assign custom role permissions, and send credentials.',
         safeDemo: 'Safe Demonstration: Clicking this takes you to the user creation form. No user will be created during this preview step.'
       },
       usersSearchFilter: {
         title: 'Search & Role/Status Filtering',
-        description: 'Search users by full name or email, and filter by specific roles or account status (Active vs. Inactive).'
+        description: 'Search admin users by full name or email, and filter by specific roles or account status.'
       },
       usersTable: {
-        title: 'Administrator & User List Table',
-        description: 'Displays detailed user records, including role badges, email verification badges, creation timestamps, and active status indicators.'
+        title: 'Administrator User List Table',
+        description: 'Displays detailed administrator records, including role badges, email verification badges, and creation timestamps.'
       },
       usersActions: {
         title: 'User Operations (View, Edit, Ban, Delete)',
         description: 'Use action buttons to view user details, modify account permissions, toggle account suspension/ban status, or delete accounts.',
-        safeDemo: 'Safe Demonstration: Action buttons like Delete or Suspension prompt for multi-step confirmation before executing. No production data will be changed.'
+        safeDemo: 'Safe Demonstration: Action buttons prompt for multi-step confirmation before executing. No production data will be changed.'
+      },
+
+      // Mobile Users Management steps
+      mobileUsersHeader: {
+        title: 'Mobile App Users Management Center',
+        description: 'Oversee and monitor all mobile application users across the platform, including registered farmers and agricultural vendors.'
+      },
+      mobileUsersStats: {
+        title: 'Mobile User Statistics & Demographics',
+        description: 'Real-time metrics showing total users, active accounts, banned accounts, farmers, vendors, and new registrations today.'
+      },
+      mobileUsersSearch: {
+        title: 'Search & Role/Status Filtering',
+        description: 'Search mobile users by full name, email address, or phone number, and filter by status (Active, Banned, Pending) or role (Farmer, Vendor).'
+      },
+      mobileUsersTable: {
+        title: 'Mobile Users Directory Table',
+        description: 'Detailed user directory displaying avatar profiles, contact details, verification badges, roles, status, and account actions (View details, Ban/Suspend reason, Delete).',
+        safeDemo: 'Safe Demonstration: Mobile user ban or deletion actions are simulated securely during the tour without altering live app data.'
       },
 
       // Content Moderation steps
@@ -276,25 +296,26 @@ export const tourTranslations = {
     safeModeBadge: '🔒 ආරක්ෂිත ආදර්ශන මාදිලිය',
     roleTag: 'භූමිකාව: {role}',
     welcomeTitle: 'SmartFarmer පරිපාලක පද්ධතියට සාදරයෙන් පිළිගනිමු!',
-    welcomeDesc: 'ඔබේ පරිපාලක භූමිකාවට ({role}) අනුකූලව සකස් කරන ලද අන්තර්ක්‍රියාකාරී විශේෂාංග සංචාරය ආරම්භ කරමු. මෙමගින් සියලුම මොඩියුල 9 සහ මෙවලම් පහසුවෙන් තේරුම් ගත හැක.',
+    welcomeDesc: 'ඔබේ පරිපාලක භූමිකාවට ({role}) අනුකූලව සකස් කරන ලද අන්තර්ක්‍රියාකාරී විශේෂාංග සංචාරය ආරම්භ කරමු.',
     startTourBtn: 'සංචාරය ආරම්භ කරන්න',
     maybeLaterBtn: 'පසුව බලන්න',
     completedTitle: 'සංචාරය සාර්ථකව අවසන් විය!',
-    completedDesc: 'ඔබගේ පරිපාලක භූමිකාවට ({role}) අදාළ මොඩියුල 9 හි සියලුම විශේෂාංග ඔබ අධ්‍යයනය කර ඇත.',
+    completedDesc: 'ඔබගේ පරිපාලක භූමිකාවට අදාළ සියලුම මොඩියුල සහ ජංගම පරිශීලක කළමනාකරණය ඔබ අධ්‍යයනය කර ඇත.',
     gotItBtn: 'තේරුණා, ආරම්භ කරමු!',
 
     modules: {
       header: 'ශීර්ෂය සහ දළ විශ්ලේෂණය',
       sidebar: 'ප්‍රධාන මෙනුව',
       dashboard: 'පරිපාලක පුවරුව (Dashboard)',
-      users: 'පරිශීලක කළමනාකරණය',
+      users: 'පරිපාලක පරිශීලක කළමනාකරණය',
+      mobileUsers: 'ජංගම පරිශීලක කළමනාකරණය',
       posts: 'අන්තර්ගත සමාලෝචනය',
       analytics: 'විශ්ලේෂණ සහ වාර්තා',
       security: 'ආරක්ෂාව සහ පද්ධතිය',
       barter: 'හුවමාරු පද්ධතිය (Barter)',
       advertisements: 'දැන්වීම් කළමනාකරණය',
       settings: 'පද්ධති සැකසුම්',
-      logs: 'ක්‍රියාකාරකම් ලොග් (Activity Logs)',
+      logs: 'ක්‍රියාකාරකම් ලොග්',
       profile: 'පරිපාලක ගිණුම'
     },
 
@@ -307,7 +328,7 @@ export const tourTranslations = {
 
       sidebarBrand: { title: 'SmartFarmer පරිපාලක පෝටලය', description: 'ලාංඡනය ක්ලික් කිරීමෙන් ඔබගේ ප්‍රධාන Dashboard එකට පිවිසිය හැක.' },
       sidebarProfile: { title: 'ඔබගේ පරිපාලක ශ්‍රේණිය', description: 'ඔබගේ නම, විද්‍යුත් තැපෑල සහ පරිපාලක මට්ටම මෙහි දැක්වේ.' },
-      sidebarNav: { title: 'මෙනු මොඩියුල 9', description: 'පද්ධතියේ ප්‍රධාන මොඩියුල 9 සඳහා ප්‍රවේශ වන මෙනුවයි.' },
+      sidebarNav: { title: 'ප්‍රධාන මෙනු මොඩියුල', description: 'පද්ධතියේ සියලුම මොඩියුල සඳහා ප්‍රවේශ වන මෙනුවයි.' },
 
       dashboardWelcome: { title: 'සාදරයෙන් පිළිගැනීමේ පුවරුව', description: 'දිනයේ වේලාවට අනුව පිළිගැනීමේ පණිවිඩය.' },
       dashboardStats: { title: 'ප්‍රධාන සංඛ්‍යාලේඛන', description: 'ලියාපදිංචි පරිශීලකයින්, ගොවීන්, වෙළෙන්දන් සහ සක්‍රීය සටහන්.' },
@@ -316,20 +337,25 @@ export const tourTranslations = {
       dashboardRecentUsers: { title: 'නව ලියාපදිංචි කිරීම්', description: 'නවතමයෙන් එකතු වූ පරිශීලකයින්ගේ තොරතුරු.' },
       dashboardRecentPosts: { title: 'මෑතකාලීන ප්‍රජා සටහන්', description: 'ගොවීන් විසින් එකතු කරන ලද නවතම සටහන්.' },
 
-      usersHeader: { title: 'පරිශීලක කළමනාකරණය', description: 'පරිපාලකයින් සහ පරිශීලකයින් කළමනාකරණය කිරීමේ මධ්‍යස්ථානය.' },
+      usersHeader: { title: 'පරිපාලක කළමනාකරණය', description: 'පරිපාලක ගිණුම් කළමනාකරණය කිරීමේ මධ්‍යස්ථානය.' },
       usersCreateBtn: { title: 'නව පරිපාලක ගිණුමක් සෑදීම', description: 'නව පරිපාලකයෙකු එකතු කර අදාළ බලතල පවරන්න.', safeDemo: 'ආරක්ෂිත ආදර්ශනය: කිසිදු දත්තයක් වෙනස් නොවේ.' },
-      usersSearchFilter: { title: 'සෙවීම සහ පෙරා වෙන් කිරීම', description: 'නම හෝ Email මගින් පරිශීලකයින් සෙවීම.' },
-      usersTable: { title: 'පරිශීලක ලැයිස්තුව', description: 'පරිශීලකයින්ගේ භූමිකාව සහ තත්ත්වය අඩංගු වගුව.' },
-      usersActions: { title: 'ක්‍රියාකාරකම්', description: 'ගිණුම් තොරතුරු බැලීම, වෙනස් කිරීම් කිරීම හෝ ඉවත් කිරීම.', safeDemo: 'ආරක්ෂිත ආදර්ශනය: නිෂ්පාදන දත්ත වෙනස් නොවේ.' },
+      usersSearchFilter: { title: 'සෙවීම සහ පෙරා වෙන් කිරීම', description: 'නම හෝ Email මගින් පරිපාලකයින් සෙවීම.' },
+      usersTable: { title: 'පරිපාලක ලැයිස්තුව', description: 'පරිපාලකයින්ගේ භූමිකාව සහ තත්ත්වය අඩංගු වගුව.' },
+      usersActions: { title: 'ක්‍රියාකාරකම්', description: 'ගිණුම් තොරතුරු බැලීම, වෙනස් කිරීම් කිරීම හෝ ඉවත් කිරීම.', safeDemo: 'ආරක්ෂිත ආදර්ශනය: දත්ත වෙනස් නොවේ.' },
+
+      mobileUsersHeader: { title: 'ජංගම පරිශීලක කළමනාකරණය', description: 'ගොවීන් සහ වෙළෙන්දන් ඇතුළු සියලුම ජංගම යෙදුම් පරිශීලකයින් නිරීක්ෂණය කිරීම.' },
+      mobileUsersStats: { title: 'ජංගම පරිශීලක සංඛ්‍යාලේඛන', description: 'මුළු පරිශීලකයින්, සක්‍රීය ගිණුම්, බාන් වූ අය සහ ගොවීන් පෙන්වන සජීවී දර්ශක.' },
+      mobileUsersSearch: { title: 'සෙවීම සහ පෙරා වෙන් කිරීම', description: 'නම, Email හෝ දුරකථන අංකය මගින් ජංගම පරිශීලකයින් සෙවීම.' },
+      mobileUsersTable: { title: 'ජංගම පරිශීලක ලැයිස්තු වගුව', description: 'පරිශීලක තොරතුරු, සම්බන්ධතා, තත්ත්වයන් සහ ගිණුම් ක්‍රියාකාරකම් පෙන්වන වගුව.', safeDemo: 'ආරක්ෂිත ආදර්ශනය: දත්ත වෙනස් නොවේ.' },
 
       postsHeader: { title: 'අන්තර්ගත සමාලෝචනය', description: 'පරිශීලක සටහන් සහ වාර්තා වූ අන්තර්ගතයන් පරීක්ෂා කිරීම.' },
       postsTabs: { title: 'අන්තර්ගත තත්ත්ව වර්ගීකරණය', description: 'බලපොරොත්තුවෙන් පවතින සහ අනුමත වූ සටහන්.' },
       postsGrid: { title: 'සටහන් විස්තර', description: 'ඡායාරූප, විස්තර සහ වාර්තා වීමට හේතු පරීක්ෂා කරන්න.' },
-      postsModerateAction: { title: 'අනුමත කිරීම සහ ඉවත් කිරීම', description: 'සුදුසු සටහන් අනුමත කිරීම සහ නීති උල්ලංඝනය කරන සටහන් ඉවත් කිරීම.', safeDemo: 'ආරක්ෂිත ආදර්ශනය: දත්ත වෙනස් නොවේ.' },
+      postsModerateAction: { title: 'අනුමත කිරීම සහ ඉවත් කිරීම', description: 'සුදුසු සටහන් අනුමත කිරීම සහ ඉවත් කිරීම.', safeDemo: 'ආරක්ෂිත ආදර්ශනය: දත්ත වෙනස් නොවේ.' },
 
       analyticsHeader: { title: 'පද්ධති විශ්ලේෂණ', description: 'පරිශීලක ක්‍රියාකාරකම් සහ හුවමාරු දත්ත විශ්ලේෂණය.' },
       analyticsOverview: { title: 'කාර්යසාධන දර්ශක', description: 'දෛනික භාවිතය සහ හුවමාරු සංඛ්‍යාලේඛන.' },
-      analyticsCharts: { title: 'දත්ත ප්‍රස්ථාර', description: 'दीර්ඝකාලීන වර්ධන ප්‍රස්ථාර.' },
+      analyticsCharts: { title: 'දත්ත ප්‍රස්ථාර', description: 'දීර්ඝකාලීන වර්ධන ප්‍රස්ථාර.' },
 
       securityHeader: { title: 'ආරක්ෂක පාලනය', description: 'සක්‍රීය පරිපාලක සැසි සහ ආරක්ෂක පද්ධති නිරීක්ෂණය.' },
       securityAlerts: { title: 'ආරක්ෂක අනතුරු ඇඟවීම්', description: 'සැක සහිත ක්‍රියාකාරකම් පිළිබඳ අනතුරු ඇඟවීම්.' },
@@ -375,56 +401,62 @@ export const tourTranslations = {
     safeModeBadge: '🔒 பாதுகாப்பான மாதிரி முறைமை',
     roleTag: 'பங்கு: {role}',
     welcomeTitle: 'SmartFarmer நிர்வாக போர்ட்டலுக்கு வரவேற்கிறோம்!',
-    welcomeDesc: 'உங்கள் நிர்வாகி பங்குக்கு ({role}) ஏற்ப அமைக்கப்பட்ட ஊடாடும் அம்ச சுற்றுலாவைத் தொடங்குவோம். இது அனைத்து 9 தொகுதிகளையும் கருவிகளையும் எளிதாகப் புரிந்து கொள்ள உதவும்.',
+    welcomeDesc: 'உங்கள் நிர்வாகி பங்குக்கு ஏற்ப அமைக்கப்பட்ட ஊடாடும் அம்ச சுற்றுலாவைத் தொடங்குவோம்.',
     startTourBtn: 'சுற்றுலாவைத் தொடங்குங்கள்',
     maybeLaterBtn: 'பின்னர் பார்க்கவும்',
     completedTitle: 'சுற்றுலா வெற்றிகரமாக முடிந்தது!',
-    completedDesc: 'உங்கள் நிர்வாகி பங்குக்கு உரிய அனைத்து 9 தொகுதிகளையும் நீங்கள் வெற்றிகரமாக ஆய்வு செய்துள்ளீர்கள்.',
+    completedDesc: 'அனைத்து தொகுதிகள் மற்றும் மொபைல் பயனர் மேலாண்மை உட்பட அனைத்து அம்சங்களையும் ஆய்வு செய்துள்ளீர்கள்.',
     gotItBtn: 'புரிந்தது, தொடங்குவோம்!',
 
     modules: {
       header: 'தலைப்பு மற்றும் மேலோட்டம்',
       sidebar: 'முதன்மை மெனு',
       dashboard: 'நிர்வாக பலகை (Dashboard)',
-      users: 'பயனர் மேலாண்மை',
+      users: 'நிர்வாக பயனர் மேலாண்மை',
+      mobileUsers: 'மொபைல் பயனர் மேலாண்மை',
       posts: 'உள்ளடக்க மதிப்பாய்வு',
       analytics: 'பகுப்பாய்வு மற்றும் அறிக்கைகள்',
       security: 'பாதுகாப்பு மற்றும் அமைப்பு',
       barter: 'பண்டமாற்று முறைமை (Barter)',
       advertisements: 'விளம்பர மேலாண்மை',
       settings: 'அமைப்புகள்',
-      logs: 'செயல்பாட்டு பதிவுகள் (Activity Logs)',
+      logs: 'செயல்பாட்டு பதிவுகள்',
       profile: 'நிர்வாகி சுயவிவரம்'
     },
 
     steps: {
-      headerTitle: { title: 'தலைப்பு மற்றும் நேரக் காட்டி', description: 'தற்போதைய பகுதி தலைப்பு மற்றும் நேரடி அமைப்பு நேரம் இங்கு காட்டப்படும்.' },
+      headerTitle: { title: 'தலைப்பு மற்றும் நேரக் காட்டி', description: 'தற்போதைய பகுதி தலைப்பு மற்றும் நேரடி அமைப்பு நேரம்.' },
       headerSecurity: { title: 'பாதுகாப்பான இணைப்பு நிலை', description: 'உங்கள் நிர்வாக அமர்வு SSL பாதுகாப்பால் பாதுகாக்கப்படுகிறது.' },
-      headerNotifications: { title: 'நேரடி அறிவிப்புகள்', description: 'அமைப்பின் நடவடிக்கைகள் மற்றும் பாதுகாப்பு எச்சரிக்கைகள்.' },
-      headerTourBtn: { title: 'சுற்றுலா பொத்தான்', description: 'இந்த வழிகாட்டி சுற்றுலாவை மீண்டும் தொடங்க பொத்தானைக் கிளிக் செய்யவும்.' },
+      headerNotifications: { title: 'நேரடி அறிவிப்புகள்', description: 'அமைப்பின் நடவடிக்கைகள் மற்றும் எச்சரிக்கைகள்.' },
+      headerTourBtn: { title: 'சுற்றுலா பொத்தான்', description: 'சுற்றுலாவை மீண்டும் தொடங்க பொத்தானைக் கிளிக் செய்யவும்.' },
       headerProfile: { title: 'நிர்வாகி சுயவிவரம்', description: 'உங்கள் கணக்கு விவரங்கள் மற்றும் வெளியேறும் விருப்பங்கள்.' },
 
       sidebarBrand: { title: 'SmartFarmer நிர்வாக போர்ட்டல்', description: 'முதன்மை சின்னம் மூலம் டாஷ்போர்டிற்குச் செல்லலாம்.' },
       sidebarProfile: { title: 'உங்கள் நிர்வாக நிலை', description: 'உங்கள் பெயர், மின்னஞ்சல் மற்றும் நிர்வாக நிலை.' },
-      sidebarNav: { title: '9 முதன்மை தொகுதிகள் மெனு', description: 'அனைத்து 9 தொகுதிகளையும் அணுகும் மெனு.' },
+      sidebarNav: { title: 'முதன்மை மெனு தொகுதிகள்', description: 'அமைப்பின் அனைத்து தொகுதிகளையும் அணுகும் மெனு.' },
 
-      dashboardWelcome: { title: 'வரவேற்பு பலகை', description: 'நேரத்திற்கு ஏற்ற வாழ்த்து மற்றும் அமைப்பு நிலை.' },
-      dashboardStats: { title: 'முக்கிய புள்ளிவிவரங்கள்', description: 'பதிவுசெய்த பயனர்கள் மற்றும் விவசாயிகளின் நேரடி எண்ணிக்கை.' },
-      dashboardOnline: { title: 'நேரடி ஆன்லைன் நிர்வாகிகள்', description: 'தற்போது அமைப்பில் உள்ள ஆன்லைன் நிர்வாகிகளைக் கண்காணிக்கும்.' },
+      dashboardWelcome: { title: 'வரவேற்பு பலகை', description: 'நேரத்திற்கு ஏற்ற வாழ்த்து.' },
+      dashboardStats: { title: 'முக்கிய புள்ளிவிவரங்கள்', description: 'பதிவுசெய்த பயனர்கள் மற்றும் விவசாயிகளின் எண்ணிக்கை.' },
+      dashboardOnline: { title: 'நேரடி ஆன்லைன் நிர்வாகிகள்', description: 'தற்போது அமைப்பில் உள்ள ஆன்லைன் நிர்வாகிகள்.' },
       dashboardCharts: { title: 'வளர்ச்சி வரைபடங்கள்', description: 'பயனர் வளர்ச்சி மற்றும் வாராந்திர செயல்பாடுகளின் வரைபடங்கள்.' },
       dashboardRecentUsers: { title: 'புதிய பதிவுகள்', description: 'சமீபத்தில் இணைந்த பயனர்களின் விவரங்கள்.' },
       dashboardRecentPosts: { title: 'சமீபத்திய இடுகைகள்', description: 'விவசாயிகளால் சேர்க்கப்பட்ட புதிய உள்ளடக்கங்கள்.' },
 
-      usersHeader: { title: 'பயனர் மேலாண்மை மையம்', description: 'நிர்வாகிகளையும் பயனர் கணக்குகளையும் நிர்வகிக்கும் மையம்.' },
+      usersHeader: { title: 'நிர்வாக பயனர் மேலாண்மை', description: 'நிர்வாக கணக்குகளை நிர்வகிக்கும் மையம்.' },
       usersCreateBtn: { title: 'புதிய நிர்வாகி கணக்கை உருவாக்குதல்', description: 'புதிய நிர்வாகியைச் சேர்த்து அதிகாரங்களை வழங்கவும்.', safeDemo: 'பாதுகாப்பான மாதிரி: தரவு மாற்றப்படாது.' },
       usersSearchFilter: { title: 'தேடல் மற்றும் வடிகட்டி', description: 'பெயர் அல்லது மின்னஞ்சல் மூலம் பயனர்களைத் தேடலாம்.' },
-      usersTable: { title: 'பயனர் பட்டியல்', description: 'பயனர்களின் நிலை மற்றும் பதிவு தேதிகள் அடங்கிய பட்டியல்.' },
+      usersTable: { title: 'நிர்வாகி பட்டியல்', description: 'நிர்வாகிகளின் நிலை மற்றும் பங்கை காட்டும் அட்டவணை.' },
       usersActions: { title: 'செயல்பாடுகள்', description: 'கணக்கு விவரங்களைப் பார்க்க மற்றும் திருத்த.', safeDemo: 'பாதுகாப்பான மாதிரி: தரவு மாற்றப்படாது.' },
+
+      mobileUsersHeader: { title: 'மொபைல் பயனர் மேலாண்மை மையம்', description: 'விவசாயிகள் மற்றும் விற்பனையாளர்கள் உட்பட அனைத்து மொபைல் பயனர்களையும் நிர்வகித்தல்.' },
+      mobileUsersStats: { title: 'மொபைல் பயனர் புள்ளிவிவரங்கள்', description: 'மொத்த பயனர்கள், aktiv கணக்குகள் மற்றும் விவசாயிகளைக் காட்டும் புள்ளிவிவரங்கள்.' },
+      mobileUsersSearch: { title: 'தேடல் மற்றும் வடிகட்டி', description: 'பெயர், மின்னஞ்சல் அல்லது தொலைபேசி எண் மூலம் மொபைல் பயனர்களைத் தேடலாம்.' },
+      mobileUsersTable: { title: 'மொபைல் பயனர் பட்டியல் அட்டவணை', description: 'பயனர் சுயவிவரங்கள், தொடர்பு விவரங்கள் மற்றும் கணக்கு நடவடிக்கைகளைக் காட்டும் அட்டவணை.', safeDemo: 'பாதுகாப்பான மாதிரி: தரவு மாற்றப்படாது.' },
 
       postsHeader: { title: 'உள்ளடக்க மதிப்பாய்வு மையம்', description: 'பயனர் இடுகைகள் மற்றும் புகார்களை மதிப்பாய்வு செய்தல்.' },
       postsTabs: { title: 'உள்ளடக்க நிலை வகைகள்', description: 'நிலுவையில் உள்ள மற்றும் அனுமதிக்கப்பட்ட இடுகைகள்.' },
       postsGrid: { title: 'இடுகை விவரங்கள்', description: 'படங்கள், விளக்கங்கள் மற்றும் புகார்களின் காரணங்கள்.' },
-      postsModerateAction: { title: 'அனுமதித்தல் மற்றும் நீக்குதல்', description: 'சரியான இடுகைகளை அனுமதித்து விதியை மீறும் இடுகைகளை நீக்குங்கள்.', safeDemo: 'பாதுகாப்பான மாதிரி: தரவு மாற்றப்படாது.' },
+      postsModerateAction: { title: 'அனுமதித்தல் மற்றும் நீக்குதல்', description: 'சரியான இடுகைகளை அனுமதித்து நீக்குங்கள்.', safeDemo: 'பாதுகாப்பான மாதிரி: தரவு மாற்றப்படாது.' },
 
       analyticsHeader: { title: 'பகுப்பாய்வு மற்றும் அறிக்கைகள்', description: 'பயனர் நடவடிக்கைகள் மற்றும் வர்த்தகப் புள்ளிவிவரங்கள்.' },
       analyticsOverview: { title: 'செயல்திறன் குறிகாட்டிகள்', description: 'தினசரி பயன்பாடு மற்றும் பரிமாற்றங்களின் புள்ளிவிவரங்கள்.' },
@@ -446,7 +478,7 @@ export const tourTranslations = {
       settingsHeader: { title: 'அமைப்புகள்', description: 'மொழி அமைப்புகள் மற்றும் கட்டுப்பாடுகளை சரிசெய்தல்.' },
       settingsGeneral: { title: 'மொழி மற்றும் பொது அமைப்புகள்', description: 'அமைப்பின் முதன்மை மொழியைத் தேர்வு செய்யவும்.' },
       settingsSecurity: { title: 'பாதுகாப்பு அமைப்புகள்', description: 'மின்னஞ்சல் உறுதிப்படுத்தல் மற்றும் விதிகள்.' },
-      settingsTourRestart: { title: 'சுற்றுலாவை மீண்டும் தொடங்குதல்', description: 'வ வழிகாட்டி சுற்றுலாவை மீண்டும் தொடங்க.' },
+      settingsTourRestart: { title: 'சுற்றுலாவை மீண்டும் தொடங்குதல்', description: 'வழிகாட்டி சுற்றுலாவை மீண்டும் தொடங்க.' },
 
       logsHeader: { title: 'செயல்பாட்டு பதிவுகள் மையம்', description: 'அனைத்து நிர்வாக நடவடிக்கைகள் மற்றும் பதிவுகளைக் கண்காணிக்கவும்.' },
       logsStats: { title: 'பதிவு புள்ளிவிவரங்கள்', description: 'மொத்த செயல்பாடுகள் மற்றும் 24 மணிநேர பதிவுகள்.' },

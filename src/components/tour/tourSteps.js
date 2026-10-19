@@ -1,4 +1,4 @@
-// Master definition of all interactive tour steps covering all 9 modules
+// Master definition of all interactive tour steps covering all modules including Mobile Users
 // Filtered dynamically based on user role and permissions
 
 export const tourSteps = [
@@ -192,7 +192,47 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 5: CONTENT MODERATION PAGE
+  // MODULE 5: MOBILE USERS MANAGEMENT PAGE
+  // ==========================================
+  {
+    id: 'mobile-users-header',
+    module: 'mobileUsers',
+    targetSelector: '[data-tour="mobile-users-header"]',
+    pageRoute: '/admin/mobile-users',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN', 'SUPPORT_ADMIN'],
+    placement: 'bottom',
+    stepKey: 'mobileUsersHeader'
+  },
+  {
+    id: 'mobile-users-stats',
+    module: 'mobileUsers',
+    targetSelector: '[data-tour="mobile-users-stats"]',
+    pageRoute: '/admin/mobile-users',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN', 'SUPPORT_ADMIN'],
+    placement: 'bottom',
+    stepKey: 'mobileUsersStats'
+  },
+  {
+    id: 'mobile-users-search',
+    module: 'mobileUsers',
+    targetSelector: '[data-tour="mobile-users-search"]',
+    pageRoute: '/admin/mobile-users',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN', 'SUPPORT_ADMIN'],
+    placement: 'bottom',
+    stepKey: 'mobileUsersSearch'
+  },
+  {
+    id: 'mobile-users-table',
+    module: 'mobileUsers',
+    targetSelector: '[data-tour="mobile-users-table"]',
+    pageRoute: '/admin/mobile-users',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN', 'SUPPORT_ADMIN'],
+    placement: 'top',
+    stepKey: 'mobileUsersTable'
+  },
+
+  // ==========================================
+  // MODULE 6: CONTENT MODERATION PAGE
   // ==========================================
   {
     id: 'posts-header',
@@ -233,7 +273,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 6: ANALYTICS & REPORTS PAGE
+  // MODULE 7: ANALYTICS & REPORTS PAGE
   // ==========================================
   {
     id: 'analytics-header',
@@ -264,7 +304,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 7: SECURITY & SYSTEM PAGE
+  // MODULE 8: SECURITY & SYSTEM PAGE
   // ==========================================
   {
     id: 'security-header',
@@ -304,7 +344,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 8: BARTER SYSTEM PAGE
+  // MODULE 9: BARTER SYSTEM PAGE
   // ==========================================
   {
     id: 'barter-header',
@@ -336,7 +376,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 9: ADVERTISEMENTS PAGE
+  // MODULE 10: ADVERTISEMENTS PAGE
   // ==========================================
   {
     id: 'ads-header',
@@ -368,7 +408,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 10: SYSTEM SETTINGS PAGE
+  // MODULE 11: SYSTEM SETTINGS PAGE
   // ==========================================
   {
     id: 'settings-header',
@@ -408,7 +448,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 11: ACTIVITY LOGS PAGE
+  // MODULE 12: ACTIVITY LOGS PAGE
   // ==========================================
   {
     id: 'logs-header',
@@ -448,7 +488,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 12: ADMIN PROFILE PAGE
+  // MODULE 13: ADMIN PROFILE PAGE
   // ==========================================
   {
     id: 'profile-card',
