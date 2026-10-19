@@ -1,4 +1,4 @@
-// Master definition of all interactive tour steps
+// Master definition of all interactive tour steps covering all 9 modules
 // Filtered dynamically based on user role and permissions
 
 export const tourSteps = [
@@ -264,7 +264,7 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 7: SECURITY & SYSTEM LOGS PAGE
+  // MODULE 7: SECURITY & SYSTEM PAGE
   // ==========================================
   {
     id: 'security-header',
@@ -408,7 +408,47 @@ export const tourSteps = [
   },
 
   // ==========================================
-  // MODULE 11: ADMIN PROFILE PAGE
+  // MODULE 11: ACTIVITY LOGS PAGE
+  // ==========================================
+  {
+    id: 'logs-header',
+    module: 'logs',
+    targetSelector: '[data-tour="logs-header"]',
+    pageRoute: '/admin/security/logs',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN'],
+    placement: 'bottom',
+    stepKey: 'logsHeader'
+  },
+  {
+    id: 'logs-stats',
+    module: 'logs',
+    targetSelector: '[data-tour="logs-stats"]',
+    pageRoute: '/admin/security/logs',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN'],
+    placement: 'bottom',
+    stepKey: 'logsStats'
+  },
+  {
+    id: 'logs-filters',
+    module: 'logs',
+    targetSelector: '[data-tour="logs-filters"]',
+    pageRoute: '/admin/security/logs',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN'],
+    placement: 'bottom',
+    stepKey: 'logsFilters'
+  },
+  {
+    id: 'logs-table',
+    module: 'logs',
+    targetSelector: '[data-tour="logs-table"]',
+    pageRoute: '/admin/security/logs',
+    requiredRoles: ['SUPER_ADMIN', 'SECURITY_ADMIN'],
+    placement: 'top',
+    stepKey: 'logsTable'
+  },
+
+  // ==========================================
+  // MODULE 12: ADMIN PROFILE PAGE
   // ==========================================
   {
     id: 'profile-card',

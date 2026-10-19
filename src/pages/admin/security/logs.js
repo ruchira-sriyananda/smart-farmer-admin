@@ -329,7 +329,7 @@ export default function ActivityLogs() {
     <AdminLayout title="Activity Logs">
       <div className="logs-container">
         {/* Header */}
-        <div className="page-header">
+        <div className="page-header" data-tour="logs-header">
           <div className="header-content">
             <div className="header-icon">
               <i className="bi bi-activity"></i>
@@ -349,7 +349,7 @@ export default function ActivityLogs() {
         </div>
 
         {/* Stats Cards */}
-        <div className="stats-grid">
+        <div className="stats-grid" data-tour="logs-stats">
           <div className="stat-card">
             <div className="stat-icon primary"><i className="bi bi-database"></i></div>
             <div className="stat-info">

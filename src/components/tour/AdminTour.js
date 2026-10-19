@@ -11,14 +11,35 @@ export default function AdminTour({
   onClose = () => {}
 }) {
   const router = useRouter()
-  const [active, setActive] = useState(false)
-  const [stepIndex, setStepIndex] = useState(0)
+
+  // Storage keys for persistence across reloads, route changes, and component remounts
+  const completionKey = `smart_farmer_tour_completed_${userId}_${userRole}`
+  const activeStorageKey = `smart_farmer_tour_active_${userId}_${userRole}`
+  const stepIndexStorageKey = `smart_farmer_tour_step_index_${userId}_${userRole}`
+
+  // Initialize state from persistent storage or defaults
+  const [active, setActive] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(activeStorageKey) === 'true'
+    }
+    return false
+  })
+
+  const [stepIndex, setStepIndex] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const savedIndex = localStorage.getItem(stepIndexStorageKey)
+      return savedIndex !== null ? parseInt(savedIndex, 10) : 0
+    }
+    return 0
+  })
+
   const [language, setLanguage] = useState('en')
   const [targetRect, setTargetRect] = useState(null)
   const [navigating, setNavigating] = useState(false)
   const [showWelcomeModal, setShowWelcomeModal] = useState(false)
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 })
-  const resizeObserverRef = useRef(null)
+
+  const pollTimerRef = useRef(null)
 
   // Initialize language from localStorage or default
   useEffect(() => {
@@ -42,28 +63,31 @@ export default function AdminTour({
     return step.requiredRoles.includes(userRole)
   })
 
-  // Storage key for completion tracking per user and role
-  const completionKey = `smart_farmer_tour_completed_${userId}_${userRole}`
+  // Persist active state and step index
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(activeStorageKey, active ? 'true' : 'false')
+      localStorage.setItem(stepIndexStorageKey, stepIndex.toString())
+    }
+  }, [active, stepIndex, activeStorageKey, stepIndexStorageKey])
 
   // Check if tour should run automatically on first login across any admin page
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Check completion status
     const isCompleted = localStorage.getItem(completionKey) === 'true'
-
-    // Auto start welcome modal if first time and loaded on any admin page (not login/blocked)
     const isAdminPage = router.pathname.startsWith('/admin') &&
                         router.pathname !== '/admin/login' &&
                         router.pathname !== '/admin/blocked'
 
-    if (!isCompleted && isAdminPage && !isOpen && !active) {
+    // If first time, not completed, not already active, and on an admin page -> show welcome modal
+    if (!isCompleted && isAdminPage && !isOpen && !active && localStorage.getItem(activeStorageKey) !== 'true') {
       const timer = setTimeout(() => {
         setShowWelcomeModal(true)
-      }, 1200)
+      }, 1000)
       return () => clearTimeout(timer)
     }
-  }, [router.pathname, completionKey, isOpen, active])
+  }, [router.pathname, completionKey, isOpen, active, activeStorageKey])
 
   // Handle explicit isOpen prop (e.g. triggered from header button or profile menu)
   useEffect(() => {
@@ -94,43 +118,63 @@ export default function AdminTour({
     return result
   }
 
-  // Update highlight bounding box and auto-scroll
+  // Robust element detection with polling / waiting for asynchronous UI rendering
   const updateTargetRect = useCallback(() => {
     if (!active || !currentStep) return
 
-    const selector = currentStep.targetSelector
-    const element = document.querySelector(selector)
-
-    if (element) {
-      // Auto-scroll element into view smoothly
-      element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-
-      const rect = element.getBoundingClientRect()
-      setTargetRect({
-        top: rect.top + window.scrollY,
-        left: rect.left + window.scrollX,
-        width: rect.width,
-        height: rect.height,
-        viewportTop: rect.top,
-        viewportLeft: rect.left
-      })
-
-      calculateTooltipPosition(rect, currentStep.placement)
-    } else {
-      // Element not found - default fallback position centered on screen
-      setTargetRect(null)
-      setTooltipPos({
-        top: window.innerHeight / 2 - 150,
-        left: Math.max(20, window.innerWidth / 2 - 220)
-      })
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current)
     }
+
+    let attempts = 0
+    const maxAttempts = 30 // Try for up to 3 seconds (30 * 100ms)
+
+    const findAndHighlight = () => {
+      const selector = currentStep.targetSelector
+      const element = document.querySelector(selector)
+
+      if (element) {
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+        setNavigating(false)
+
+        // Auto-scroll element into view smoothly
+        element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+
+        const rect = element.getBoundingClientRect()
+        setTargetRect({
+          top: rect.top + window.scrollY,
+          left: rect.left + window.scrollX,
+          width: rect.width,
+          height: rect.height,
+          viewportTop: rect.top,
+          viewportLeft: rect.left
+        })
+
+        calculateTooltipPosition(rect, currentStep.placement)
+      } else {
+        attempts++
+        if (attempts >= maxAttempts) {
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+          setNavigating(false)
+          // Fallback default centered position if element not found in DOM
+          setTargetRect(null)
+          setTooltipPos({
+            top: window.innerHeight / 2 - 140,
+            left: Math.max(16, window.innerWidth / 2 - 210)
+          })
+        }
+      }
+    }
+
+    findAndHighlight()
+    pollTimerRef.current = setInterval(findAndHighlight, 100)
   }, [active, currentStep])
 
   // Compute smart tooltip positioning
   const calculateTooltipPosition = (rect, placement = 'bottom') => {
     const margin = 16
     const tooltipWidth = Math.min(420, window.innerWidth - 32)
-    const tooltipHeight = 260
+    const tooltipHeight = 270
 
     let top = 0
     let left = 0
@@ -173,22 +217,26 @@ export default function AdminTour({
     setTooltipPos({ top, left })
   }
 
-  // Monitor route changes and step updates
+  // Monitor route changes and step updates with robust route synchronization
   useEffect(() => {
     if (!active || !currentStep) return
 
     if (router.pathname !== currentStep.pageRoute) {
       setNavigating(true)
       router.push(currentStep.pageRoute).then(() => {
-        setTimeout(() => {
-          setNavigating(false)
+        // Wait for page transition and async render
+        const timer = setTimeout(() => {
           updateTargetRect()
-        }, 400)
+        }, 300)
+        return () => clearTimeout(timer)
       }).catch(() => setNavigating(false))
     } else {
       setNavigating(false)
-      const timer = setTimeout(updateTargetRect, 200)
-      return () => clearTimeout(timer)
+      updateTargetRect()
+    }
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
     }
   }, [stepIndex, active, currentStep, router, updateTargetRect])
 
@@ -262,6 +310,8 @@ export default function AdminTour({
   const handleFinish = () => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(completionKey, 'true')
+      localStorage.setItem(activeStorageKey, 'false')
+      localStorage.setItem(stepIndexStorageKey, '0')
     }
     setActive(false)
     setShowWelcomeModal(false)
@@ -272,6 +322,8 @@ export default function AdminTour({
   const handleSkipTour = () => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(completionKey, 'true')
+      localStorage.setItem(activeStorageKey, 'false')
+      localStorage.setItem(stepIndexStorageKey, '0')
     }
     setActive(false)
     setShowWelcomeModal(false)
@@ -438,7 +490,7 @@ export default function AdminTour({
               {navigating ? (
                 <div className="text-center py-4">
                   <div className="spinner-border text-primary spinner-border-sm mb-2" role="status"></div>
-                  <p className="text-muted small mb-0">Navigating to feature section...</p>
+                  <p className="text-muted small mb-0">Navigating across modules and rendering view...</p>
                 </div>
               ) : (
                 <>
